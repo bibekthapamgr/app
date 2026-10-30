@@ -1,31 +1,39 @@
 package app.proxyflow
 
-import android.os.Looper
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.proxyflow.core.data.InMemoryProfileRepository
+import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.testing.DumpOnFailureRule
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import app.proxyflow.feature.profiles.AddEditActions
+import app.proxyflow.feature.profiles.AddEditProxyDestination
+import app.proxyflow.feature.profiles.AddEditProxyScreen
+import app.proxyflow.feature.profiles.AddEditProxyViewModel
+import app.proxyflow.feature.profiles.AddEditUiState
+import app.proxyflow.feature.profiles.addEditProxyScreen
+import app.proxyflow.ui.ProxyFlowApp
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.Shadows.shadowOf
 
 /**
- * TEMPORARY (removed before merge): system Back on the app's proxy form neither
- * pops nor stays put correctly. These tests use a bare two-screen NavHost to see
- * whether Back behaves the same without any of the app's own code.
+ * TEMPORARY (removed before merge): a bare two-screen NavHost handles system
+ * Back correctly, the app does not. Each test adds one part of the app to the
+ * bare setup, to find the part that breaks it.
  */
 @RunWith(AndroidJUnit4::class)
 class BackDiagnosticTest {
@@ -33,17 +41,67 @@ class BackDiagnosticTest {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     @get:Rule(order = 1)
-    val dumpOnFailure = DumpOnFailureRule { compose.describeScreen() + "\nback handled by screen B: $handledByB" }
+    val dumpOnFailure = DumpOnFailureRule { compose.describeScreen() }
 
-    private var handledByB by mutableStateOf(false)
+    private fun systemBack() {
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+    }
 
-    private fun twoScreens(bInterceptsBack: Boolean?) {
+    private val formFactory = viewModelFactory {
+        initializer { AddEditProxyViewModel(createSavedStateHandle(), InMemoryProfileRepository()) }
+    }
+
+    @Test
+    fun v1_realFormDestinationPopsOnSystemBack() {
+        compose.setContent {
+            val nav = rememberNavController()
+            ProxyFlowTheme {
+                NavHost(nav, startDestination = "a") {
+                    composable("a") { Text("Screen A") }
+                    addEditProxyScreen(formFactory, onDone = { nav.popBackStack<AddEditProxyDestination>(inclusive = true) })
+                }
+            }
+            LaunchedEffect(Unit) { nav.navigate(AddEditProxyDestination()) }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Server").assertExists()
+        systemBack()
+        compose.onNodeWithText("Screen A").assertExists()
+        compose.onNodeWithText("Server").assertDoesNotExist()
+    }
+
+    @Test
+    fun v2_statelessFormPopsOnSystemBack() {
+        compose.setContent {
+            val nav = rememberNavController()
+            ProxyFlowTheme {
+                NavHost(nav, startDestination = "a") {
+                    composable("a") { Text("Screen A") }
+                    composable("b") { AddEditProxyScreen(AddEditUiState(), AddEditActions()) }
+                }
+            }
+            LaunchedEffect(Unit) { nav.navigate("b") }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Server").assertExists()
+        systemBack()
+        compose.onNodeWithText("Screen A").assertExists()
+        compose.onNodeWithText("Server").assertDoesNotExist()
+    }
+
+    @Test
+    fun v2b_screenThatSetsFlagSecurePopsOnSystemBack() {
         compose.setContent {
             val nav = rememberNavController()
             NavHost(nav, startDestination = "a") {
                 composable("a") { Text("Screen A") }
                 composable("b") {
-                    if (bInterceptsBack != null) BackHandler(enabled = bInterceptsBack) { handledByB = true }
+                    val window = LocalActivity.current?.window
+                    DisposableEffect(window) {
+                        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+                    }
                     Text("Screen B")
                 }
             }
@@ -51,50 +109,20 @@ class BackDiagnosticTest {
         }
         compose.waitForIdle()
         compose.onNodeWithText("Screen B").assertExists()
-        compose.onNodeWithText("Screen A").assertDoesNotExist()
-    }
-
-    private fun systemBack() {
-        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
-    }
-
-    @Test
-    fun m1_plainNavHostPopsOnSystemBack() {
-        twoScreens(bInterceptsBack = null)
         systemBack()
-        compose.waitForIdle()
         compose.onNodeWithText("Screen A").assertExists()
         compose.onNodeWithText("Screen B").assertDoesNotExist()
     }
 
     @Test
-    fun m1b_plainNavHostPopsOnSystemBackAfterLooperIdle() {
-        twoScreens(bInterceptsBack = null)
-        systemBack()
-        shadowOf(Looper.getMainLooper()).idle()
-        compose.mainClock.advanceTimeBy(2_000)
+    fun v3_appShellInAPlainActivityPopsTheFormOnSystemBack() {
+        val factory = (compose.activity.application as ProxyFlowApplication).container.viewModelFactory
+        compose.setContent { ProxyFlowTheme { ProxyFlowApp(viewModelFactory = factory, version = "test") } }
         compose.waitForIdle()
-        compose.onNodeWithText("Screen A").assertExists()
-        compose.onNodeWithText("Screen B").assertDoesNotExist()
-    }
-
-    @Test
-    fun m2_enabledBackHandlerOnTheScreenWins() {
-        twoScreens(bInterceptsBack = true)
+        compose.onNodeWithText("Add proxy").performClick()
+        compose.onNodeWithText("Server").assertExists()
         systemBack()
-        compose.waitForIdle()
-        assertTrue("the screen's BackHandler did not get the Back", handledByB)
-        compose.onNodeWithText("Screen B").assertExists()
-        compose.onNodeWithText("Screen A").assertDoesNotExist()
-    }
-
-    @Test
-    fun m3_disabledBackHandlerLetsNavHostPop() {
-        twoScreens(bInterceptsBack = false)
-        systemBack()
-        compose.waitForIdle()
-        assertFalse("a disabled BackHandler got the Back", handledByB)
-        compose.onNodeWithText("Screen A").assertExists()
-        compose.onNodeWithText("Screen B").assertDoesNotExist()
+        compose.onNodeWithText("Add a proxy to get started").assertExists()
+        compose.onNodeWithText("Server").assertDoesNotExist()
     }
 }
