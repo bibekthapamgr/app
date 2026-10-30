@@ -6,11 +6,12 @@ name: m1-feasibility-spike
 # first rebuilds it from proxy.golang.org — every hash checked against the
 # public checksum database sum.golang.org — and fails if it differs.
 
+# Pull requests don't trigger it: the spike takes up to 30 minutes and only
+# changes with M1 work. Run it from the Actions tab (workflow_dispatch) on a
+# branch that touches spike/.
 on:
   push:
     branches: [main]
-    paths: ["spike/**", ".github/workflows/spike.yml"]
-  pull_request:
     paths: ["spike/**", ".github/workflows/spike.yml"]
   workflow_dispatch:
 

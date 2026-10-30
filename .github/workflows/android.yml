@@ -25,6 +25,9 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash # -eo pipefail, so a failing Gradle run fails its step even through tee
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -48,27 +51,31 @@ jobs:
 
       - name: Formatting (ktlint via Spotless)
         if: ${{ !cancelled() }}
-        run: ./gradlew spotlessCheck
+        run: ./gradlew spotlessCheck --continue 2>&1 | tee "$RUNNER_TEMP/gradle-1-spotless.log"
 
       - name: Android Lint (app and every module it uses)
         if: ${{ !cancelled() }}
-        run: ./gradlew :app:lintDebug
+        run: ./gradlew :app:lintDebug --continue 2>&1 | tee "$RUNNER_TEMP/gradle-2-lint.log"
 
       - name: Unit, ViewModel and Robolectric UI tests
         if: ${{ !cancelled() }}
-        run: ./gradlew testDebugUnitTest
+        run: ./gradlew testDebugUnitTest --continue 2>&1 | tee "$RUNNER_TEMP/gradle-3-test.log"
 
       - name: Debug build
         if: ${{ !cancelled() }}
-        run: ./gradlew :app:assembleDebug
+        run: ./gradlew :app:assembleDebug 2>&1 | tee "$RUNNER_TEMP/gradle-4-debug.log"
 
       - name: Release build (R8, unsigned unless signing secrets are configured)
         if: ${{ !cancelled() }}
-        run: ./gradlew :app:assembleRelease
+        run: ./gradlew :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle-5-release.log"
 
       - name: Screenshots of every screen, light and dark (Roborazzi)
         if: ${{ !cancelled() }}
-        run: ./gradlew :app:recordRoborazziDebug
+        run: ./gradlew :app:recordRoborazziDebug 2>&1 | tee "$RUNNER_TEMP/gradle-6-screenshots.log"
+
+      - name: Error digest (also emitted as annotations, readable through the API)
+        if: failure()
+        run: python3 scripts/ci_error_digest.py "$RUNNER_TEMP"/gradle-*.log
 
       - name: Upload reports, screenshots and APKs
         if: always()
