@@ -1,39 +1,29 @@
 package app.proxyflow
 
-import android.view.WindowManager
+import android.graphics.Color
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.LocalActivity
-import androidx.compose.material3.Text
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.lifecycle.createSavedStateHandle
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import app.proxyflow.core.data.InMemoryProfileRepository
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.model.UserSettings
 import app.proxyflow.core.testing.DumpOnFailureRule
-import app.proxyflow.feature.profiles.AddEditActions
-import app.proxyflow.feature.profiles.AddEditProxyDestination
-import app.proxyflow.feature.profiles.AddEditProxyScreen
-import app.proxyflow.feature.profiles.AddEditProxyViewModel
-import app.proxyflow.feature.profiles.AddEditUiState
-import app.proxyflow.feature.profiles.addEditProxyScreen
 import app.proxyflow.ui.ProxyFlowApp
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * TEMPORARY (removed before merge): a bare two-screen NavHost handles system
- * Back correctly, the app does not. Each test adds one part of the app to the
- * bare setup, to find the part that breaks it.
+ * TEMPORARY (removed before merge): the app shell handles system Back on the
+ * proxy form correctly in a plain activity, but not in MainActivity. Each test
+ * adds one thing MainActivity does.
  */
 @RunWith(AndroidJUnit4::class)
 class BackDiagnosticTest {
@@ -43,86 +33,47 @@ class BackDiagnosticTest {
     @get:Rule(order = 1)
     val dumpOnFailure = DumpOnFailureRule { compose.describeScreen() }
 
-    private fun systemBack() {
-        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
-        compose.waitForIdle()
-    }
+    private val container get() = (compose.activity.application as ProxyFlowApplication).container
 
-    private val formFactory = viewModelFactory {
-        initializer { AddEditProxyViewModel(createSavedStateHandle(), InMemoryProfileRepository()) }
-    }
-
-    @Test
-    fun v1_realFormDestinationPopsOnSystemBack() {
-        compose.setContent {
-            val nav = rememberNavController()
-            ProxyFlowTheme {
-                NavHost(nav, startDestination = "a") {
-                    composable("a") { Text("Screen A") }
-                    addEditProxyScreen(formFactory, onDone = { nav.popBackStack<AddEditProxyDestination>(inclusive = true) })
-                }
-            }
-            LaunchedEffect(Unit) { nav.navigate(AddEditProxyDestination()) }
-        }
-        compose.waitForIdle()
-        compose.onNodeWithText("Server").assertExists()
-        systemBack()
-        compose.onNodeWithText("Screen A").assertExists()
-        compose.onNodeWithText("Server").assertDoesNotExist()
-    }
-
-    @Test
-    fun v2_statelessFormPopsOnSystemBack() {
-        compose.setContent {
-            val nav = rememberNavController()
-            ProxyFlowTheme {
-                NavHost(nav, startDestination = "a") {
-                    composable("a") { Text("Screen A") }
-                    composable("b") { AddEditProxyScreen(AddEditUiState(), AddEditActions()) }
-                }
-            }
-            LaunchedEffect(Unit) { nav.navigate("b") }
-        }
-        compose.waitForIdle()
-        compose.onNodeWithText("Server").assertExists()
-        systemBack()
-        compose.onNodeWithText("Screen A").assertExists()
-        compose.onNodeWithText("Server").assertDoesNotExist()
-    }
-
-    @Test
-    fun v2b_screenThatSetsFlagSecurePopsOnSystemBack() {
-        compose.setContent {
-            val nav = rememberNavController()
-            NavHost(nav, startDestination = "a") {
-                composable("a") { Text("Screen A") }
-                composable("b") {
-                    val window = LocalActivity.current?.window
-                    DisposableEffect(window) {
-                        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
-                    }
-                    Text("Screen B")
-                }
-            }
-            LaunchedEffect(Unit) { nav.navigate("b") }
-        }
-        compose.waitForIdle()
-        compose.onNodeWithText("Screen B").assertExists()
-        systemBack()
-        compose.onNodeWithText("Screen A").assertExists()
-        compose.onNodeWithText("Screen B").assertDoesNotExist()
-    }
-
-    @Test
-    fun v3_appShellInAPlainActivityPopsTheFormOnSystemBack() {
-        val factory = (compose.activity.application as ProxyFlowApplication).container.viewModelFactory
-        compose.setContent { ProxyFlowTheme { ProxyFlowApp(viewModelFactory = factory, version = "test") } }
-        compose.waitForIdle()
+    private fun openFormThenSystemBack() {
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Add proxy").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Add proxy").performClick()
         compose.onNodeWithText("Server").assertExists()
-        systemBack()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
         compose.onNodeWithText("Add a proxy to get started").assertExists()
         compose.onNodeWithText("Server").assertDoesNotExist()
+    }
+
+    @Test
+    fun w1_themeReadFromDataStoreBeforeTheFirstFrame() {
+        compose.setContent {
+            val settings: UserSettings? by container.settingsRepository.settings.collectAsStateWithLifecycle(initialValue = null)
+            settings ?: return@setContent
+            ProxyFlowTheme { ProxyFlowApp(viewModelFactory = container.viewModelFactory, version = "test") }
+        }
+        openFormThenSystemBack()
+    }
+
+    @Test
+    fun w2_enableEdgeToEdgeBeforeSetContent() {
+        compose.runOnUiThread { compose.activity.enableEdgeToEdge() }
+        compose.setContent { ProxyFlowTheme { ProxyFlowApp(viewModelFactory = container.viewModelFactory, version = "test") } }
+        openFormThenSystemBack()
+    }
+
+    @Test
+    fun w3_enableEdgeToEdgeFromComposition() {
+        compose.setContent {
+            DisposableEffect(Unit) {
+                compose.activity.enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { false },
+                    navigationBarStyle = SystemBarStyle.auto(Color.WHITE, Color.BLACK) { false },
+                )
+                onDispose {}
+            }
+            ProxyFlowTheme { ProxyFlowApp(viewModelFactory = container.viewModelFactory, version = "test") }
+        }
+        openFormThenSystemBack()
     }
 }
