@@ -1,0 +1,4 @@
+{"time":"2026-10-30T09:35:52.132329973+09:00","type":"engine_started"}
+{"time":"2026-10-30T09:35:52.387223171+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T09:35:52.389300701+09:00","type":"conn_fail","proto":"tcp","dst_kind":"hostname","port":80,"code":"TLS_HANDSHAKE","detail":"TLS handshake with proxy failed"}
+{"time":"2026-10-30T09:35:52.391214512+09:00","type":"engine_stopped"}

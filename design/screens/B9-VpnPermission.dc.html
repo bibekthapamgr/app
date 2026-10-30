@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VPN permission explainer</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; position: relative; overflow: hidden">
+  <div aria-hidden="true" style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding-top: 72px; gap: 40px">
+    <span style="font-size: 22px; font-weight: 500; align-self: flex-start; margin-left: 16px">ProxyFlow</span>
+    <span style="width: 176px; height: 176px; border-radius: 88px; background: #20B8A5"></span>
+    <span style="width: 340px; height: 88px; border-radius: 16px; background: #FFFFFF"></span>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(16, 24, 32, 0.5)"></div>
+  <section role="dialog" aria-modal="true" aria-labelledby="sheet-title" style="position: absolute; left: 0; right: 0; bottom: 0; background: #FFFFFF; border-radius: 28px 28px 0 0; padding: 12px 24px 32px; display: flex; flex-direction: column; gap: 16px">
+    <span aria-hidden="true" style="width: 32px; height: 4px; border-radius: 2px; background: #C9D1DC; align-self: center; margin-bottom: 8px"></span>
+    <span style="width: 56px; height: 56px; border-radius: 16px; background: #C7F0EA; color: #0B2F2A; display: flex; align-items: center; justify-content: center"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l2 2"/></svg></span>
+    <h2 id="sheet-title" style="margin: 0; font-size: 24px; line-height: 32px; font-weight: 400">Allow a VPN connection</h2>
+    <p style="margin: 0; font-size: 16px; line-height: 24px; color: #465569">Android will ask you to allow ProxyFlow to set up a VPN. That is how your apps' traffic reaches your proxy on this phone.</p>
+    <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 14px; line-height: 20px">
+      <li style="display: flex; gap: 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#157A6D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M5 12l5 5 9-10"/></svg>ProxyFlow has no servers of its own and doesn't collect your traffic.</li>
+      <li style="display: flex; gap: 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#157A6D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M5 12l5 5 9-10"/></svg>A key icon appears in the status bar while connected.</li>
+      <li style="display: flex; gap: 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#157A6D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M5 12l5 5 9-10"/></svg>Only one VPN app can be active. Starting another turns ProxyFlow off.</li>
+    </ul>
+    <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 8px">
+      <a href="B2-HomeDisconnected.dc.html" style="height: 48px; padding: 0 20px; border-radius: 24px; color: #157A6D; font-size: 15px; font-weight: 500; display: flex; align-items: center; text-decoration: none">Cancel</a>
+      <a href="B3-HomeConnecting.dc.html" style="height: 48px; padding: 0 24px; border-radius: 24px; background: #157A6D; color: #FFFFFF; font-size: 15px; font-weight: 500; display: flex; align-items: center; text-decoration: none">Continue</a>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

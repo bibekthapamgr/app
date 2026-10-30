@@ -1,0 +1,68 @@
+diff --git a/src/hev-socks5-client.c b/src/hev-socks5-client.c
+index c8ea591..db1b872 100644
+--- a/src/hev-socks5-client.c
++++ b/src/hev-socks5-client.c
+@@ -310,8 +310,22 @@ hev_socks5_client_connect (HevSocks5Client *self, const char *addr, int port)
+         return -1;
+     }
+ 
+-    res = hev_task_io_socket_connect (fd, sap, sizeof (saddr), task_io_yielder,
+-                                      self);
++    {
++        /* SPIKE TEST PATCH: connect v4-mapped address on an AF_INET socket */
++        extern int hev_socks5_spike_v4only;
++        struct sockaddr_in s4;
++        socklen_t slen = sizeof (saddr);
++        if (hev_socks5_spike_v4only) {
++            memset (&s4, 0, sizeof (s4));
++            s4.sin_family = AF_INET;
++            s4.sin_port = saddr.sin6_port;
++            memcpy (&s4.sin_addr, &saddr.sin6_addr.s6_addr[12], 4);
++            sap = (struct sockaddr *)&s4;
++            slen = sizeof (s4);
++        }
++        res = hev_task_io_socket_connect (fd, sap, slen, task_io_yielder,
++                                          self);
++    }
+     if (res < 0) {
+         LOG_I ("%p socks5 client connect", self);
+         hev_task_del_fd (hev_task_self (), fd);
+diff --git a/src/hev-socks5-misc.c b/src/hev-socks5-misc.c
+index 2b5e122..88d4c5a 100644
+--- a/src/hev-socks5-misc.c
++++ b/src/hev-socks5-misc.c
+@@ -56,6 +56,8 @@ hev_socks5_task_io_yielder (HevTaskYieldType type, void *data)
+     return 0;
+ }
+ 
++int hev_socks5_spike_v4only;
++
+ int
+ hev_socks5_socket (int type)
+ {
+@@ -63,13 +65,18 @@ hev_socks5_socket (int type)
+     int fd, res, zero = 0;
+ 
+     fd = hev_task_io_socket_socket (AF_INET6, type, 0);
+-    if (fd < 0)
+-        return -1;
+-
+-    res = setsockopt (fd, IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof (zero));
+-    if (res < 0) {
+-        close (fd);
+-        return -1;
++    if (fd < 0) {
++        /* SPIKE TEST PATCH: kernel booted with ipv6.disable=1 */
++        fd = hev_task_io_socket_socket (AF_INET, type, 0);
++        if (fd < 0)
++            return -1;
++        hev_socks5_spike_v4only = 1;
++    } else {
++        res = setsockopt (fd, IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof (zero));
++        if (res < 0) {
++            close (fd);
++            return -1;
++        }
+     }
+ 
+     res = hev_task_add_fd (task, fd, POLLIN | POLLOUT);

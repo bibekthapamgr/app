@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Status notifications</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 420px; height: 640px; box-sizing: border-box; background: #DCE3EB; font-family: Roboto, system-ui, sans-serif; color: #14243A; display: flex; flex-direction: column; padding: 0 14px 14px">
+  <div style="height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 6px; font-size: 13px; font-weight: 500; flex: none">
+    <span style="flex: 1">14:32</span>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#14243A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="VPN active" role="img"><circle cx="7.5" cy="12" r="3.5"/><path d="M11 12h10M17 12v3.5M20 12v2.5"/></svg>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#14243A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.8 16a5 5 0 0 1 6.4 0M12 19.5h.01"/></svg>
+    <svg width="18" height="16" viewBox="0 0 28 24" fill="none" stroke="#14243A" stroke-width="2" aria-hidden="true"><rect x="2" y="6" width="21" height="12" rx="3"/><rect x="5" y="9" width="12" height="6" rx="1" fill="#14243A" stroke="none"/><path d="M25.5 10v4" stroke-linecap="round"/></svg>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px">
+    <span style="font-size: 12px; font-weight: 500; letter-spacing: 0.4px; color: #465569; padding-left: 8px">CONNECTED · ongoing, silent</span>
+    <section aria-label="Connected notification" style="background: #FFFFFF; border-radius: 24px; padding: 14px 16px 6px; display: flex; flex-direction: column; gap: 4px">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #465569">
+        <span style="width: 24px; height: 24px; border-radius: 12px; background: #20B8A5; color: #14243A; display: flex; align-items: center; justify-content: center; flex: none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M8.5 12h7M13 9.5l2.5 2.5-2.5 2.5"/></svg></span>
+        <span>ProxyFlow · Tokyo residential · <span style="font-family: 'Roboto Mono', monospace">12:47</span></span>
+      </div>
+      <strong style="font-size: 15px; font-weight: 500; padding-left: 32px">Connected</strong>
+      <span style="font-size: 14px; line-height: 20px; color: #465569; padding-left: 32px">↑ 1.4 MB · ↓ 23.8 MB · UDP blocked</span>
+      <div style="display: flex; gap: 4px; padding-left: 20px">
+        <span style="height: 40px; padding: 0 12px; display: flex; align-items: center; font-size: 14px; font-weight: 500; color: #157A6D">Disconnect</span>
+      </div>
+    </section>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 14px">
+    <span style="font-size: 12px; font-weight: 500; letter-spacing: 0.4px; color: #465569; padding-left: 8px">RECONNECTING · ongoing, silent</span>
+    <section aria-label="Reconnecting notification" style="background: #FFFFFF; border-radius: 24px; padding: 14px 16px 6px; display: flex; flex-direction: column; gap: 4px">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #465569">
+        <span style="width: 24px; height: 24px; border-radius: 12px; background: #FFE2B8; color: #3D2600; display: flex; align-items: center; justify-content: center; flex: none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></span>
+        <span>ProxyFlow · Tokyo residential · now</span>
+      </div>
+      <strong style="font-size: 15px; font-weight: 500; padding-left: 32px">Reconnecting… traffic paused</strong>
+      <span style="font-size: 14px; line-height: 20px; color: #465569; padding-left: 32px">Your proxy stopped answering. Nothing is sent around it.</span>
+      <div style="display: flex; gap: 4px; padding-left: 20px">
+        <span style="height: 40px; padding: 0 12px; display: flex; align-items: center; font-size: 14px; font-weight: 500; color: #157A6D">Retry now</span>
+        <span style="height: 40px; padding: 0 12px; display: flex; align-items: center; font-size: 14px; font-weight: 500; color: #157A6D">Disconnect</span>
+      </div>
+    </section>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 14px">
+    <span style="font-size: 12px; font-weight: 500; letter-spacing: 0.4px; color: #465569; padding-left: 8px">PROBLEM · separate channel, alerts once</span>
+    <section aria-label="Error notification" style="background: #FFFFFF; border-radius: 24px; padding: 14px 16px 6px; display: flex; flex-direction: column; gap: 4px">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #465569">
+        <span style="width: 24px; height: 24px; border-radius: 12px; background: #F9DEDC; color: #410E0B; display: flex; align-items: center; justify-content: center; flex: none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5M12 16h.01"/></svg></span>
+        <span>ProxyFlow · Tokyo residential · now</span>
+      </div>
+      <strong style="font-size: 15px; font-weight: 500; padding-left: 32px">Traffic blocked: sign-in failed</strong>
+      <span style="font-size: 14px; line-height: 20px; color: #465569; padding-left: 32px">Your proxy rejected the username or password. Apps stay offline until you fix it.</span>
+      <div style="display: flex; gap: 4px; padding-left: 20px">
+        <span style="height: 40px; padding: 0 12px; display: flex; align-items: center; font-size: 14px; font-weight: 500; color: #157A6D">Edit credentials</span>
+        <span style="height: 40px; padding: 0 12px; display: flex; align-items: center; font-size: 14px; font-weight: 500; color: #157A6D">Disconnect</span>
+      </div>
+    </section>
+  </div>
+
+  <p style="margin: auto 8px 0; font-size: 12px; line-height: 16px; color: #465569">Tapping any notification opens Home. "Disconnect" stops ProxyFlow and apps use your normal network, unless Android's "Block connections without VPN" is on.</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":420,"height":640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

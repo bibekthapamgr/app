@@ -1,0 +1,33 @@
+flowchart TB
+    subgraph APP["ProxyFlow app process (Kotlin)"]
+        direction TB
+        UI[":app + :feature-*<br/>Compose UI, ViewModels<br/>Home · Profiles · Add/Edit · Logs · Settings · About"]
+        DATA[":core:data<br/>Room (profiles, logs) · DataStore (settings)<br/>CredentialStore (Keystore AES-GCM)"]
+        VPN[":vpn<br/>ProxyFlowVpnService (foreground, systemExempted)<br/>ConnectionController state machine<br/>NetworkMonitor · LockdownStatus · Notifications"]
+        API[":engine-api<br/>Kotlin interface: start(fd, profile) · stop() · stats() · events()"]
+        subgraph GO[":engine — Go library via gomobile AAR (single .so)"]
+            direction TB
+            NS["gVisor netstack<br/>(tcpip, fdbased link)"]
+            FWD["TCP forwarder<br/>dial-before-accept · limits · relay"]
+            DNS["Fake-IP DNS<br/>198.18.0.0/15 pool"]
+            UDP["UDP / ICMP policy<br/>reject · never fake"]
+            ADP["Protocol adapters<br/>SOCKS5 · HTTP CONNECT · TLS"]
+            NS --> FWD
+            NS --> DNS
+            NS --> UDP
+            FWD --> ADP
+        end
+        UI --> VPN
+        UI --> DATA
+        VPN --> DATA
+        VPN --> API
+        API --> GO
+    end
+    OS["Android OS<br/>VpnService.Builder → TUN fd<br/>ConnectivityManager · Keystore · Always-on / lockdown"]
+    NET(("Underlying network<br/>Wi-Fi / mobile"))
+    PROXY["User's proxy<br/>HTTP CONNECT or SOCKS5<br/>(optionally TLS)"]
+    VPN <--> OS
+    OS -- "TUN fd (app traffic)" --> NS
+    ADP -- "app excluded from its own VPN<br/>(+ protect(fd))" --> NET
+    NET --> PROXY
+    DATA <--> OS

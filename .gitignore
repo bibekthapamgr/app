@@ -1,0 +1,29 @@
+# Build output
+spike/bin/
+**/build/
+*.apk
+*.aab
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Lab runtime state: keep proxy/destination logs as evidence, drop throwaway
+# private keys, password files and pid files generated per run
+spike/evidence/*/_lab/certs/*.key
+spike/evidence/*/_lab/certs/*.bundle
+spike/evidence/*/_lab/squid/passwd
+spike/evidence/*/_lab/*.pid
+
+# Editors / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+local.properties
+
+# Secrets — never commit
+*.jks
+*.keystore
+keystore.properties

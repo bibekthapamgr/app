@@ -1,0 +1,17 @@
+{
+ "sent": {
+  "v6_plain": [
+   56
+  ],
+  "v6_large_fragmented_2056B": [
+   1496,
+   656
+  ],
+  "v6_jumbo_fragmented_12296B": [
+   9000,
+   3392
+  ]
+ },
+ "received": [],
+ "echo_replies": []
+}

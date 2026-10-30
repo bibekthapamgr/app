@@ -1,0 +1,61 @@
+{
+  "test": "test_E02_socks5_auth_real_dante",
+  "title": "SOCKS5 username/password (RFC 1929) against a real Dante server; wrong password fails closed.",
+  "requirement": "HTTP CONNECT and SOCKS5 support with optional credentials.",
+  "checks": [
+    {
+      "check": "correct credentials: HTTP 200 via Dante",
+      "passed": true,
+      "detail": {
+        "rc": 0,
+        "code": 200,
+        "body": "{\"client_ip\": \"10.20.0.2\", \"client_port\": 46980, \"server_port\": 80, \"tls\": false, \"path\": \"/whoami\"}\n",
+        "seconds": 0.029,
+        "stderr": ""
+      }
+    },
+    {
+      "check": "wrong password: app connection fails",
+      "passed": true,
+      "detail": {
+        "rc": 7,
+        "code": 0,
+        "body": "",
+        "seconds": 0.025,
+        "stderr": "curl: (7) Failed to connect to web.test port 80 after 17 ms: Couldn't connect to server"
+      }
+    },
+    {
+      "check": "wrong password categorised AUTH_FAILED (proxy-level)",
+      "passed": true,
+      "detail": {
+        "AUTH_FAILED": 1
+      }
+    },
+    {
+      "check": "no destination request during the failing run",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: nothing left the device except to the proxy endpoint(s) [('10.20.0.2', 1081)]",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "check": "uplink: no packet from the device reached a destination address directly",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: no DNS (port 53) left the device",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "metrics": {
+    "fail_seconds": 0.025
+  },
+  "notes": [],
+  "verdict": "PASS"
+}

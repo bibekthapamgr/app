@@ -1,0 +1,39 @@
+2026.10.30 00:14:54 LOG5[ui]: stunnel 5.72 on x86_64-pc-linux-gnu platform
+2026.10.30 00:14:54 LOG5[ui]: Compiled/running with OpenSSL 3.0.13 30 Jan 2024
+2026.10.30 00:14:54 LOG5[ui]: Threading:PTHREAD Sockets:POLL,IPv6,SYSTEMD TLS:ENGINE,OCSP,PSK,SNI Auth:LIBWRAP
+2026.10.30 00:14:54 LOG5[ui]: Reading configuration from file /home/claude/proxyflow-android/spike/evidence/run-20261029T151316Z/_lab/stunnel.conf
+2026.10.30 00:14:54 LOG5[ui]: UTF-8 byte order mark not detected
+2026.10.30 00:14:54 LOG5[ui]: FIPS mode disabled
+2026.10.30 00:14:54 LOG5[ui]: Configuration successful
+2026.10.30 00:14:54 LOG5[0]: Service [socks-tls] accepted connection from 10.20.0.2:35214
+2026.10.30 00:14:54 LOG3[0]: SSL_accept: ../ssl/record/rec_layer_s3.c:316: error:0A000126:SSL routines::unexpected eof while reading
+2026.10.30 00:14:54 LOG5[1]: Service [squid-tls] accepted connection from 10.20.0.2:56164
+2026.10.30 00:14:54 LOG3[1]: SSL_accept: ../ssl/record/rec_layer_s3.c:316: error:0A000126:SSL routines::unexpected eof while reading
+2026.10.30 00:14:54 LOG5[1]: Connection reset/closed: 0 byte(s) sent to TLS, 0 byte(s) sent to socket
+2026.10.30 00:14:54 LOG5[0]: Connection reset/closed: 0 byte(s) sent to TLS, 0 byte(s) sent to socket
+2026.10.30 00:15:07 LOG5[2]: Service [socks-tls] accepted connection from 10.10.0.2:38922
+2026.10.30 00:15:07 LOG5[2]: s_connect: connected 10.20.0.2:1080
+2026.10.30 00:15:07 LOG5[2]: Service [socks-tls] connected remote server from 10.20.0.2:51176
+2026.10.30 00:15:07 LOG5[2]: Connection closed: 257 byte(s) sent to TLS, 115 byte(s) sent to socket
+2026.10.30 00:15:10 LOG5[3]: Service [http-auth-tls] accepted connection from 10.10.0.2:38580
+2026.10.30 00:15:10 LOG5[3]: s_connect: connected 10.20.0.2:3128
+2026.10.30 00:15:10 LOG5[3]: Service [http-auth-tls] connected remote server from 10.20.0.2:49574
+2026.10.30 00:15:10 LOG5[3]: Connection closed: 284 byte(s) sent to TLS, 225 byte(s) sent to socket
+2026.10.30 00:15:13 LOG5[4]: Service [socks-tls] accepted connection from 10.10.0.2:45790
+2026.10.30 00:15:13 LOG3[4]: SSL_accept: ../ssl/record/rec_layer_s3.c:1599: error:0A000412:SSL routines::sslv3 alert bad certificate
+2026.10.30 00:15:13 LOG5[4]: Connection reset/closed: 0 byte(s) sent to TLS, 0 byte(s) sent to socket
+2026.10.30 00:15:16 LOG5[5]: Service [socks-tls-expired] accepted connection from 10.10.0.2:35262
+2026.10.30 00:15:16 LOG3[5]: SSL_accept: ../ssl/record/rec_layer_s3.c:1599: error:0A000412:SSL routines::sslv3 alert bad certificate
+2026.10.30 00:15:16 LOG5[5]: Connection reset/closed: 0 byte(s) sent to TLS, 0 byte(s) sent to socket
+2026.10.30 00:15:19 LOG5[6]: Service [socks-tls-untrusted] accepted connection from 10.10.0.2:43980
+2026.10.30 00:15:19 LOG3[6]: SSL_accept: ../ssl/record/rec_layer_s3.c:1599: error:0A000412:SSL routines::sslv3 alert bad certificate
+2026.10.30 00:15:19 LOG5[6]: Connection reset/closed: 0 byte(s) sent to TLS, 0 byte(s) sent to socket
+2026.10.30 00:16:55 LOG5[7]: Service [http-auth-tls] accepted connection from 10.10.0.2:48256
+2026.10.30 00:16:55 LOG5[7]: s_connect: connected 10.20.0.2:3128
+2026.10.30 00:16:55 LOG5[7]: Service [http-auth-tls] connected remote server from 10.20.0.2:38318
+2026.10.30 00:16:55 LOG5[7]: Connection closed: 284 byte(s) sent to TLS, 225 byte(s) sent to socket
+2026.10.30 00:17:11 LOG5[8]: Service [socks-tls] accepted connection from 10.10.0.2:33890
+2026.10.30 00:17:11 LOG5[8]: s_connect: connected 10.20.0.2:1080
+2026.10.30 00:17:11 LOG5[8]: Service [socks-tls] connected remote server from 10.20.0.2:43910
+2026.10.30 00:17:11 LOG5[8]: Connection closed: 204 byte(s) sent to TLS, 95 byte(s) sent to socket
+2026.10.30 00:17:14 LOG5[ui]: Terminated

@@ -1,0 +1,4 @@
+{"time":"2026-10-30T01:44:09.97689557+09:00","type":"engine_started"}
+{"time":"2026-10-30T01:44:10.245575282+09:00","type":"udp_rejected","proto":"udp","port":5000}
+{"time":"2026-10-30T01:44:10.269688295+09:00","type":"udp_rejected","proto":"udp","port":443}
+{"time":"2026-10-30T01:44:10.273927585+09:00","type":"engine_stopped"}

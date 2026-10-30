@@ -1,0 +1,45 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/19 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 19/19 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 81384 (27102/sec), new interesting: 0 (total: 19)
+fuzz: elapsed: 6s, execs: 160520 (26402/sec), new interesting: 0 (total: 19)
+fuzz: elapsed: 9s, execs: 243555 (27672/sec), new interesting: 0 (total: 19)
+fuzz: elapsed: 12s, execs: 322530 (26328/sec), new interesting: 0 (total: 19)
+fuzz: elapsed: 15s, execs: 400723 (26067/sec), new interesting: 0 (total: 19)
+fuzz: elapsed: 18s, execs: 479593 (26287/sec), new interesting: 0 (total: 19)
+fuzz: elapsed: 21s, execs: 560681 (27029/sec), new interesting: 0 (total: 19)
+fuzz: elapsed: 24s, execs: 643077 (27445/sec), new interesting: 0 (total: 19)
+fuzz: elapsed: 27s, execs: 730095 (29027/sec), new interesting: 0 (total: 19)
+fuzz: elapsed: 30s, execs: 814264 (27999/sec), new interesting: 0 (total: 19)
+fuzz: elapsed: 30s, execs: 814264 (0/sec), new interesting: 0 (total: 19)
+PASS
+ok  	proxyflow/spike/engine/adapters	30.109s
+fuzz: elapsed: 0s, gathering baseline coverage: 0/38 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 38/38 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 94642 (31544/sec), new interesting: 6 (total: 44)
+fuzz: elapsed: 6s, execs: 199177 (34840/sec), new interesting: 7 (total: 45)
+fuzz: elapsed: 9s, execs: 294686 (31836/sec), new interesting: 7 (total: 45)
+fuzz: elapsed: 12s, execs: 397189 (34162/sec), new interesting: 10 (total: 48)
+fuzz: elapsed: 15s, execs: 495285 (32708/sec), new interesting: 10 (total: 48)
+fuzz: elapsed: 18s, execs: 578712 (27805/sec), new interesting: 12 (total: 50)
+fuzz: elapsed: 21s, execs: 578712 (0/sec), new interesting: 12 (total: 50)
+fuzz: elapsed: 24s, execs: 578712 (0/sec), new interesting: 12 (total: 50)
+fuzz: elapsed: 27s, execs: 578712 (0/sec), new interesting: 12 (total: 50)
+fuzz: elapsed: 30s, execs: 578712 (0/sec), new interesting: 12 (total: 50)
+fuzz: elapsed: 31s, execs: 578712 (0/sec), new interesting: 12 (total: 50)
+PASS
+ok  	proxyflow/spike/engine/adapters	31.035s
+fuzz: elapsed: 0s, gathering baseline coverage: 0/46 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 46/46 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 147231 (49061/sec), new interesting: 2 (total: 48)
+fuzz: elapsed: 6s, execs: 304348 (52384/sec), new interesting: 3 (total: 49)
+fuzz: elapsed: 9s, execs: 459039 (51553/sec), new interesting: 5 (total: 51)
+fuzz: elapsed: 12s, execs: 624228 (55071/sec), new interesting: 9 (total: 55)
+fuzz: elapsed: 15s, execs: 777086 (50951/sec), new interesting: 12 (total: 58)
+fuzz: elapsed: 18s, execs: 941489 (54794/sec), new interesting: 15 (total: 61)
+fuzz: elapsed: 21s, execs: 1111718 (56744/sec), new interesting: 18 (total: 64)
+fuzz: elapsed: 24s, execs: 1270667 (52982/sec), new interesting: 19 (total: 65)
+fuzz: elapsed: 27s, execs: 1431073 (53472/sec), new interesting: 22 (total: 68)
+fuzz: elapsed: 30s, execs: 1585769 (51567/sec), new interesting: 22 (total: 68)
+fuzz: elapsed: 30s, execs: 1585769 (0/sec), new interesting: 22 (total: 68)
+PASS
+ok  	proxyflow/spike/engine/fakedns	30.034s

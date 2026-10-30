@@ -1,0 +1,114 @@
+{
+  "test": "test_E12_concurrency_and_cleanup",
+  "title": "200 concurrent flows complete and are released; then 200 flows are held open and the engine is stopped under them.",
+  "requirement": "resource cleanup verified before release; resource limits.",
+  "checks": [
+    {
+      "check": "200/200 concurrent requests succeeded",
+      "passed": true,
+      "detail": {
+        "requested": 200,
+        "ok": 200,
+        "errors": [],
+        "fake_ip": "198.18.1.0",
+        "seconds": 3.19
+      }
+    },
+    {
+      "check": "engine saw ~200 simultaneous flows",
+      "passed": true,
+      "detail": 200
+    },
+    {
+      "check": "all flows released after completion (tcp_active == 0)",
+      "passed": true,
+      "detail": 0
+    },
+    {
+      "check": "phase 2: ~200 flows were open when the engine was stopped",
+      "passed": true,
+      "detail": {
+        "seen_before_stop": 200,
+        "tcp_active_at_stop": 200
+      }
+    },
+    {
+      "check": "graceful stop completed",
+      "passed": true,
+      "detail": {
+        "bytes_down": 38600,
+        "bytes_up": 24200,
+        "consecutive_proxy_failures": 0,
+        "dns": {
+          "mapped": 2
+        },
+        "failures": {},
+        "fake_dns_mappings": 1,
+        "goroutines": 2,
+        "goroutines_after_stop": 2,
+        "goroutines_before_stop": 608,
+        "heap_inuse_kib": 16800,
+        "icmp_echo_replies_blocked": 0,
+        "icmp_echo_replies_sent": 0,
+        "icmp_echo_requests_dropped": 0,
+        "idle_timeouts": 0,
+        "malformed_in": 0,
+        "packets_in": 1861,
+        "packets_out": 2176,
+        "recovered_panics": 0,
+        "rss_kib": 26040,
+        "settle_ms": 200,
+        "stop_ms": 21,
+        "stopped": true,
+        "tcp_active": 0,
+        "tcp_active_at_stop": 200,
+        "tcp_failed": 0,
+        "tcp_opened": 400,
+        "time": "2026-10-30T01:44:36.207438412+09:00",
+        "udp_rejected": 0,
+        "udp_rejected_ports": {}
+      }
+    },
+    {
+      "check": "Stop() with ~200 open flows took < 2 s",
+      "passed": true,
+      "detail": 21
+    },
+    {
+      "check": "goroutines released on stop (<= 12 remain)",
+      "passed": true,
+      "detail": {
+        "before": 608,
+        "after": 2
+      }
+    },
+    {
+      "check": "held app connections were ended, not left hanging (no 30-second waits)",
+      "passed": true,
+      "detail": {
+        "ok": 0,
+        "errors": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "seconds_after_stop": 0.88
+      }
+    }
+  ],
+  "metrics": {
+    "idle_rss_kib": 10888,
+    "peak_rss_kib": 21488,
+    "peak_active": 200,
+    "tcp_active_at_stop": 200,
+    "stop_ms": 21,
+    "goroutines_before_stop": 608,
+    "goroutines_after_stop": 2,
+    "phase1_wall_seconds": 3.19,
+    "clients_released_s": 0.88
+  },
+  "notes": [],
+  "verdict": "PASS"
+}

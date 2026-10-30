@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; display: flex; flex-direction: column">
+  <header style="height: 64px; display: flex; align-items: center; padding: 0 4px 0 16px; box-sizing: border-box">
+    <h1 style="margin: 0; flex: 1; font-size: 22px; font-weight: 500">Settings</h1>
+  </header>
+  <main style="flex: 1; display: flex; flex-direction: column; padding: 0 16px; gap: 6px; overflow: hidden">
+    <h2 style="margin: 6px 0 2px; font-size: 13px; font-weight: 500; letter-spacing: 0.4px; color: #157A6D">PROTECTION</h2>
+    <div style="background: #FFFFFF; border: 1px solid #C9D1DC; border-radius: 16px; display: flex; flex-direction: column">
+      <div style="display: flex; gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid #E6EBF1">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#157A6D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px">In-app kill switch</span><span style="font-size: 13px; line-height: 18px; color: #465569">Always on: while connected, traffic is blocked whenever the proxy isn't working.</span></span>
+      </div>
+      <a href="E2-LockdownGuide.dc.html" style="display: flex; gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid #E6EBF1; text-decoration: none; color: #14243A">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A5300" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M12 9v4M12 16h.01"/></svg>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px">System kill switch</span><span style="font-size: 13px; line-height: 18px; color: #465569">Android blocks traffic if ProxyFlow stops</span></span>
+        <span style="font-size: 13px; font-weight: 500; color: #8A5300">Off · Set up</span>
+      </a>
+      <div style="display: flex; gap: 14px; align-items: center; padding: 12px 16px">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#465569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px">Reconnect automatically</span><span style="font-size: 13px; color: #465569">After network changes or outages</span></span>
+        <span role="switch" aria-checked="true" aria-label="Reconnect automatically" style="width: 52px; height: 32px; border-radius: 16px; background: #157A6D; display: flex; align-items: center; justify-content: flex-end; padding: 0 4px; box-sizing: border-box; flex: none"><span style="width: 24px; height: 24px; border-radius: 12px; background: #FFFFFF"></span></span>
+      </div>
+    </div>
+    <h2 style="margin: 12px 0 2px; font-size: 13px; font-weight: 500; letter-spacing: 0.4px; color: #157A6D">LOGS &amp; PRIVACY</h2>
+    <div style="background: #FFFFFF; border: 1px solid #C9D1DC; border-radius: 16px; display: flex; flex-direction: column">
+      <div style="display: flex; gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid #E6EBF1">
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px">Record destinations</span><span style="font-size: 13px; line-height: 18px; color: #465569">Save site names and addresses in Logs. Off by default.</span></span>
+        <span role="switch" aria-checked="false" aria-label="Record destinations in logs" style="width: 52px; height: 32px; border-radius: 16px; border: 2px solid #6E7D92; box-sizing: border-box; background: #E6EBF1; display: flex; align-items: center; padding: 0 4px; flex: none"><span style="width: 16px; height: 16px; border-radius: 8px; background: #6E7D92"></span></span>
+      </div>
+      <div style="display: flex; gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid #E6EBF1">
+        <span style="flex: 1; font-size: 15px">Keep logs for</span>
+        <span style="font-size: 14px; color: #465569; display: flex; align-items: center; gap: 4px">24 hours<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span>
+      </div>
+      <a href="F1-LogsEmpty.dc.html" style="display: flex; gap: 14px; align-items: center; padding: 12px 16px; font-size: 15px; color: #B3261E; text-decoration: none">Clear logs now</a>
+    </div>
+    <h2 style="margin: 12px 0 2px; font-size: 13px; font-weight: 500; letter-spacing: 0.4px; color: #157A6D">APP</h2>
+    <div style="background: #FFFFFF; border: 1px solid #C9D1DC; border-radius: 16px; display: flex; flex-direction: column">
+      <div style="display: flex; gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid #E6EBF1">
+        <span style="flex: 1; font-size: 15px">Theme</span>
+        <span style="font-size: 14px; color: #465569; display: flex; align-items: center; gap: 4px">System default<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span>
+      </div>
+      <a href="G1-About.dc.html" style="display: flex; gap: 14px; align-items: center; padding: 12px 16px; text-decoration: none; color: #14243A">
+        <span style="flex: 1; font-size: 15px">About &amp; privacy</span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#465569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+  </main>
+  <nav aria-label="Main" style="height: 80px; display: flex; background: #FFFFFF; border-top: 1px solid #E6EBF1; padding: 12px 8px 16px; box-sizing: border-box">
+    <a href="B2-HomeDisconnected.dc.html" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; color: #465569; font-size: 12px; font-weight: 500"><span style="width: 64px; height: 32px; border-radius: 16px; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Home</a>
+    <a href="C2-ProfilesList.dc.html" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; color: #465569; font-size: 12px; font-weight: 500"><span style="width: 64px; height: 32px; border-radius: 16px; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></svg></span>Profiles</a>
+    <a href="F2-Logs.dc.html" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; color: #465569; font-size: 12px; font-weight: 500"><span style="width: 64px; height: 32px; border-radius: 16px; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"/><path d="M9 11h6M9 15h6M9 7h3"/></svg></span>Logs</a>
+    <a href="E1-Settings.dc.html" aria-current="page" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; color: #14243A; font-size: 12px; font-weight: 700"><span style="width: 64px; height: 32px; border-radius: 16px; background: #C7F0EA; color: #0B2F2A; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></span>Settings</a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

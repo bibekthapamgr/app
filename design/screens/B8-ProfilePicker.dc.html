@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Choose proxy</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; position: relative; overflow: hidden">
+  <div aria-hidden="true" style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding-top: 72px; gap: 40px">
+    <span style="font-size: 22px; font-weight: 500; align-self: flex-start; margin-left: 16px">ProxyFlow</span>
+    <span style="width: 176px; height: 176px; border-radius: 88px; background: #20B8A5"></span>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(16, 24, 32, 0.5)"></div>
+  <section role="dialog" aria-modal="true" aria-labelledby="pick-title" style="position: absolute; left: 0; right: 0; bottom: 0; background: #FFFFFF; border-radius: 28px 28px 0 0; padding: 12px 0 24px; display: flex; flex-direction: column">
+    <span aria-hidden="true" style="width: 32px; height: 4px; border-radius: 2px; background: #C9D1DC; align-self: center; margin-bottom: 16px"></span>
+    <h2 id="pick-title" style="margin: 0 24px 8px; font-size: 22px; font-weight: 400">Choose proxy</h2>
+    <div role="radiogroup" aria-labelledby="pick-title" style="display: flex; flex-direction: column">
+      <a href="B2-HomeDisconnected.dc.html" role="radio" aria-checked="true" style="display: flex; gap: 16px; align-items: center; padding: 14px 24px; text-decoration: none; color: #14243A">
+        <span style="width: 20px; height: 20px; border-radius: 10px; border: 2px solid #157A6D; box-sizing: border-box; display: flex; align-items: center; justify-content: center; flex: none"><span style="width: 10px; height: 10px; border-radius: 5px; background: #157A6D"></span></span>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 3px"><strong style="font-size: 16px; font-weight: 500">Tokyo residential</strong><span style="font-size: 13px; color: #465569">SOCKS5 · TLS · <span style="font-family: 'Roboto Mono', monospace">proxy.example.com:1443</span></span></span>
+        <span style="font-size: 13px; font-weight: 500; color: #157A6D; display: flex; align-items: center; gap: 4px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>182 ms</span>
+      </a>
+      <a href="B2-HomeDisconnected.dc.html" role="radio" aria-checked="false" style="display: flex; gap: 16px; align-items: center; padding: 14px 24px; text-decoration: none; color: #14243A">
+        <span style="width: 20px; height: 20px; border-radius: 10px; border: 2px solid #6E7D92; box-sizing: border-box; flex: none"></span>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 3px"><strong style="font-size: 16px; font-weight: 500">Office HTTP</strong><span style="font-size: 13px; color: #465569">HTTP · <span style="color: #8A5300; font-weight: 500">Not encrypted</span> · <span style="font-family: 'Roboto Mono', monospace">203.0.113.10:3128</span></span></span>
+        <span style="font-size: 13px; font-weight: 500; color: #B3261E; display: flex; align-items: center; gap: 4px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>Sign-in failed</span>
+      </a>
+      <a href="B2-HomeDisconnected.dc.html" role="radio" aria-checked="false" style="display: flex; gap: 16px; align-items: center; padding: 14px 24px; text-decoration: none; color: #14243A">
+        <span style="width: 20px; height: 20px; border-radius: 10px; border: 2px solid #6E7D92; box-sizing: border-box; flex: none"></span>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 3px"><strong style="font-size: 16px; font-weight: 500">Backup SOCKS</strong><span style="font-size: 13px; color: #465569">SOCKS5 · <span style="color: #8A5300; font-weight: 500">Not encrypted</span> · <span style="font-family: 'Roboto Mono', monospace">socks.example.net:1080</span></span></span>
+        <span style="font-size: 13px; color: #465569">Not tested</span>
+      </a>
+    </div>
+    <div style="height: 1px; background: #E6EBF1; margin: 8px 0"></div>
+    <a href="D1-AddProxy.dc.html" style="display: flex; gap: 16px; align-items: center; padding: 14px 24px; text-decoration: none; color: #157A6D; font-size: 15px; font-weight: 500"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add proxy</a>
+    <a href="C2-ProfilesList.dc.html" style="display: flex; gap: 16px; align-items: center; padding: 14px 24px; text-decoration: none; color: #157A6D; font-size: 15px; font-weight: 500"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>Manage profiles</a>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

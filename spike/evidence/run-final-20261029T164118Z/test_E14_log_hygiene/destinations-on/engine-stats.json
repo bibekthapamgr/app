@@ -1,0 +1,33 @@
+{
+  "bytes_down": 245,
+  "bytes_up": 97,
+  "consecutive_proxy_failures": 0,
+  "dns": {
+    "mapped": 1
+  },
+  "failures": {},
+  "fake_dns_mappings": 1,
+  "goroutines": 2,
+  "goroutines_after_stop": 2,
+  "goroutines_before_stop": 8,
+  "heap_inuse_kib": 1328,
+  "icmp_echo_replies_blocked": 0,
+  "icmp_echo_replies_sent": 0,
+  "icmp_echo_requests_dropped": 0,
+  "idle_timeouts": 0,
+  "malformed_in": 0,
+  "packets_in": 6,
+  "packets_out": 7,
+  "recovered_panics": 0,
+  "rss_kib": 12276,
+  "settle_ms": 200,
+  "stop_ms": 0,
+  "stopped": true,
+  "tcp_active": 0,
+  "tcp_active_at_stop": 0,
+  "tcp_failed": 0,
+  "tcp_opened": 1,
+  "time": "2026-10-30T01:45:36.682708017+09:00",
+  "udp_rejected": 0,
+  "udp_rejected_ports": {}
+}

@@ -1,0 +1,11 @@
+{"time":"2026-10-30T01:16:40.266176019+09:00","type":"engine_started"}
+{"time":"2026-10-30T01:16:40.519899519+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T01:16:40.522041959+09:00","type":"conn_open","conn_id":2,"proto":"tcp","dst_kind":"hostname","port":80,"setup_ms":1}
+{"time":"2026-10-30T01:16:40.523859041+09:00","type":"conn_close","conn_id":2,"proto":"tcp","bytes_up":77,"bytes_down":192,"duration_ms":3}
+{"time":"2026-10-30T01:16:40.537043855+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T01:16:40.537453924+09:00","type":"conn_fail","proto":"tcp","dst_kind":"hostname","port":80,"code":"PROXY_UNREACHABLE","detail":"cannot connect to proxy"}
+{"time":"2026-10-30T01:16:40.544507838+09:00","type":"conn_fail","proto":"tcp","dst_kind":"ip","port":80,"code":"PROXY_UNREACHABLE","detail":"cannot connect to proxy"}
+{"time":"2026-10-30T01:16:41.569861195+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T01:16:41.573635035+09:00","type":"conn_open","conn_id":5,"proto":"tcp","dst_kind":"hostname","port":80,"setup_ms":3}
+{"time":"2026-10-30T01:16:41.57453979+09:00","type":"conn_close","conn_id":5,"proto":"tcp","bytes_up":77,"bytes_down":192,"duration_ms":4}
+{"time":"2026-10-30T01:16:41.57548539+09:00","type":"engine_stopped"}

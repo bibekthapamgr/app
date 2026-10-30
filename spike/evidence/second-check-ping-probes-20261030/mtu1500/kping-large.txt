@@ -1,0 +1,5 @@
+PING 10.30.0.2 (10.30.0.2) 2000(2028) bytes of data.
+
+--- 10.30.0.2 ping statistics ---
+2 packets transmitted, 0 received, 100% packet loss, time 1011ms
+

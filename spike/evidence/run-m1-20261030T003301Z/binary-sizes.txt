@@ -1,0 +1,5 @@
+go version go1.27.3 linux/amd64
+  12863371 bytes  bin/pfspike  (ELF 64-bit LSB executable, x86-64)
+   8679687 bytes  bin/pfspike-stripped  (ELF 64-bit LSB executable, x86-64)
+   9044262 bytes  bin/pfspike-android-arm64  (ELF 64-bit LSB pie executable, ARM aarch64)
+    342656 bytes  bin/hev-socks5-tunnel  (ELF 64-bit LSB pie executable, x86-64)

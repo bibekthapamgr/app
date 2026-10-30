@@ -1,0 +1,58 @@
+{
+  "test": "test_E04_tls_to_proxy[valid-socks5-tls]",
+  "title": "TLS to the proxy endpoint with strict certificate and hostname validation; failures fail closed.",
+  "requirement": "optional TLS with strict certificate validation; Play VpnService encryption policy.",
+  "checks": [
+    {
+      "check": "HTTP 200 through TLS-wrapped proxy",
+      "passed": true,
+      "detail": {
+        "rc": 0,
+        "code": 200,
+        "body": "{\"client_ip\": \"10.20.0.2\", \"client_port\": 49518, \"server_port\": 80, \"tls\": false, \"path\": \"/nonce/tlsnonce47c0d4d2a981\", \"nonce\": \"tlsnonce47c0d4d2a981\"}\n",
+        "seconds": 0.027,
+        "stderr": ""
+      }
+    },
+    {
+      "check": "uplink capture: destination hostname NOT visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink capture: app payload (nonce) NOT visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink capture: the proxy's name (SNI) is visible, the destination's is not",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: nothing left the device except to the proxy endpoint(s) [('10.20.0.2', 1443)] (22 packets captured)",
+      "passed": true,
+      "detail": {
+        "capture": "/home/claude/proxyflow-android/spike/evidence/run-m1-20261030T003301Z/test_E04_tls_to_proxy[valid-socks5-tls]/pcap/2-device-uplink.pcap",
+        "exists": true,
+        "packets": 22,
+        "violations": []
+      }
+    },
+    {
+      "check": "uplink: no packet from the device reached a destination address directly",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: no DNS (port 53) left the device",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "metrics": {},
+  "notes": [
+    "The TLS ClientHello SNI (proxy.test) is visible on the network by design."
+  ],
+  "verdict": "PASS"
+}

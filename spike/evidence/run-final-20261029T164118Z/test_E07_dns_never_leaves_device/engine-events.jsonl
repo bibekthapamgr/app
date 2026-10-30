@@ -1,0 +1,7 @@
+{"time":"2026-10-30T01:44:06.933589894+09:00","type":"engine_started"}
+{"time":"2026-10-30T01:44:07.197732765+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T01:44:07.218879897+09:00","type":"dns","proto":"udp","port":53,"detail":"refused"}
+{"time":"2026-10-30T01:44:07.239269757+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T01:44:07.264366662+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T01:44:07.28492303+09:00","type":"conn_fail","proto":"tcp","dst_kind":"ip","port":53,"code":"TARGET_UNREACHABLE","detail":"SOCKS5 reply 0x03 network unreachable"}
+{"time":"2026-10-30T01:44:07.287179612+09:00","type":"engine_stopped"}

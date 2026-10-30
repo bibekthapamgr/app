@@ -1,0 +1,7 @@
+{
+  "rc": 0,
+  "code": 200,
+  "body": "{\"client_ip\": \"10.20.0.2\", \"client_port\": 56576, \"server_port\": 80, \"tls\": false, \"path\": \"/nonce/27515e03d09da3b4\", \"nonce\": \"27515e03d09da3b4\"}\n",
+  "seconds": 0.015,
+  "stderr": ""
+}

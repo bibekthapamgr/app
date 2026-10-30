@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How ProxyFlow works</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; display: flex; flex-direction: column; padding: 8px 24px 32px; gap: 20px">
+  <div style="height: 56px; display: flex; align-items: center; margin-left: -12px">
+    <a href="Main.dc.html" aria-label="Back" style="width: 48px; height: 48px; border-radius: 24px; display: flex; align-items: center; justify-content: center; color: #14243A"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></a>
+  </div>
+  <h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 500">How it works</h1>
+  <div style="display: flex; align-items: center; justify-content: space-between; background: #FFFFFF; border: 1px solid #C9D1DC; border-radius: 16px; padding: 16px 12px">
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 64px"><span style="width: 40px; height: 40px; border-radius: 12px; background: #DCE3EE; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg></span><span style="font-size: 12px; font-weight: 500; text-align: center">Your apps</span></div>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#465569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 64px"><span style="width: 40px; height: 40px; border-radius: 12px; background: #20B8A5; color: #14243A; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/></svg></span><span style="font-size: 12px; font-weight: 500; text-align: center">ProxyFlow</span></div>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#465569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 64px"><span style="width: 40px; height: 40px; border-radius: 12px; background: #DCE3EE; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></svg></span><span style="font-size: 12px; font-weight: 500; text-align: center">Your proxy</span></div>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#465569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 64px"><span style="width: 40px; height: 40px; border-radius: 12px; background: #DCE3EE; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg></span><span style="font-size: 12px; font-weight: 500; text-align: center">Internet</span></div>
+  </div>
+  <section aria-labelledby="what" style="display: flex; flex-direction: column; gap: 4px">
+    <h2 id="what" style="margin: 0 0 4px; font-size: 16px; font-weight: 500">While connected</h2>
+    <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #E6EBF1">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#157A6D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>
+      <span style="flex: 1; font-size: 14px; line-height: 20px">Websites and most apps <span style="color: #465569">(TCP)</span></span>
+      <span style="font-size: 13px; font-weight: 500; color: #157A6D">Via your proxy</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #E6EBF1">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#157A6D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>
+      <span style="flex: 1; font-size: 14px; line-height: 20px">Website names <span style="color: #465569">(DNS)</span></span>
+      <span style="font-size: 13px; font-weight: 500; color: #157A6D">Resolved by proxy</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #E6EBF1">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A5300" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M6 18L18 6"/></svg>
+      <span style="flex: 1; font-size: 14px; line-height: 20px">Calls, some games, ping <span style="color: #465569">(UDP, ICMP)</span></span>
+      <span style="font-size: 13px; font-weight: 500; color: #8A5300">Blocked</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px; padding: 10px 0">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A5300" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M6 18L18 6"/></svg>
+      <span style="flex: 1; font-size: 14px; line-height: 20px">Printers, casting, local devices</span>
+      <span style="font-size: 13px; font-weight: 500; color: #8A5300">Not reachable</span>
+    </div>
+    <p style="margin: 4px 0 0; font-size: 13px; line-height: 18px; color: #465569">Blocked traffic is never sent around your proxy. Video calls usually switch to TCP; apps that can't will not work while connected.</p>
+  </section>
+  <div style="display: flex; gap: 12px; background: #DCE3EE; border-radius: 12px; padding: 12px 14px">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#14243A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+    <p style="margin: 0; font-size: 14px; line-height: 20px">Your proxy provider can see which sites you connect to and any unencrypted data. Choose one you trust.</p>
+  </div>
+  <div style="flex: 1"></div>
+  <div style="display: flex; flex-direction: column; gap: 16px">
+    <div aria-label="Step 2 of 3" style="display: flex; gap: 8px; justify-content: center">
+      <span style="width: 8px; height: 8px; border-radius: 4px; background: #C9D1DC"></span>
+      <span style="width: 24px; height: 8px; border-radius: 4px; background: #157A6D"></span>
+      <span style="width: 8px; height: 8px; border-radius: 4px; background: #C9D1DC"></span>
+    </div>
+    <a href="A3-Notifications.dc.html" style="height: 52px; border-radius: 26px; background: #157A6D; color: #FFFFFF; font-size: 16px; font-weight: 500; display: flex; align-items: center; justify-content: center; text-decoration: none">Continue</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

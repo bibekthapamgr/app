@@ -1,0 +1,56 @@
+{
+  "test": "test_E16_proxy_hostname_resolved_on_underlying_network",
+  "title": "The proxy's own hostname is resolved via the underlying network with a protected socket; nothing else is.",
+  "requirement": "routing loop prevention; DNS handling.",
+  "checks": [
+    {
+      "check": "TLS proxy addressed by hostname works",
+      "passed": true,
+      "detail": {
+        "rc": 0,
+        "code": 200,
+        "body": "{\"client_ip\": \"10.20.0.2\", \"client_port\": 56652, \"server_port\": 80, \"tls\": false, \"path\": \"/whoami\"}\n",
+        "seconds": 0.027,
+        "stderr": ""
+      }
+    },
+    {
+      "check": "underlay resolver saw lookups, and only of the proxy hostnames",
+      "passed": true,
+      "detail": [
+        "no-such-proxy.test",
+        "proxy.test"
+      ]
+    },
+    {
+      "check": "unknown proxy hostname categorised PROXY_DNS_FAILED",
+      "passed": true,
+      "detail": {
+        "PROXY_DNS_FAILED": 1
+      }
+    },
+    {
+      "check": "uplink: nothing left the device except to the proxy endpoint(s) [('10.20.0.2', 1443)] (30 packets captured)",
+      "passed": true,
+      "detail": {
+        "capture": "/home/claude/proxyflow-android/spike/evidence/run-m1-20261030T003301Z/test_E16_proxy_hostname_resolved_on_underlying_network/pcap/2-device-uplink.pcap",
+        "exists": true,
+        "packets": 30,
+        "violations": []
+      }
+    },
+    {
+      "check": "uplink: no packet from the device reached a destination address directly",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: no DNS (port 53) left the device except the allowed lookups of the proxy's own name [('10.10.0.1', 53)]",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "metrics": {},
+  "notes": [],
+  "verdict": "PASS"
+}

@@ -1,0 +1,66 @@
+{
+  "test": "test_E11_kill_switch_semantics",
+  "title": "What happens on engine crash vs. VPN interface teardown, with and without OS lockdown.",
+  "requirement": "kill-switch / fail-closed design input for M5/M8.",
+  "checks": [
+    {
+      "check": "A. baseline works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "A. engine crashed while the TUN stays up: traffic black-holed (fail closed)",
+      "passed": true,
+      "detail": {
+        "rc": 28,
+        "code": 0,
+        "body": "",
+        "seconds": 4.01,
+        "stderr": "curl: (28) Connection timed out after 4002 milliseconds"
+      }
+    },
+    {
+      "check": "A. no destination request after the crash",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "A uplink: nothing left the device except to the proxy endpoint(s) [('10.20.0.2', 1080)]",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "check": "A uplink: no packet from the device reached a destination address directly",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "A uplink: no DNS (port 53) left the device",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "B. without OS lockdown, teardown LEAKS (expected; proves why lockdown is required)",
+      "passed": true,
+      "detail": [
+        "10.10.0.2"
+      ]
+    },
+    {
+      "check": "C. with lockdown emulation, teardown is fail-closed",
+      "passed": true,
+      "detail": {
+        "rc": 7,
+        "code": 0,
+        "body": "",
+        "seconds": 0.008,
+        "stderr": "curl: (7) Failed to connect to 10.30.0.2 port 80 after 0 ms: Couldn't connect to server"
+      }
+    }
+  ],
+  "metrics": {},
+  "notes": [
+    "B is a deliberate negative control. On Android the equivalent protection is Always-on VPN + 'Block connections without VPN' (lockdown); the app must detect and guide it."
+  ],
+  "verdict": "PASS"
+}

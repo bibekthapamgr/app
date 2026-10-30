@@ -1,0 +1,30 @@
+flowchart LR
+    subgraph TB1["Trust boundary 1 — ProxyFlow app sandbox (UID of ProxyFlow)"]
+        UI["P1 UI"]
+        CTRL["P2 Connection controller<br/>+ VpnService"]
+        ENG["P3 Engine<br/>(netstack, DNS, adapters)"]
+        DB[("D1 Room DB<br/>profiles (ciphertext secrets), logs")]
+        DS[("D2 DataStore<br/>settings")]
+    end
+    subgraph TB2["Trust boundary 2 — Android OS"]
+        KS[("D3 Android Keystore<br/>AES key, non-exportable")]
+        TUN["TUN interface"]
+        TRUST[("System CA store")]
+    end
+    APPS["E1 Other apps<br/>(untrusted traffic sources)"]
+    NETW["E2 Local network / ISP<br/>(passive & active attacker)"]
+    PROXY["E3 User's proxy<br/>(semi-trusted)"]
+    DEST["E4 Destinations<br/>(untrusted)"]
+    USER["E5 User"]
+    USER -- "credentials, settings" --> UI
+    UI --> CTRL
+    CTRL -- "profile, secret" --> ENG
+    UI <--> DB
+    UI <--> DS
+    CTRL <--> KS
+    APPS -- "packets (any protocol)" --> TUN
+    TUN <--> ENG
+    ENG -- "TLS or plaintext tunnel<br/>(TB3: device ⇄ network)" --> NETW
+    NETW --> PROXY
+    PROXY --> DEST
+    ENG -. "anchors / verify" .-> TRUST

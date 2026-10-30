@@ -1,0 +1,233 @@
+{"Time":"2026-10-30T09:33:07.593358546+09:00","Action":"start","Package":"proxyflow/spike/engine/adapters"}
+{"Time":"2026-10-30T09:33:07.611800473+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation"}
+{"Time":"2026-10-30T09:33:07.612424601+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation","Output":"=== RUN   TestTLSToProxyValidation\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.61306538+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/valid_chain_and_hostname"}
+{"Time":"2026-10-30T09:33:07.613077412+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/valid_chain_and_hostname","Output":"=== RUN   TestTLSToProxyValidation/valid_chain_and_hostname\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.620018279+09:00","Action":"start","Package":"proxyflow/spike/engine/cmd/pfspike"}
+{"Time":"2026-10-30T09:33:07.620057665+09:00","Action":"output","Package":"proxyflow/spike/engine/cmd/pfspike","Output":"?   \tproxyflow/spike/engine/cmd/pfspike\t[no test files]\n"}
+{"Time":"2026-10-30T09:33:07.620070892+09:00","Action":"skip","Package":"proxyflow/spike/engine/cmd/pfspike","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.620470245+09:00","Action":"start","Package":"proxyflow/spike/engine/engine"}
+{"Time":"2026-10-30T09:33:07.622415092+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/valid_chain_and_hostname","Output":"--- PASS: TestTLSToProxyValidation/valid_chain_and_hostname (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.622540596+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/valid_chain_and_hostname","Elapsed":0.01}
+{"Time":"2026-10-30T09:33:07.622606244+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/hostname_mismatch"}
+{"Time":"2026-10-30T09:33:07.622612223+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/hostname_mismatch","Output":"=== RUN   TestTLSToProxyValidation/hostname_mismatch\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.628802105+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/hostname_mismatch","Output":"--- PASS: TestTLSToProxyValidation/hostname_mismatch (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.628912526+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/hostname_mismatch","Elapsed":0.01}
+{"Time":"2026-10-30T09:33:07.628973362+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/expired_certificate"}
+{"Time":"2026-10-30T09:33:07.628979514+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/expired_certificate","Output":"=== RUN   TestTLSToProxyValidation/expired_certificate\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.634970377+09:00","Action":"run","Package":"proxyflow/spike/engine/engine","Test":"TestPingIsNeverAnswered"}
+{"Time":"2026-10-30T09:33:07.635022232+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestPingIsNeverAnswered","Output":"=== RUN   TestPingIsNeverAnswered\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.63528177+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/expired_certificate","Output":"--- PASS: TestTLSToProxyValidation/expired_certificate (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.635369823+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/expired_certificate","Elapsed":0.01}
+{"Time":"2026-10-30T09:33:07.635476578+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/untrusted_issuer"}
+{"Time":"2026-10-30T09:33:07.635481584+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/untrusted_issuer","Output":"=== RUN   TestTLSToProxyValidation/untrusted_issuer\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.641838979+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/untrusted_issuer","Output":"--- PASS: TestTLSToProxyValidation/untrusted_issuer (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.641953493+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation/untrusted_issuer","Elapsed":0.01}
+{"Time":"2026-10-30T09:33:07.642201225+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation","Output":"--- PASS: TestTLSToProxyValidation (0.04s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.642298968+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToProxyValidation","Elapsed":0.04}
+{"Time":"2026-10-30T09:33:07.642380049+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToPlaintextProxy"}
+{"Time":"2026-10-30T09:33:07.642383792+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToPlaintextProxy","Output":"=== RUN   TestTLSToPlaintextProxy\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.64469542+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToPlaintextProxy","Output":"--- PASS: TestTLSToPlaintextProxy (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.64473639+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestTLSToPlaintextProxy","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.644743623+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestProxyUnreachableAndTimeout"}
+{"Time":"2026-10-30T09:33:07.644746188+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestProxyUnreachableAndTimeout","Output":"=== RUN   TestProxyUnreachableAndTimeout\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.947230214+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestProxyUnreachableAndTimeout","Output":"--- PASS: TestProxyUnreachableAndTimeout (0.30s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.947291447+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestProxyUnreachableAndTimeout","Elapsed":0.3}
+{"Time":"2026-10-30T09:33:07.947302311+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestProxyHostnameResolutionFailure"}
+{"Time":"2026-10-30T09:33:07.947304439+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestProxyHostnameResolutionFailure","Output":"=== RUN   TestProxyHostnameResolutionFailure\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.948936516+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestProxyHostnameResolutionFailure","Output":"--- PASS: TestProxyHostnameResolutionFailure (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.948994512+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestProxyHostnameResolutionFailure","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.949002372+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestProtectorFailureFailsClosed"}
+{"Time":"2026-10-30T09:33:07.949006352+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestProtectorFailureFailsClosed","Output":"=== RUN   TestProtectorFailureFailsClosed\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.949308408+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestProtectorFailureFailsClosed","Output":"--- PASS: TestProtectorFailureFailsClosed (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.949313715+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestProtectorFailureFailsClosed","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.949318158+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestConfigNeverRevealsSecrets"}
+{"Time":"2026-10-30T09:33:07.949361418+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestConfigNeverRevealsSecrets","Output":"=== RUN   TestConfigNeverRevealsSecrets\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.949459852+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestConfigNeverRevealsSecrets","Output":"--- PASS: TestConfigNeverRevealsSecrets (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.949463731+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestConfigNeverRevealsSecrets","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.949468466+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestConfigValidation"}
+{"Time":"2026-10-30T09:33:07.949470582+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestConfigValidation","Output":"=== RUN   TestConfigValidation\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.949583941+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestConfigValidation","Output":"--- PASS: TestConfigValidation (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.949592101+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestConfigValidation","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.949642077+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestValidHostname"}
+{"Time":"2026-10-30T09:33:07.949644908+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestValidHostname","Output":"=== RUN   TestValidHostname\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.94970737+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestValidHostname","Output":"--- PASS: TestValidHostname (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.949710752+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestValidHostname","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.949713855+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestDialHTTPConnectRefusalNoPanic"}
+{"Time":"2026-10-30T09:33:07.949716187+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestDialHTTPConnectRefusalNoPanic","Output":"=== RUN   TestDialHTTPConnectRefusalNoPanic\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.952023484+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestDialHTTPConnectRefusalNoPanic","Output":"--- PASS: TestDialHTTPConnectRefusalNoPanic (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.95209124+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestDialHTTPConnectRefusalNoPanic","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.952100999+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectRequestAndBufferedTunnelBytes"}
+{"Time":"2026-10-30T09:33:07.952103717+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectRequestAndBufferedTunnelBytes","Output":"=== RUN   TestHTTPConnectRequestAndBufferedTunnelBytes\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.952474493+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectRequestAndBufferedTunnelBytes","Output":"--- PASS: TestHTTPConnectRequestAndBufferedTunnelBytes (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.952545135+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectRequestAndBufferedTunnelBytes","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.952553987+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectIPv6LiteralAndNoCredentials"}
+{"Time":"2026-10-30T09:33:07.952558007+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectIPv6LiteralAndNoCredentials","Output":"=== RUN   TestHTTPConnectIPv6LiteralAndNoCredentials\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.952840436+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectIPv6LiteralAndNoCredentials","Output":"--- PASS: TestHTTPConnectIPv6LiteralAndNoCredentials (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.952856315+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectIPv6LiteralAndNoCredentials","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.952861243+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectStatusMapping"}
+{"Time":"2026-10-30T09:33:07.952864201+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectStatusMapping","Output":"=== RUN   TestHTTPConnectStatusMapping\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.953861707+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectStatusMapping","Output":"--- PASS: TestHTTPConnectStatusMapping (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.953957597+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectStatusMapping","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.953969619+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectDigestOnlyIsExplained"}
+{"Time":"2026-10-30T09:33:07.953972707+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectDigestOnlyIsExplained","Output":"=== RUN   TestHTTPConnectDigestOnlyIsExplained\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.95456727+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectDigestOnlyIsExplained","Output":"--- PASS: TestHTTPConnectDigestOnlyIsExplained (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.954602518+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectDigestOnlyIsExplained","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.954608251+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectOversizedHeaders"}
+{"Time":"2026-10-30T09:33:07.954612564+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectOversizedHeaders","Output":"=== RUN   TestHTTPConnectOversizedHeaders\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.954810967+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectOversizedHeaders","Output":"--- PASS: TestHTTPConnectOversizedHeaders (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.954825713+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectOversizedHeaders","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.954855454+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectRejectsInjectedHostname"}
+{"Time":"2026-10-30T09:33:07.95488698+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectRejectsInjectedHostname","Output":"=== RUN   TestHTTPConnectRejectsInjectedHostname\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.955114445+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectRejectsInjectedHostname","Output":"--- PASS: TestHTTPConnectRejectsInjectedHostname (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.955154579+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestHTTPConnectRejectsInjectedHostname","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.955184266+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5NoAuthDomainTarget"}
+{"Time":"2026-10-30T09:33:07.95518954+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5NoAuthDomainTarget","Output":"=== RUN   TestSOCKS5NoAuthDomainTarget\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.955591308+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5NoAuthDomainTarget","Output":"--- PASS: TestSOCKS5NoAuthDomainTarget (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.955622032+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5NoAuthDomainTarget","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.95562892+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5UserPassSuccessIPv6Reply"}
+{"Time":"2026-10-30T09:33:07.955631729+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5UserPassSuccessIPv6Reply","Output":"=== RUN   TestSOCKS5UserPassSuccessIPv6Reply\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.955864459+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5UserPassSuccessIPv6Reply","Output":"--- PASS: TestSOCKS5UserPassSuccessIPv6Reply (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.955890373+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5UserPassSuccessIPv6Reply","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.955895169+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures"}
+{"Time":"2026-10-30T09:33:07.955926723+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures","Output":"=== RUN   TestSOCKS5AuthFailures\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.955980754+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/rejected_credentials"}
+{"Time":"2026-10-30T09:33:07.955984124+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/rejected_credentials","Output":"=== RUN   TestSOCKS5AuthFailures/rejected_credentials\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.956331664+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/rejected_credentials","Output":"--- PASS: TestSOCKS5AuthFailures/rejected_credentials (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.956351116+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/rejected_credentials","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.956356128+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/auth_required_but_none_configured"}
+{"Time":"2026-10-30T09:33:07.95635873+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/auth_required_but_none_configured","Output":"=== RUN   TestSOCKS5AuthFailures/auth_required_but_none_configured\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.956364515+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/auth_required_but_none_configured","Output":"--- PASS: TestSOCKS5AuthFailures/auth_required_but_none_configured (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.956367281+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/auth_required_but_none_configured","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.95640135+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/no_acceptable_method_although_credentials_were_offered"}
+{"Time":"2026-10-30T09:33:07.956404953+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/no_acceptable_method_although_credentials_were_offered","Output":"=== RUN   TestSOCKS5AuthFailures/no_acceptable_method_although_credentials_were_offered\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.95671983+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/no_acceptable_method_although_credentials_were_offered","Output":"--- PASS: TestSOCKS5AuthFailures/no_acceptable_method_although_credentials_were_offered (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.956737227+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/no_acceptable_method_although_credentials_were_offered","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.956758155+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/server_picks_method_we_did_not_offer"}
+{"Time":"2026-10-30T09:33:07.956762067+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/server_picks_method_we_did_not_offer","Output":"=== RUN   TestSOCKS5AuthFailures/server_picks_method_we_did_not_offer\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957026332+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/server_picks_method_we_did_not_offer","Output":"--- PASS: TestSOCKS5AuthFailures/server_picks_method_we_did_not_offer (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957033926+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures/server_picks_method_we_did_not_offer","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.957042168+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures","Output":"--- PASS: TestSOCKS5AuthFailures (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957066483+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5AuthFailures","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.95707261+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5ReplyCodes"}
+{"Time":"2026-10-30T09:33:07.957075443+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5ReplyCodes","Output":"=== RUN   TestSOCKS5ReplyCodes\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957180287+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5ReplyCodes","Output":"--- PASS: TestSOCKS5ReplyCodes (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957199398+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5ReplyCodes","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.957221481+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5NotASocksServer"}
+{"Time":"2026-10-30T09:33:07.957224184+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5NotASocksServer","Output":"=== RUN   TestSOCKS5NotASocksServer\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957337507+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5NotASocksServer","Output":"--- PASS: TestSOCKS5NotASocksServer (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957354958+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5NotASocksServer","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.957365201+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5RequestEncoding"}
+{"Time":"2026-10-30T09:33:07.957367383+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5RequestEncoding","Output":"=== RUN   TestSOCKS5RequestEncoding\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957458354+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5RequestEncoding","Output":"--- PASS: TestSOCKS5RequestEncoding (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957463024+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5RequestEncoding","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.957475706+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5TruncatedReply"}
+{"Time":"2026-10-30T09:33:07.957479207+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5TruncatedReply","Output":"=== RUN   TestSOCKS5TruncatedReply\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957599762+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5TruncatedReply","Output":"--- PASS: TestSOCKS5TruncatedReply (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957605533+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"TestSOCKS5TruncatedReply","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.957667537+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse"}
+{"Time":"2026-10-30T09:33:07.957670267+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse","Output":"=== RUN   FuzzReadConnectResponse\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957819421+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#0"}
+{"Time":"2026-10-30T09:33:07.957822155+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#0","Output":"=== RUN   FuzzReadConnectResponse/seed#0\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957935361+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#0","Output":"--- PASS: FuzzReadConnectResponse/seed#0 (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.957939614+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#0","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.95799588+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#1"}
+{"Time":"2026-10-30T09:33:07.958002549+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#1","Output":"=== RUN   FuzzReadConnectResponse/seed#1\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958056881+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#1","Output":"--- PASS: FuzzReadConnectResponse/seed#1 (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958079554+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#1","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.958086426+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#2"}
+{"Time":"2026-10-30T09:33:07.958088789+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#2","Output":"=== RUN   FuzzReadConnectResponse/seed#2\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958170712+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#2","Output":"--- PASS: FuzzReadConnectResponse/seed#2 (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958188408+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse/seed#2","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.958222445+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse","Output":"--- PASS: FuzzReadConnectResponse (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958226648+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadConnectResponse","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.958280664+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply"}
+{"Time":"2026-10-30T09:33:07.958283442+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply","Output":"=== RUN   FuzzReadSOCKS5Reply\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958330999+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#0"}
+{"Time":"2026-10-30T09:33:07.958334031+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#0","Output":"=== RUN   FuzzReadSOCKS5Reply/seed#0\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958431215+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#0","Output":"--- PASS: FuzzReadSOCKS5Reply/seed#0 (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958439372+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#0","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.95844714+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#1"}
+{"Time":"2026-10-30T09:33:07.958449825+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#1","Output":"=== RUN   FuzzReadSOCKS5Reply/seed#1\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958521615+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#1","Output":"--- PASS: FuzzReadSOCKS5Reply/seed#1 (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958556843+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#1","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.958577787+09:00","Action":"run","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#2"}
+{"Time":"2026-10-30T09:33:07.958588352+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#2","Output":"=== RUN   FuzzReadSOCKS5Reply/seed#2\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958628287+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#2","Output":"--- PASS: FuzzReadSOCKS5Reply/seed#2 (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.958632633+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply/seed#2","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.958661961+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply","Output":"--- PASS: FuzzReadSOCKS5Reply (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:07.95866623+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Test":"FuzzReadSOCKS5Reply","Elapsed":0}
+{"Time":"2026-10-30T09:33:07.958688802+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:08.960560361+09:00","Action":"output","Package":"proxyflow/spike/engine/adapters","Output":"ok  \tproxyflow/spike/engine/adapters\t1.367s\n"}
+{"Time":"2026-10-30T09:33:08.9606266+09:00","Action":"pass","Package":"proxyflow/spike/engine/adapters","Elapsed":1.367}
+{"Time":"2026-10-30T09:33:09.147010029+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestPingIsNeverAnswered","Output":"    echofilter_test.go:284: requests dropped 7, fragments dropped 2, replies blocked 0, replies sent 0\n"}
+{"Time":"2026-10-30T09:33:09.148486464+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestPingIsNeverAnswered","Output":"--- PASS: TestPingIsNeverAnswered (1.51s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.148573451+09:00","Action":"pass","Package":"proxyflow/spike/engine/engine","Test":"TestPingIsNeverAnswered","Elapsed":1.51}
+{"Time":"2026-10-30T09:33:09.148584945+09:00","Action":"run","Package":"proxyflow/spike/engine/engine","Test":"TestEchoFilterBlocksOutboundReplies"}
+{"Time":"2026-10-30T09:33:09.148588648+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestEchoFilterBlocksOutboundReplies","Output":"=== RUN   TestEchoFilterBlocksOutboundReplies\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.152526178+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestEchoFilterBlocksOutboundReplies","Output":"--- PASS: TestEchoFilterBlocksOutboundReplies (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.152564484+09:00","Action":"pass","Package":"proxyflow/spike/engine/engine","Test":"TestEchoFilterBlocksOutboundReplies","Elapsed":0}
+{"Time":"2026-10-30T09:33:09.152573185+09:00","Action":"run","Package":"proxyflow/spike/engine/engine","Test":"TestClassifyICMP"}
+{"Time":"2026-10-30T09:33:09.152576876+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestClassifyICMP","Output":"=== RUN   TestClassifyICMP\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.152600433+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestClassifyICMP","Output":"--- PASS: TestClassifyICMP (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.152604461+09:00","Action":"pass","Package":"proxyflow/spike/engine/engine","Test":"TestClassifyICMP","Elapsed":0}
+{"Time":"2026-10-30T09:33:09.152609367+09:00","Action":"run","Package":"proxyflow/spike/engine/engine","Test":"TestHostnameIsSentToProxyAndDataFlows"}
+{"Time":"2026-10-30T09:33:09.152613275+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestHostnameIsSentToProxyAndDataFlows","Output":"=== RUN   TestHostnameIsSentToProxyAndDataFlows\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.159842767+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestHostnameIsSentToProxyAndDataFlows","Output":"--- PASS: TestHostnameIsSentToProxyAndDataFlows (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.159882271+09:00","Action":"pass","Package":"proxyflow/spike/engine/engine","Test":"TestHostnameIsSentToProxyAndDataFlows","Elapsed":0.01}
+{"Time":"2026-10-30T09:33:09.159958086+09:00","Action":"run","Package":"proxyflow/spike/engine/engine","Test":"TestProxyFailureRefusesConnection"}
+{"Time":"2026-10-30T09:33:09.159961644+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestProxyFailureRefusesConnection","Output":"=== RUN   TestProxyFailureRefusesConnection\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.164579121+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestProxyFailureRefusesConnection","Output":"--- PASS: TestProxyFailureRefusesConnection (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.164605628+09:00","Action":"pass","Package":"proxyflow/spike/engine/engine","Test":"TestProxyFailureRefusesConnection","Elapsed":0}
+{"Time":"2026-10-30T09:33:09.164645803+09:00","Action":"run","Package":"proxyflow/spike/engine/engine","Test":"TestIPLiteralAndStaleMapping"}
+{"Time":"2026-10-30T09:33:09.164649297+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestIPLiteralAndStaleMapping","Output":"=== RUN   TestIPLiteralAndStaleMapping\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.172098057+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestIPLiteralAndStaleMapping","Output":"--- PASS: TestIPLiteralAndStaleMapping (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.17213399+09:00","Action":"pass","Package":"proxyflow/spike/engine/engine","Test":"TestIPLiteralAndStaleMapping","Elapsed":0.01}
+{"Time":"2026-10-30T09:33:09.172281994+09:00","Action":"run","Package":"proxyflow/spike/engine/engine","Test":"TestStopReleasesGoroutines"}
+{"Time":"2026-10-30T09:33:09.17228934+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestStopReleasesGoroutines","Output":"=== RUN   TestStopReleasesGoroutines\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.229679072+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestStopReleasesGoroutines","Output":"    engine_test.go:292: Stop with 20 open flows took 6.84133ms\n"}
+{"Time":"2026-10-30T09:33:09.233762232+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestStopReleasesGoroutines","Output":"--- PASS: TestStopReleasesGoroutines (0.06s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.233810378+09:00","Action":"pass","Package":"proxyflow/spike/engine/engine","Test":"TestStopReleasesGoroutines","Elapsed":0.06}
+{"Time":"2026-10-30T09:33:09.233907698+09:00","Action":"run","Package":"proxyflow/spike/engine/engine","Test":"TestIPv6TCPIsForwardedByAddress"}
+{"Time":"2026-10-30T09:33:09.233911443+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestIPv6TCPIsForwardedByAddress","Output":"=== RUN   TestIPv6TCPIsForwardedByAddress\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.241900673+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestIPv6TCPIsForwardedByAddress","Output":"--- PASS: TestIPv6TCPIsForwardedByAddress (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.24197238+09:00","Action":"pass","Package":"proxyflow/spike/engine/engine","Test":"TestIPv6TCPIsForwardedByAddress","Elapsed":0.01}
+{"Time":"2026-10-30T09:33:09.241986373+09:00","Action":"run","Package":"proxyflow/spike/engine/engine","Test":"TestIPv6UDPRejectedAndDNSAnswered"}
+{"Time":"2026-10-30T09:33:09.241989846+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestIPv6UDPRejectedAndDNSAnswered","Output":"=== RUN   TestIPv6UDPRejectedAndDNSAnswered\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.248386824+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Test":"TestIPv6UDPRejectedAndDNSAnswered","Output":"--- PASS: TestIPv6UDPRejectedAndDNSAnswered (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.248423713+09:00","Action":"pass","Package":"proxyflow/spike/engine/engine","Test":"TestIPv6UDPRejectedAndDNSAnswered","Elapsed":0.01}
+{"Time":"2026-10-30T09:33:09.248432974+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.369952877+09:00","Action":"start","Package":"proxyflow/spike/engine/fakedns"}
+{"Time":"2026-10-30T09:33:09.383222894+09:00","Action":"run","Package":"proxyflow/spike/engine/fakedns","Test":"TestPoolAllocationAndReverse"}
+{"Time":"2026-10-30T09:33:09.383289428+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"TestPoolAllocationAndReverse","Output":"=== RUN   TestPoolAllocationAndReverse\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.383316385+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"TestPoolAllocationAndReverse","Output":"--- PASS: TestPoolAllocationAndReverse (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.383329136+09:00","Action":"pass","Package":"proxyflow/spike/engine/fakedns","Test":"TestPoolAllocationAndReverse","Elapsed":0}
+{"Time":"2026-10-30T09:33:09.383346964+09:00","Action":"run","Package":"proxyflow/spike/engine/fakedns","Test":"TestPoolLRURecycling"}
+{"Time":"2026-10-30T09:33:09.383354553+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"TestPoolLRURecycling","Output":"=== RUN   TestPoolLRURecycling\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.383615674+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"TestPoolLRURecycling","Output":"--- PASS: TestPoolLRURecycling (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.384296269+09:00","Action":"pass","Package":"proxyflow/spike/engine/fakedns","Test":"TestPoolLRURecycling","Elapsed":0}
+{"Time":"2026-10-30T09:33:09.38430492+09:00","Action":"run","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponder"}
+{"Time":"2026-10-30T09:33:09.384307423+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponder","Output":"=== RUN   TestResponder\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.384312431+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponder","Output":"--- PASS: TestResponder (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.384315634+09:00","Action":"pass","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponder","Elapsed":0}
+{"Time":"2026-10-30T09:33:09.384318064+09:00","Action":"run","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponderRejectsInjectionNames"}
+{"Time":"2026-10-30T09:33:09.384320099+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponderRejectsInjectionNames","Output":"=== RUN   TestResponderRejectsInjectionNames\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.384323416+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponderRejectsInjectionNames","Output":"--- PASS: TestResponderRejectsInjectionNames (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.384326134+09:00","Action":"pass","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponderRejectsInjectionNames","Elapsed":0}
+{"Time":"2026-10-30T09:33:09.384356428+09:00","Action":"run","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponderMalformed"}
+{"Time":"2026-10-30T09:33:09.384359389+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponderMalformed","Output":"=== RUN   TestResponderMalformed\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.38436443+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponderMalformed","Output":"--- PASS: TestResponderMalformed (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.384367451+09:00","Action":"pass","Package":"proxyflow/spike/engine/fakedns","Test":"TestResponderMalformed","Elapsed":0}
+{"Time":"2026-10-30T09:33:09.384370074+09:00","Action":"run","Package":"proxyflow/spike/engine/fakedns","Test":"FuzzResponder"}
+{"Time":"2026-10-30T09:33:09.384372103+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"FuzzResponder","Output":"=== RUN   FuzzResponder\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.384558043+09:00","Action":"run","Package":"proxyflow/spike/engine/fakedns","Test":"FuzzResponder/seed#0"}
+{"Time":"2026-10-30T09:33:09.384565154+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"FuzzResponder/seed#0","Output":"=== RUN   FuzzResponder/seed#0\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.384706507+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"FuzzResponder/seed#0","Output":"--- PASS: FuzzResponder/seed#0 (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.38471299+09:00","Action":"pass","Package":"proxyflow/spike/engine/fakedns","Test":"FuzzResponder/seed#0","Elapsed":0}
+{"Time":"2026-10-30T09:33:09.38471652+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Test":"FuzzResponder","Output":"--- PASS: FuzzResponder (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:09.384721694+09:00","Action":"pass","Package":"proxyflow/spike/engine/fakedns","Test":"FuzzResponder","Elapsed":0}
+{"Time":"2026-10-30T09:33:09.384724118+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-30T09:33:10.251048373+09:00","Action":"output","Package":"proxyflow/spike/engine/engine","Output":"ok  \tproxyflow/spike/engine/engine\t2.630s\n"}
+{"Time":"2026-10-30T09:33:10.251117643+09:00","Action":"pass","Package":"proxyflow/spike/engine/engine","Elapsed":2.6310000000000002}
+{"Time":"2026-10-30T09:33:10.386179427+09:00","Action":"output","Package":"proxyflow/spike/engine/fakedns","Output":"ok  \tproxyflow/spike/engine/fakedns\t1.016s\n"}
+{"Time":"2026-10-30T09:33:10.38624097+09:00","Action":"pass","Package":"proxyflow/spike/engine/fakedns","Elapsed":1.016}

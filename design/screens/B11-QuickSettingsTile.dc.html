@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quick Settings tile</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 420px; height: 520px; box-sizing: border-box; background: #DCE3EB; font-family: Roboto, system-ui, sans-serif; color: #14243A; display: flex; flex-direction: column; gap: 14px; padding: 20px 20px 18px">
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <span style="font-size: 12px; font-weight: 500; letter-spacing: 0.4px; color: #465569">CONNECTED · active</span>
+    <div style="display: flex; align-items: center; gap: 12px; height: 64px; border-radius: 32px; background: #20B8A5; color: #14243A; padding: 0 20px">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M8.5 12h7M13 9.5l2.5 2.5-2.5 2.5"/></svg>
+      <span style="display: flex; flex-direction: column"><strong style="font-size: 15px; font-weight: 500">ProxyFlow</strong><span style="font-size: 13px">Tokyo residential</span></span>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <span style="font-size: 12px; font-weight: 500; letter-spacing: 0.4px; color: #465569">BLOCKED · active, never shown as off</span>
+    <div style="display: flex; align-items: center; gap: 12px; height: 64px; border-radius: 32px; background: #FFE2B8; color: #3D2600; padding: 0 20px">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+      <span style="display: flex; flex-direction: column"><strong style="font-size: 15px; font-weight: 500">ProxyFlow</strong><span style="font-size: 13px">Traffic blocked</span></span>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <span style="font-size: 12px; font-weight: 500; letter-spacing: 0.4px; color: #465569">OFF · inactive</span>
+    <div style="display: flex; align-items: center; gap: 12px; height: 64px; border-radius: 32px; background: #FFFFFF; color: #14243A; padding: 0 20px">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M8.5 12h7M13 9.5l2.5 2.5-2.5 2.5"/></svg>
+      <span style="display: flex; flex-direction: column"><strong style="font-size: 15px; font-weight: 500">ProxyFlow</strong><span style="font-size: 13px; color: #465569">Off</span></span>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <span style="font-size: 12px; font-weight: 500; letter-spacing: 0.4px; color: #465569">NO PROFILE · unavailable</span>
+    <div style="display: flex; align-items: center; gap: 12px; height: 64px; border-radius: 32px; background: #E6EBF1; color: #465569; padding: 0 20px">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M12 9v4M12 16h.01"/></svg>
+      <span style="display: flex; flex-direction: column"><strong style="font-size: 15px; font-weight: 500">ProxyFlow</strong><span style="font-size: 13px">Add a proxy first</span></span>
+    </div>
+  </div>
+  <p style="margin: auto 4px 0; font-size: 12px; line-height: 16px; color: #465569">Tap connects or disconnects the active profile; long-press opens Home. Android 13+ tile styling; the tile follows the system's colours on devices that tint tiles.</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":420,"height":520}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Set up the system kill switch</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; display: flex; flex-direction: column">
+  <header style="height: 64px; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 4px; box-sizing: border-box">
+    <a href="E1-Settings.dc.html" aria-label="Back" style="width: 48px; height: 48px; border-radius: 24px; display: flex; align-items: center; justify-content: center; color: #14243A"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></a>
+    <h1 style="margin: 0; flex: 1; font-size: 22px; font-weight: 500">System kill switch</h1>
+  </header>
+  <main style="flex: 1; display: flex; flex-direction: column; gap: 16px; padding: 4px 20px 24px">
+    <p style="margin: 0; font-size: 15px; line-height: 22px; color: #465569">ProxyFlow already blocks traffic while it's running. If Android stops ProxyFlow, or another VPN takes over, only Android itself can keep blocking.</p>
+    <div role="status" style="display: flex; align-items: center; gap: 10px; background: #FFE2B8; color: #3D2600; border-radius: 12px; padding: 10px 14px; font-size: 14px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M12 9v4M12 16h.01"/></svg><span><strong style="font-weight: 500">Status:</strong> not set up</span></div>
+    <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px">
+      <li style="display: flex; gap: 14px; align-items: flex-start"><span style="width: 28px; height: 28px; border-radius: 14px; background: #157A6D; color: #FFFFFF; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none">1</span><span style="font-size: 15px; line-height: 22px; padding-top: 3px">Tap <strong style="font-weight: 500">Open VPN settings</strong> below.</span></li>
+      <li style="display: flex; gap: 14px; align-items: flex-start"><span style="width: 28px; height: 28px; border-radius: 14px; background: #157A6D; color: #FFFFFF; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none">2</span><span style="font-size: 15px; line-height: 22px; padding-top: 3px">Tap the settings icon next to <strong style="font-weight: 500">ProxyFlow</strong>.</span></li>
+      <li style="display: flex; gap: 14px; align-items: flex-start"><span style="width: 28px; height: 28px; border-radius: 14px; background: #157A6D; color: #FFFFFF; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none">3</span><span style="font-size: 15px; line-height: 22px; padding-top: 3px">Turn on <strong style="font-weight: 500">Always-on VPN</strong>.</span></li>
+      <li style="display: flex; gap: 14px; align-items: flex-start"><span style="width: 28px; height: 28px; border-radius: 14px; background: #157A6D; color: #FFFFFF; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none">4</span><span style="font-size: 15px; line-height: 22px; padding-top: 3px">Turn on <strong style="font-weight: 500">Block connections without VPN</strong>.</span></li>
+    </ol>
+    <p style="margin: 0; font-size: 13px; line-height: 18px; color: #465569">Menu names vary by phone maker. With blocking on, apps can't go online while ProxyFlow is off — turn it off again in the same place to use your normal network.</p>
+    <div style="flex: 1"></div>
+    <a href="E1-Settings.dc.html" style="height: 52px; border-radius: 26px; background: #157A6D; color: #FFFFFF; font-size: 16px; font-weight: 500; display: flex; align-items: center; justify-content: center; text-decoration: none">Open VPN settings</a>
+    <a href="B2-HomeDisconnected.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; color: #157A6D; font-size: 15px; font-weight: 500; text-decoration: none">Later</a>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

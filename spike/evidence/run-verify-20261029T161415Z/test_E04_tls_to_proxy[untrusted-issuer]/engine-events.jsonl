@@ -1,0 +1,4 @@
+{"time":"2026-10-30T01:16:16.397428541+09:00","type":"engine_started"}
+{"time":"2026-10-30T01:16:16.65195072+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T01:16:16.656926983+09:00","type":"conn_fail","proto":"tcp","dst_kind":"hostname","port":80,"code":"TLS_UNTRUSTED","detail":"proxy certificate is not issued by a trusted authority"}
+{"time":"2026-10-30T01:16:16.663580505+09:00","type":"engine_stopped"}

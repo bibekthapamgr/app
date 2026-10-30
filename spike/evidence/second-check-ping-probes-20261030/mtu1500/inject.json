@@ -1,0 +1,34 @@
+{
+ "sent": {
+  "v4_plain": [
+   36
+  ],
+  "v4_fragmented_2056B": [
+   1500,
+   596
+  ],
+  "v6_plain": [
+   56
+  ],
+  "v6_destopts": [
+   64
+  ],
+  "v6_hopbyhop": [
+   65
+  ],
+  "v6_atomic_fragment": [
+   64
+  ],
+  "v6_small_2frags": [
+   56,
+   56,
+   56
+  ],
+  "v6_large_fragmented_2056B": [
+   1496,
+   656
+  ]
+ },
+ "received": [],
+ "echo_replies": []
+}

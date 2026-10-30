@@ -1,0 +1,45 @@
+{
+  "no_tunnel_proxy_host_to_dest": {
+    "upload_mbps": 16964.7
+  },
+  "spike_gvisor_mtu1500": {
+    "tun_mtu": 1500,
+    "upload_mbps": 1795.0,
+    "download_mbps": 612.8,
+    "engine_cpu_seconds": 9.35,
+    "cpu_seconds_per_gb": 7.77,
+    "rss_kib_after": 33496
+  },
+  "hev_no_offload_mtu1500": {
+    "tun_mtu": 1500,
+    "upload_mbps": 3339.8,
+    "download_mbps": 2825.6,
+    "engine_cpu_seconds": 6.71,
+    "cpu_seconds_per_gb": 2.18,
+    "rss_kib_after": 2484
+  },
+  "spike_gvisor_mtu9000": {
+    "tun_mtu": 9000,
+    "upload_mbps": 4591.9,
+    "download_mbps": 3254.9,
+    "engine_cpu_seconds": 7.74,
+    "cpu_seconds_per_gb": 1.97,
+    "rss_kib_after": 24696
+  },
+  "hev_no_offload_mtu9000": {
+    "tun_mtu": 9000,
+    "upload_mbps": 6211.7,
+    "download_mbps": 5724.5,
+    "engine_cpu_seconds": 5.94,
+    "cpu_seconds_per_gb": 1.0,
+    "rss_kib_after": 2504
+  },
+  "hev_linux_offloads_mtu1500 (not available on Android)": {
+    "tun_mtu": 1500,
+    "upload_mbps": 7743.4,
+    "download_mbps": 7145.5,
+    "engine_cpu_seconds": 5.01,
+    "cpu_seconds_per_gb": 0.67,
+    "rss_kib_after": 2636
+  }
+}

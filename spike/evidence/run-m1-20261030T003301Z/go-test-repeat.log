@@ -1,0 +1,11 @@
+$ go test -race -count=20 -v ./engine/   (results per test, counted)
+     20 --- PASS: TestClassifyICMP
+     20 --- PASS: TestEchoFilterBlocksOutboundReplies
+     20 --- PASS: TestHostnameIsSentToProxyAndDataFlows
+     20 --- PASS: TestIPLiteralAndStaleMapping
+     20 --- PASS: TestIPv6TCPIsForwardedByAddress
+     20 --- PASS: TestIPv6UDPRejectedAndDNSAnswered
+     20 --- PASS: TestPingIsNeverAnswered
+     20 --- PASS: TestProxyFailureRefusesConnection
+     20 --- PASS: TestStopReleasesGoroutines
+ok  	proxyflow/spike/engine/engine	33.063s

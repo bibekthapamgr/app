@@ -1,0 +1,5 @@
+{"time":"2026-10-30T09:37:48.81451407+09:00","type":"engine_started"}
+{"time":"2026-10-30T09:37:49.066118671+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T09:37:49.07892722+09:00","type":"conn_open","conn_id":2,"proto":"tcp","dst_kind":"hostname","port":80,"setup_ms":12}
+{"time":"2026-10-30T09:37:49.080427408+09:00","type":"conn_close","conn_id":2,"proto":"tcp","bytes_up":77,"bytes_down":192,"duration_ms":13}
+{"time":"2026-10-30T09:37:49.085142184+09:00","type":"engine_stopped"}

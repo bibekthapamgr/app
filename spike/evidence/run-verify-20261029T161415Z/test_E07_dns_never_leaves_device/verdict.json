@@ -1,0 +1,65 @@
+{
+  "test": "test_E07_dns_never_leaves_device",
+  "title": "DNS: fake-IP answers, interception of any resolver, no direct DNS on the uplink.",
+  "requirement": "never fall back to direct DNS; M1 task 3 DNS behaviour.",
+  "checks": [
+    {
+      "check": "A query answered from the fake pool",
+      "passed": true,
+      "detail": "198.18.1.0"
+    },
+    {
+      "check": "TXT refused (only A/AAAA/HTTPS handled in V1)",
+      "passed": true,
+      "detail": "wer:\n;; ->>HEADER<<- opcode: QUERY, status: REFUSED, id: 2352\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 0\n\n;; QUESTION SECTION:\n;web.test.\t\t\tIN\tTXT\n\n;; Query time: 0 msec\n;; SERVER: 198.18.0.2#53(198.18.0.2) (UDP)\n;; WHEN: Fri Oct 30 01:16:28 JST 2026\n;; MSG SIZE  rcvd: 26\n\n"
+    },
+    {
+      "check": "query sent to 8.8.8.8 was intercepted and answered locally",
+      "passed": true,
+      "detail": "198.18.1.1"
+    },
+    {
+      "check": "query aimed at the underlying network's resolver was intercepted too",
+      "passed": true,
+      "detail": "198.18.1.2"
+    },
+    {
+      "check": "underlying-network resolver received NO app queries",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "DNS-over-TCP to 8.8.8.8 is treated as a normal TCP flow via the proxy (fails here: lab has no 8.8.8.8)",
+      "passed": true,
+      "detail": ";; Connection to 8.8.8.8#53(8.8.8.8) for example.com failed: connection refused.\n;; no servers could be reached\n"
+    },
+    {
+      "check": "uplink: nothing left the device except to the proxy endpoint(s) [('10.20.0.2', 1080)]",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "check": "uplink: no packet from the device reached a destination address directly",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: no DNS (port 53) left the device",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "zero UDP packets on the uplink",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "metrics": {
+    "dns_outcomes": {
+      "mapped": 3,
+      "refused": 1
+    }
+  },
+  "notes": [],
+  "verdict": "PASS"
+}

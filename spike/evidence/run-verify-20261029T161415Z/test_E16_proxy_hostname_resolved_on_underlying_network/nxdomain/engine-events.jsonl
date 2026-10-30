@@ -1,0 +1,4 @@
+{"time":"2026-10-30T01:18:09.736335252+09:00","type":"engine_started"}
+{"time":"2026-10-30T01:18:09.990388889+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T01:18:09.99158106+09:00","type":"conn_fail","proto":"tcp","dst_kind":"hostname","port":80,"code":"PROXY_DNS_FAILED","detail":"cannot resolve proxy host"}
+{"time":"2026-10-30T01:18:09.992775111+09:00","type":"engine_stopped"}

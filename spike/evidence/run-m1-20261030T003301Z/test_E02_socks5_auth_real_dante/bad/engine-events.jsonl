@@ -1,0 +1,4 @@
+{"time":"2026-10-30T09:35:29.742619817+09:00","type":"engine_started"}
+{"time":"2026-10-30T09:35:29.99570066+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T09:35:30.016211787+09:00","type":"conn_fail","proto":"tcp","dst_kind":"hostname","port":80,"code":"AUTH_FAILED","detail":"proxy rejected the username or password"}
+{"time":"2026-10-30T09:35:30.017816205+09:00","type":"engine_stopped"}

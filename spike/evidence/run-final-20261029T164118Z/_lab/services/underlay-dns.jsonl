@@ -1,0 +1,4 @@
+{"ts": 1793292350.214334, "client": "10.10.0.2", "name": "proxy.test", "qtype": 28, "answer": null, "rcode": 0}
+{"ts": 1793292350.21444, "client": "10.10.0.2", "name": "proxy.test", "qtype": 1, "answer": "10.20.0.2", "rcode": 0}
+{"ts": 1793292351.3050363, "client": "10.10.0.2", "name": "no-such-proxy.test", "qtype": 28, "answer": null, "rcode": 3}
+{"ts": 1793292351.3051174, "client": "10.10.0.2", "name": "no-such-proxy.test", "qtype": 1, "answer": null, "rcode": 3}
