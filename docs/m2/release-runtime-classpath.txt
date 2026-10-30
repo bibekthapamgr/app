@@ -1,7 +1,10 @@
 # Libraries on the release runtime classpath of :app (what ships in the APK)
 # Resolved by Gradle in CI (./gradlew :app:dependencies --configuration releaseRuntimeClasspath).
-# Licences: every entry is Apache-2.0 (androidx.*, org.jetbrains.kotlin*, kotlinx.*, okio,
-# guava listenablefuture, org.jetbrains:annotations, org.jspecify).
+# Licences: Apache-2.0 for every entry (androidx.*, org.jetbrains.kotlin*, kotlinx.*, okio,
+# guava listenablefuture, org.jetbrains:annotations, org.jspecify) except one:
+# androidx.datastore:datastore-preferences-external-protobuf is Google's protobuf-lite
+# repackaged and is BSD-3-Clause (license.name in its AndroidX build file). BSD-3-Clause
+# requires its copyright notice in the app's open-source notices, to add before release (M11).
 
 androidx.activity:activity-compose:1.13.0
 androidx.activity:activity-ktx:1.13.0
