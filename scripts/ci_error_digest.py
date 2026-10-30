@@ -18,6 +18,7 @@ the tests use fake data only.
 import glob
 import os
 import re
+import secrets
 import sys
 import xml.etree.ElementTree as ET
 
@@ -146,7 +147,12 @@ def main(logs: list[str]) -> None:
     items += lint_issues()
     if not items:
         items = ["No errors found in the Gradle logs or the test and Lint reports."]
+    # The digest quotes logs and test output, which come from the code under test:
+    # print them with workflow commands off, so none of that text is run as one.
+    token = secrets.token_hex(16)
+    print(f"::stop-commands::{token}")
     print("\n\n".join(items))
+    print(f"::{token}::")
     chunks = chunks_of(items)
     for n, chunk in enumerate(chunks):
         print(f"::{LEVELS[n // 10]} title=digest {n + 1}/{len(chunks)}::{escape(chunk)}")

@@ -73,6 +73,24 @@ class RepositoryTest {
     }
 
     @Test
+    fun aSavedPasswordIsNeverKeptForADifferentProxy() = runTest {
+        val repo = InMemoryProfileRepository(newId = { "p" })
+        val signIn = ProxyProfileInput(server = "a.example", port = "1080", requiresSignIn = true, username = "u", password = "secret")
+        listOf(
+            signIn.copy(server = "b.example"),
+            signIn.copy(port = "1081"),
+            signIn.copy(protocol = ProxyProtocol.HTTP),
+            signIn.copy(username = "other"),
+            signIn.copy(useTls = true),
+        ).forEach { changed ->
+            repo.save(null, signIn)
+            assertFalse("$changed", repo.save("p", changed.copy(password = "")).hasPassword)
+        }
+        repo.save(null, signIn)
+        assertTrue("same proxy, only the name changed", repo.save("p", signIn.copy(name = "Renamed", password = "")).hasPassword)
+    }
+
+    @Test
     fun connectionControllerIsHonestAboutM2() {
         val controller = UnavailableConnectionController()
         assertFalse(controller.canConnect)

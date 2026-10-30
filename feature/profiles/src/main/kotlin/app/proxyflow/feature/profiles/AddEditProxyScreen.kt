@@ -208,8 +208,19 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
             value = input.password,
             onValueChange = actions.onPasswordChange,
             label = stringResource(R.string.edit_password),
-            supportingText = if (state.hasSavedPassword) stringResource(R.string.edit_password_keep) else null,
-            errorText = errors[ProfileField.Password]?.let { errorText(it) },
+            supportingText = when {
+                state.keepsSavedPassword -> stringResource(R.string.edit_password_keep)
+                state.hasSavedPassword -> stringResource(R.string.edit_password_reenter)
+                else -> null
+            },
+            errorText = errors[ProfileField.Password]?.let { error ->
+                // Say why a password that was saved is needed again.
+                if (error == ProfileError.PasswordRequired && state.hasSavedPassword) {
+                    stringResource(R.string.edit_password_reenter)
+                } else {
+                    errorText(error)
+                }
+            },
         )
     }
     PfSwitchRow(
@@ -247,6 +258,7 @@ private fun errorText(error: ProfileError): String = stringResource(
         ProfileError.UsernameHasColon -> R.string.error_username_colon
         ProfileError.UsernameTooLong -> R.string.error_username_too_long
         ProfileError.PasswordWithoutUsername -> R.string.error_password_without_username
+        ProfileError.PasswordRequired -> R.string.error_password_required
         ProfileError.PasswordTooLong -> R.string.error_password_too_long
         ProfileError.TlsServerNameInvalid -> R.string.error_tls_server_name
     },

@@ -17,6 +17,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.data.InMemoryProfileRepository
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.model.ProfileError
+import app.proxyflow.core.model.ProfileField
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.testing.DumpOnFailureRule
 import org.junit.Assert.assertEquals
@@ -33,6 +35,9 @@ class AddEditProxyScreenTest {
 
     @get:Rule(order = 1)
     val dumpOnFailure = DumpOnFailureRule { compose.onAllNodes(isRoot()).printToString(maxDepth = Int.MAX_VALUE) }
+
+    private val editing =
+        AddEditUiState(isEdit = true, input = ProxyProfileInput(requiresSignIn = true, username = "user"), hasSavedPassword = true)
 
     /** Shows the screen with a plain state holder, so each test can change the state. */
     private fun showForm(initial: AddEditUiState = AddEditUiState()) {
@@ -67,11 +72,34 @@ class AddEditProxyScreenTest {
 
     @Test
     fun savedPasswordIsNeverShownButItsPresenceIs() {
-        showForm(
-            AddEditUiState(isEdit = true, input = ProxyProfileInput(requiresSignIn = true, username = "user"), hasSavedPassword = true),
-        )
+        showForm(editing.copy(keepsSavedPassword = true))
         compose.onNodeWithText("Edit proxy").assertIsDisplayed()
         compose.onNodeWithText("Leave empty to keep the saved password").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun aSavedPasswordThatCannotFollowTheChangesIsAskedForAgain() {
+        showForm(editing.copy(keepsSavedPassword = false))
+        compose.onNodeWithText(REENTER).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Leave empty to keep the saved password").assertDoesNotExist()
+    }
+
+    @Test
+    fun afterSaveTheErrorStillSaysWhyThePasswordIsNeeded() {
+        showForm(editing.copy(errors = mapOf(ProfileField.Password to ProfileError.PasswordRequired)))
+        compose.onNodeWithText(REENTER).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Enter the password").assertDoesNotExist()
+    }
+
+    @Test
+    fun aNewSignInWithoutPasswordSaysToEnterOne() {
+        showForm(
+            AddEditUiState(
+                input = ProxyProfileInput(requiresSignIn = true, username = "user"),
+                errors = mapOf(ProfileField.Password to ProfileError.PasswordRequired),
+            ),
+        )
+        compose.onNodeWithText("Enter the password").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -88,5 +116,9 @@ class AddEditProxyScreenTest {
         shown = false
         compose.waitForIdle()
         assertEquals(0, compose.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
+    private companion object {
+        const val REENTER = "Enter the password again: the server, port, protocol, username or TLS setting changed"
     }
 }

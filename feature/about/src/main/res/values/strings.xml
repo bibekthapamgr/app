@@ -7,7 +7,7 @@
     <string name="about_build_scope">This build sets up the app only. Connecting arrives with the VPN service in a later milestone.</string>
     <string name="about_section_privacy">Privacy</string>
     <string name="about_privacy_no_account">No account, ads or analytics. ProxyFlow has no servers of its own.</string>
-    <string name="about_privacy_on_phone">Profiles and passwords stay on this phone.</string>
+    <string name="about_privacy_on_phone">Profiles and passwords are kept on this phone. A password is only ever sent to the proxy it was saved for.</string>
     <string name="about_privacy_provider">Your proxy provider can see which sites you visit and any unencrypted data.</string>
     <string name="about_section_carry">What it will carry</string>
     <string name="about_carry_tcp">Websites and most apps (TCP) and website names (DNS) go through your proxy.</string>

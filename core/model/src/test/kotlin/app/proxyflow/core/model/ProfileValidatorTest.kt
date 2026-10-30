@@ -133,6 +133,7 @@ class ProfileValidatorTest {
         )
         val profile = input.toProfile(id = "p1", hasPassword = true)
         assertEquals("2001:db8::1", profile.host)
+        assertEquals("an empty name is stored empty, not as the server", "", profile.name)
         assertEquals("2001:db8::1", profile.displayName)
         assertEquals("[2001:db8::1]:3128", profile.endpoint)
         assertEquals(3128, profile.port)
@@ -151,5 +152,38 @@ class ProfileValidatorTest {
         assertEquals("", input.password)
         assertTrue(input.requiresSignIn)
         assertEquals(profile, input.toProfile(id = "p1", hasPassword = true))
+    }
+
+    @Test
+    fun signInNeedsAPasswordUnlessTheSavedOneIsKept() {
+        val signIn = valid.copy(requiresSignIn = true, username = "user")
+        assertEquals(ProfileError.PasswordRequired, ProfileValidator.validate(signIn)[ProfileField.Password])
+        assertTrue(ProfileValidator.validate(signIn, savedPasswordKept = true).isEmpty())
+        assertTrue(ProfileValidator.validate(signIn.copy(password = "secret")).isEmpty())
+    }
+
+    @Test
+    fun aSavedPasswordOnlyFollowsTheSameProxyAccount() {
+        val saved = valid.copy(requiresSignIn = true, username = "user", useTls = true, tlsServerName = "tls.example.com")
+        val sameAccount = saved.copy(server = " PROXY.example.com ", port = " 1080 ", tlsServerName = "TLS.example.com")
+        assertTrue(sameAccount.sameCredentialTargetAs(saved))
+        listOf(
+            saved.copy(server = "other.example.com"),
+            saved.copy(port = "1081"),
+            saved.copy(protocol = ProxyProtocol.HTTP),
+            saved.copy(username = "someone-else"),
+            saved.copy(useTls = false),
+            saved.copy(tlsServerName = "other.example.com"),
+            saved.copy(requiresSignIn = false),
+        ).forEach { changed -> assertFalse("$changed", changed.sameCredentialTargetAs(saved)) }
+    }
+
+    @Test
+    fun credentialsNeverAppearInToString() {
+        val input = valid.copy(requiresSignIn = true, username = "alice", password = "s3cret-pw")
+        val text = input.toString() + " " + input.toProfile(id = "p1", hasPassword = true).toString()
+        assertFalse(text, "alice" in text)
+        assertFalse(text, "s3cret-pw" in text)
+        assertTrue(text, "<redacted>" in text)
     }
 }

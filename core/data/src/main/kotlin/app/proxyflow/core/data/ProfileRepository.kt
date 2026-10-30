@@ -19,9 +19,12 @@ interface ProfileRepository {
 
     /**
      * Saves a validated form under [id], or under a new id when [id] is null.
-     * A non-empty [ProxyProfileInput.password] replaces the stored password; an
-     * empty one keeps it (the form never shows a saved password). Turning
-     * sign-in off erases it.
+     * A non-empty [ProxyProfileInput.password] replaces the stored password. An
+     * empty one keeps it (the form never shows a saved password), but only while
+     * the protocol, server, port, username and TLS settings are unchanged
+     * ([ProxyProfileInput.sameCredentialTargetAs]); otherwise the stored password
+     * is erased, so it is never sent to a proxy it was not saved for. Turning
+     * sign-in off erases it too.
      */
     suspend fun save(id: String?, input: ProxyProfileInput): ProxyProfile
 
@@ -48,9 +51,11 @@ class InMemoryProfileRepository(private val newId: () -> String = { UUID.randomU
 
     override suspend fun save(id: String?, input: ProxyProfileInput): ProxyProfile = mutex.withLock {
         val profileId = id ?: newId()
+        val existing = profileList.value.firstOrNull { it.id == profileId }
         when {
             !input.requiresSignIn -> passwords.remove(profileId)?.fill(ZERO)
             input.password.isNotEmpty() -> passwords.put(profileId, input.password.toCharArray())?.fill(ZERO)
+            existing == null || !input.sameCredentialTargetAs(ProxyProfileInput.from(existing)) -> passwords.remove(profileId)?.fill(ZERO)
         }
         val saved = input.toProfile(profileId, hasPassword = profileId in passwords)
         val current = profileList.value

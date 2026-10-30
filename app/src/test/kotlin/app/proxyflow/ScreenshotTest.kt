@@ -13,8 +13,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.LogEntry
-import app.proxyflow.core.model.ProfileError
-import app.proxyflow.core.model.ProfileField
+import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
@@ -46,9 +45,16 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Screenshots of every M2 screen in light and dark theme, named after the M1
- * design boards. They are evidence, and with `verifyRoborazziDebug` a visual
- * regression check. Record with `./gradlew :app:recordRoborazziDebug`; a plain
- * `testDebugUnitTest` renders every screen but writes no files.
+ * design boards, kept in app/screenshots. CI runs
+ * `./gradlew :app:verifyAndRecordRoborazziDebug`: any screen that no longer
+ * matches its committed copy fails the build, and the new image is published on
+ * the ci-screenshots/<branch> branch to be reviewed and committed. Locally,
+ * `recordRoborazziDebug` rewrites them; a plain `testDebugUnitTest` renders every
+ * screen but neither compares nor writes files.
+ *
+ * The proxy form states are the ones its ViewModel produces for that input (D3
+ * takes its errors from the validator itself), so those images show what a user
+ * sees. F2 shows sample log entries: nothing writes to the log before M7.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -107,25 +113,14 @@ class ScreenshotTest {
     fun addProxyEmpty() = captureBothThemes("D1_add_proxy") { AddEditProxyScreen(AddEditUiState(), AddEditActions()) }
 
     @Test
-    fun addProxyErrors() = captureBothThemes("D3_validation_errors") {
-        AddEditProxyScreen(
-            AddEditUiState(
-                input = ProxyProfileInput(
-                    protocol = ProxyProtocol.HTTP,
-                    server = "proxy example",
-                    port = "",
-                    requiresSignIn = true,
-                    username = "a:b",
-                ),
-                errors = mapOf(
-                    ProfileField.Server to ProfileError.ServerInvalid,
-                    ProfileField.Port to ProfileError.PortOutOfRange,
-                    ProfileField.Username to ProfileError.UsernameHasColon,
-                ),
-                dirty = true,
-            ),
-            AddEditActions(),
-        )
+    fun addProxyErrors() {
+        val input =
+            ProxyProfileInput(protocol = ProxyProtocol.HTTP, server = "proxy example", port = "", requiresSignIn = true, username = "a:b")
+        // What the form shows after Save: the validator's own errors for this input.
+        val errors = ProfileValidator.validate(input)
+        captureBothThemes("D3_validation_errors") {
+            AddEditProxyScreen(AddEditUiState(input = input, errors = errors, dirty = true), AddEditActions())
+        }
     }
 
     @Test
@@ -156,6 +151,8 @@ class ScreenshotTest {
                     AddEditUiState(
                         isEdit = true,
                         input = ProxyProfileInput.from(office).copy(port = "3129"),
+                        // The port changed, so the saved password is not kept (ProxyProfileInput.sameCredentialTargetAs).
+                        hasSavedPassword = true,
                         dirty = true,
                         originalName = "Office HTTP",
                     ),
@@ -185,7 +182,7 @@ class ScreenshotTest {
     }
 
     @Test
-    fun logsEmpty() = captureBothThemes("F1_logs_empty") { LogsScreen(LogsUiState(loading = false), onOpenSettings = {}) }
+    fun logsEmpty() = captureBothThemes("F1_logs_empty") { LogsScreen(LogsUiState(loading = false)) }
 
     @Test
     fun logsWithSampleEntries() = captureBothThemes("F2_logs_sample") {
@@ -199,7 +196,6 @@ class ScreenshotTest {
                     LogEntry(1, SAMPLE_TIME, LogEntry.Level.Info, null, "Connected to Tokyo residential"),
                 ),
             ),
-            onOpenSettings = {},
         )
     }
 

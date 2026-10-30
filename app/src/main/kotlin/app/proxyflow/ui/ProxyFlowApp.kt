@@ -82,10 +82,7 @@ fun ProxyFlowApp(
                 viewModelFactory = viewModelFactory,
                 onDone = { navController.popBackStack<AddEditProxyDestination>(inclusive = true) },
             )
-            logsScreen(
-                viewModelFactory = viewModelFactory,
-                onOpenSettings = { navController.navigateToTopLevel(TopLevelDestination.Settings) },
-            )
+            logsScreen(viewModelFactory = viewModelFactory)
             settingsScreen(viewModelFactory = viewModelFactory, onOpenAbout = { navController.navigateToAbout() })
             aboutScreen(version = version, onBack = { navController.popBackStack() })
         }

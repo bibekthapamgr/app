@@ -12,6 +12,7 @@ enum class ProfileError {
     UsernameHasColon,
     UsernameTooLong,
     PasswordWithoutUsername,
+    PasswordRequired,
     PasswordTooLong,
     TlsServerNameInvalid,
 }
@@ -28,7 +29,11 @@ object ProfileValidator {
     /** RFC 1929 caps SOCKS5 username and password at 255 bytes each. */
     const val MAX_SOCKS5_CREDENTIAL_BYTES = 255
 
-    fun validate(input: ProxyProfileInput): Map<ProfileField, ProfileError> {
+    /**
+     * @param savedPasswordKept a password saved earlier for exactly this protocol, server, port, username
+     *   and TLS setting will be kept if the password field is left empty (see [ProxyProfileInput.sameCredentialTargetAs]).
+     */
+    fun validate(input: ProxyProfileInput, savedPasswordKept: Boolean = false): Map<ProfileField, ProfileError> {
         val errors = linkedMapOf<ProfileField, ProfileError>()
 
         if (input.name.trim().length > MAX_NAME_LENGTH) errors[ProfileField.Name] = ProfileError.NameTooLong
@@ -52,6 +57,10 @@ object ProfileValidator {
             }
             if (socks && input.password.utf8Length() > MAX_SOCKS5_CREDENTIAL_BYTES) {
                 errors[ProfileField.Password] = ProfileError.PasswordTooLong
+            }
+            // A sign-in without a password would fail at the proxy; RFC 1929 also needs at least one byte.
+            if (input.username.isNotEmpty() && input.password.isEmpty() && !savedPasswordKept) {
+                errors.getOrPut(ProfileField.Password) { ProfileError.PasswordRequired }
             }
         }
 

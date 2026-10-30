@@ -26,4 +26,8 @@ data class ProxyProfile(
     val endpoint: String get() = if (':' in host) "[$host]:$port" else "$host:$port"
 
     val requiresSignIn: Boolean get() = !username.isNullOrEmpty()
+
+    /** The username is part of the credential (ADR-0006), so it never appears in logs or test output. */
+    override fun toString(): String = "ProxyProfile(id=$id, name=$name, protocol=$protocol, host=$host, port=$port, " +
+        "username=${redacted(username)}, hasPassword=$hasPassword, useTls=$useTls, tlsServerName=$tlsServerName)"
 }

@@ -4,15 +4,17 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.testing.DumpOnFailureRule
+import app.proxyflow.feature.profiles.AddEditProxyDestination
+import app.proxyflow.feature.profiles.navigateToAddEditProxy
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -51,8 +53,7 @@ class NavigationTest {
         compose.tab("Logs").performClick()
         compose.onNodeWithText("No events yet").assertIsDisplayed()
 
-        // Logs → Settings through the empty state's "Log settings" button.
-        compose.onNodeWithText("Log settings").performClick()
+        compose.tab("Settings").performClick()
         compose.tab("Settings").assertIsSelected()
         compose.onNodeWithText("Theme").assertIsDisplayed()
 
@@ -105,6 +106,23 @@ class NavigationTest {
         compose.onNodeWithText("Add proxy").performClick()
         compose.pressBack()
         compose.onNodeWithText("Discard changes?").assertDoesNotExist()
+        compose.onNodeWithText("Add a proxy to get started").assertIsDisplayed()
+    }
+
+    @Test
+    fun aDoubleTapOpensTheFormOnlyOnce() {
+        // Both taps of a quick double tap arrive before the form is drawn.
+        compose.runOnUiThread {
+            val navController = checkNotNull(compose.activity.navController)
+            navController.navigateToAddEditProxy()
+            navController.navigateToAddEditProxy()
+        }
+        compose.waitForIdle()
+        val forms = compose.activity.navController?.currentBackStack?.value.orEmpty()
+            .count { it.destination.hasRoute<AddEditProxyDestination>() }
+        assertEquals(1, forms)
+
+        compose.pressBack()
         compose.onNodeWithText("Add a proxy to get started").assertIsDisplayed()
     }
 

@@ -21,6 +21,11 @@ data class AddEditUiState(
     /** Shown only after the first Save attempt, then kept live while the user fixes them. */
     val errors: Map<ProfileField, ProfileError> = emptyMap(),
     val hasSavedPassword: Boolean = false,
+    /**
+     * Leaving the password empty keeps the saved one: true only while protocol, server, port,
+     * username and TLS settings are unchanged, so a password never follows a profile to another proxy.
+     */
+    val keepsSavedPassword: Boolean = false,
     /** Display name of the profile being edited, for the discard dialog (board D8). */
     val originalName: String? = null,
     val dirty: Boolean = false,
@@ -31,10 +36,12 @@ data class AddEditUiState(
 )
 
 /**
- * Add/Edit form state. Every field except the password is kept in
- * [SavedStateHandle], so it survives rotation, theme changes and process death;
- * the password stays in this ViewModel's memory only, so it is never written
- * into saved instance state (which Android may persist).
+ * Add/Edit form state. Every field except the username and password is kept in
+ * [SavedStateHandle], so it survives rotation, theme changes and process death.
+ * The credentials (ADR-0006) stay in this ViewModel's memory only, so they are
+ * never written into saved instance state, which Android may persist; after
+ * process death the user enters them again (an edited profile's username comes
+ * back from the profile itself).
  */
 class AddEditProxyViewModel(private val savedState: SavedStateHandle, private val repository: ProfileRepository) : ViewModel() {
     /** Navigation argument (AddEditProxyDestination.profileId); null when adding. */
@@ -49,11 +56,19 @@ class AddEditProxyViewModel(private val savedState: SavedStateHandle, private va
     init {
         if (profileId != null) {
             viewModelScope.launch {
-                val profile = repository.get(profileId) ?: return@launch
+                val profile = repository.get(profileId)
+                if (profile == null) {
+                    // Deleted, or (in M2) lost with the app process: offer what was restored as a new profile,
+                    // and let Back ask before discarding it.
+                    state.update { it.copy(isEdit = false) }
+                    refresh()
+                    return@launch
+                }
                 initial = ProxyProfileInput.from(profile)
                 state.update { s ->
-                    // After rotation or process death the restored fields win over the stored profile.
-                    val input = if (savedState.contains(KEY_SERVER)) s.input else initial
+                    // After rotation or process death the restored fields win over the stored profile,
+                    // except the username, which is not kept in saved state.
+                    val input = if (savedState.contains(KEY_SERVER)) s.input.copy(username = initial.username) else initial
                     s.copy(input = input, hasSavedPassword = profile.hasPassword, originalName = profile.displayName)
                 }
                 refresh()
@@ -92,8 +107,10 @@ class AddEditProxyViewModel(private val savedState: SavedStateHandle, private va
             return
         }
         state.update { it.copy(saving = true) }
+        // A profile that no longer exists is saved as a new one, under a new id.
+        val id = profileId.takeIf { current.isEdit }
         viewModelScope.launch {
-            repository.save(profileId, current.input)
+            repository.save(id, current.input)
             state.update { it.copy(saving = false, saved = true, dirty = false) }
         }
     }
@@ -105,8 +122,10 @@ class AddEditProxyViewModel(private val savedState: SavedStateHandle, private va
     }
 
     private fun refresh() = state.update { s ->
+        val keeps = s.hasSavedPassword && s.input.sameCredentialTargetAs(initial)
         s.copy(
-            errors = if (showErrors) ProfileValidator.validate(s.input) else emptyMap(),
+            keepsSavedPassword = keeps,
+            errors = if (showErrors) ProfileValidator.validate(s.input, savedPasswordKept = keeps) else emptyMap(),
             dirty = s.input != initial,
         )
     }
@@ -117,7 +136,6 @@ class AddEditProxyViewModel(private val savedState: SavedStateHandle, private va
         savedState[KEY_SERVER] = input.server
         savedState[KEY_PORT] = input.port
         savedState[KEY_SIGN_IN] = input.requiresSignIn
-        savedState[KEY_USERNAME] = input.username
         savedState[KEY_TLS] = input.useTls
         savedState[KEY_TLS_NAME] = input.tlsServerName
     }
@@ -130,7 +148,7 @@ class AddEditProxyViewModel(private val savedState: SavedStateHandle, private va
             server = savedState[KEY_SERVER] ?: "",
             port = savedState[KEY_PORT] ?: "",
             requiresSignIn = savedState[KEY_SIGN_IN] ?: false,
-            username = savedState[KEY_USERNAME] ?: "",
+            username = "",
             password = "",
             useTls = savedState[KEY_TLS] ?: false,
             tlsServerName = savedState[KEY_TLS_NAME] ?: "",
@@ -145,7 +163,6 @@ class AddEditProxyViewModel(private val savedState: SavedStateHandle, private va
         private const val KEY_SERVER = "form.server"
         private const val KEY_PORT = "form.port"
         private const val KEY_SIGN_IN = "form.signIn"
-        private const val KEY_USERNAME = "form.username"
         private const val KEY_TLS = "form.tls"
         private const val KEY_TLS_NAME = "form.tlsName"
         private const val KEY_SHOW_ERRORS = "form.showErrors"

@@ -13,6 +13,7 @@ Usage: ci_build_facts.py <output of ./gradlew :app:dependencies --configuration 
 import glob
 import os
 import re
+import secrets
 import sys
 import xml.etree.ElementTree as ET
 
@@ -68,7 +69,11 @@ def escape(text: str) -> str:
 
 def main(dependency_report: str) -> None:
     lines = tests() + apks() + manifests() + dependencies(dependency_report)
+    # Names in these lines come from the build under test: print them with workflow commands off.
+    token = secrets.token_hex(16)
+    print(f"::stop-commands::{token}")
     print("\n".join(lines))
+    print(f"::{token}::")
     chunks: list[str] = []
     current = ""
     for line in lines:

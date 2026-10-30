@@ -41,13 +41,13 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
 @Composable
-internal fun LogsRoute(viewModel: LogsViewModel, onOpenSettings: () -> Unit) {
+internal fun LogsRoute(viewModel: LogsViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    LogsScreen(state = state, onOpenSettings = onOpenSettings)
+    LogsScreen(state = state)
 }
 
 @Composable
-fun LogsScreen(state: LogsUiState, onOpenSettings: () -> Unit, modifier: Modifier = Modifier) {
+fun LogsScreen(state: LogsUiState, modifier: Modifier = Modifier) {
     Scaffold(
         modifier = modifier,
         topBar = { PfTopAppBar(title = stringResource(R.string.logs_title)) },
@@ -63,8 +63,6 @@ fun LogsScreen(state: LogsUiState, onOpenSettings: () -> Unit, modifier: Modifie
                     icon = PfIcons.Logs,
                     title = stringResource(R.string.logs_empty_title),
                     body = stringResource(R.string.logs_empty_body),
-                    actionLabel = stringResource(R.string.logs_settings),
-                    onAction = onOpenSettings,
                 )
             }
             else -> {

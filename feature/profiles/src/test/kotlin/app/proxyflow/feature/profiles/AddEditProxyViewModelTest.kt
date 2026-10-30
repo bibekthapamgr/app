@@ -24,6 +24,15 @@ class AddEditProxyViewModelTest {
 
     private fun viewModel(handle: SavedStateHandle = SavedStateHandle()) = AddEditProxyViewModel(handle, repository)
 
+    /** Saved state for the form opened on profile [id]. */
+    private fun editing(id: String) = SavedStateHandle(mapOf(AddEditProxyViewModel.ARG_PROFILE_ID to id))
+
+    /** What Android hands a new process: only the values that were in saved state. */
+    private fun afterProcessDeath(before: SavedStateHandle) = SavedStateHandle(before.keys().associateWith { before.get<Any?>(it) })
+
+    private val signIn =
+        ProxyProfileInput(server = "proxy.example.com", port = "1080", requiresSignIn = true, username = "user", password = "secret")
+
     @Test
     fun argumentKeyMatchesTheNavigationDestination() {
         assertEquals(AddEditProxyDestination::profileId.name, AddEditProxyViewModel.ARG_PROFILE_ID)
@@ -102,11 +111,8 @@ class AddEditProxyViewModelTest {
 
     @Test
     fun editingLoadsTheProfileButNeverItsPassword() = runTest {
-        val saved = repository.save(
-            null,
-            ProxyProfileInput(server = "proxy.example.com", port = "1080", requiresSignIn = true, username = "user", password = "secret"),
-        )
-        val vm = viewModel(SavedStateHandle(mapOf(AddEditProxyViewModel.ARG_PROFILE_ID to saved.id)))
+        val saved = repository.save(null, signIn)
+        val vm = viewModel(editing(saved.id))
 
         val state = vm.uiState.value
         assertTrue(state.isEdit)
@@ -114,42 +120,78 @@ class AddEditProxyViewModelTest {
         assertEquals("user", state.input.username)
         assertEquals("", state.input.password)
         assertTrue(state.hasSavedPassword)
+        assertTrue("left empty, the saved password is kept", state.keepsSavedPassword)
         assertEquals("proxy.example.com", state.originalName)
         assertFalse(state.dirty)
     }
 
     @Test
     fun savingAnEditKeepsTheIdAndTheStoredPasswordWhenLeftEmpty() = runTest {
-        val saved = repository.save(
-            null,
-            ProxyProfileInput(server = "proxy.example.com", port = "1080", requiresSignIn = true, username = "user", password = "secret"),
-        )
-        val vm = viewModel(SavedStateHandle(mapOf(AddEditProxyViewModel.ARG_PROFILE_ID to saved.id)))
-        vm.onPortChange("1081")
+        val saved = repository.save(null, signIn)
+        val vm = viewModel(editing(saved.id))
+        vm.onNameChange("Office")
         vm.save()
 
-        val profiles = repository.profiles.value
-        assertEquals(1, profiles.size)
-        assertEquals(saved.id, profiles.single().id)
-        assertEquals(1081, profiles.single().port)
-        assertTrue(profiles.single().hasPassword)
+        val profile = repository.profiles.value.single()
+        assertEquals(saved.id, profile.id)
+        assertEquals("Office", profile.name)
+        assertTrue(profile.hasPassword)
     }
 
     @Test
-    fun passwordIsNeverWrittenToSavedState() {
+    fun sendingTheSavedPasswordSomewhereElseNeedsItEnteredAgain() = runTest {
+        val saved = repository.save(null, signIn)
+        val vm = viewModel(editing(saved.id))
+
+        vm.onPortChange("1081")
+        assertFalse(vm.uiState.value.keepsSavedPassword)
+        vm.save()
+        assertEquals(ProfileError.PasswordRequired, vm.uiState.value.errors[ProfileField.Password])
+        assertFalse(vm.uiState.value.saved)
+        assertEquals("the saved profile is unchanged", 1080, repository.get(saved.id)?.port)
+
+        vm.onPortChange("1080")
+        assertTrue("back to the proxy it was saved for", vm.uiState.value.keepsSavedPassword)
+        assertTrue(vm.uiState.value.errors.isEmpty())
+
+        vm.onPortChange("1081")
+        vm.onPasswordChange("new-secret")
+        vm.save()
+        assertTrue(vm.uiState.value.saved)
+        assertEquals(1081, repository.get(saved.id)?.port)
+        assertEquals(true, repository.get(saved.id)?.hasPassword)
+    }
+
+    @Test
+    fun aNewProfileThatNeedsSignInNeedsAPassword() {
+        val vm = viewModel()
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.onRequiresSignInChange(true)
+        vm.onUsernameChange("user")
+        vm.save()
+
+        assertEquals(mapOf(ProfileField.Password to ProfileError.PasswordRequired), vm.uiState.value.errors)
+        assertFalse(vm.uiState.value.saved)
+        assertTrue(repository.profiles.value.isEmpty())
+    }
+
+    @Test
+    fun credentialsAreNeverWrittenToSavedState() {
         val handle = SavedStateHandle()
         val vm = viewModel(handle)
         vm.onRequiresSignInChange(true)
-        vm.onUsernameChange("user")
+        vm.onUsernameChange("user-must-not-persist")
         vm.onPasswordChange("pw-must-not-persist")
+        vm.save()
 
-        val saved = handle.keys().map { handle.get<Any?>(it) }
-        assertFalse(saved.any { it.toString().contains("pw-must-not-persist") })
-        assertTrue(handle.keys().none { it.contains("password", ignoreCase = true) })
+        val values = handle.keys().map { handle.get<Any?>(it).toString() }
+        assertFalse(values.toString(), values.any { "must-not-persist" in it })
+        assertTrue(handle.keys().none { it.contains("password", ignoreCase = true) || it.contains("username", ignoreCase = true) })
     }
 
     @Test
-    fun formIsRestoredAfterProcessDeathExceptThePassword() {
+    fun formIsRestoredAfterProcessDeathExceptTheCredentials() {
         val before = SavedStateHandle()
         viewModel(before).apply {
             onProtocolChange(ProxyProtocol.HTTP)
@@ -161,15 +203,13 @@ class AddEditProxyViewModelTest {
             onUseTlsChange(true)
             onTlsServerNameChange("tls.example.com")
         }
-        // Android restores only what was in saved state into a new process.
-        val after = SavedStateHandle(before.keys().associateWith { before.get<Any?>(it) })
-        val restored = viewModel(after).uiState.value.input
+        val restored = viewModel(afterProcessDeath(before)).uiState.value.input
 
         assertEquals(ProxyProtocol.HTTP, restored.protocol)
         assertEquals("proxy.example.com", restored.server)
         assertEquals("3128", restored.port)
         assertTrue(restored.requiresSignIn)
-        assertEquals("user", restored.username)
+        assertEquals("", restored.username)
         assertEquals("", restored.password)
         assertTrue(restored.useTls)
         assertEquals("tls.example.com", restored.tlsServerName)
@@ -182,15 +222,60 @@ class AddEditProxyViewModelTest {
             onServerChange("bad host")
             save()
         }
-        val after = SavedStateHandle(before.keys().associateWith { before.get<Any?>(it) })
-        assertEquals(ProfileError.ServerInvalid, viewModel(after).uiState.value.errors[ProfileField.Server])
+        assertEquals(ProfileError.ServerInvalid, viewModel(afterProcessDeath(before)).uiState.value.errors[ProfileField.Server])
     }
 
     @Test
-    fun missingProfileLeavesAnEmptyEditForm() {
-        val vm = viewModel(SavedStateHandle(mapOf(AddEditProxyViewModel.ARG_PROFILE_ID to "gone")))
-        assertTrue(vm.uiState.value.isEdit)
+    fun anEditRestoredAfterProcessDeathTakesTheUsernameFromTheProfile() = runTest {
+        // Profiles that outlive the process (stored on the phone from M3).
+        val saved = repository.save(null, signIn)
+        val before = editing(saved.id)
+        viewModel(before).apply {
+            onNameChange("Office")
+            onUsernameChange("typed-before-process-death")
+        }
+        val restored = viewModel(afterProcessDeath(before)).uiState.value
+
+        assertTrue(restored.isEdit)
+        assertEquals("Office", restored.input.name)
+        assertEquals("user", restored.input.username)
+        assertEquals("", restored.input.password)
+        assertTrue(restored.keepsSavedPassword)
+        assertTrue(restored.dirty)
+    }
+
+    @Test
+    fun aProfileLostWithTheProcessIsOfferedAsANewOne() = runTest {
+        val saved = repository.save(null, signIn)
+        val before = editing(saved.id)
+        viewModel(before).onServerChange("other.example.com")
+
+        // M2 keeps profiles in memory, so the new process starts without them.
+        val newProcess = InMemoryProfileRepository(newId = { "new" })
+        val vm = AddEditProxyViewModel(afterProcessDeath(before), newProcess)
+        val state = vm.uiState.value
+        assertFalse(state.isEdit)
+        assertNull(state.originalName)
+        assertFalse(state.hasSavedPassword)
+        assertEquals("other.example.com", state.input.server)
+        assertTrue("Back asks before the restored changes are thrown away", state.dirty)
+
+        vm.onRequiresSignInChange(false)
+        vm.save()
+        assertEquals("saved as a new profile", listOf("new"), newProcess.profiles.value.map { it.id })
+    }
+
+    @Test
+    fun missingProfileLeavesAnEmptyAddForm() {
+        val vm = viewModel(editing("gone"))
+        assertFalse(vm.uiState.value.isEdit)
         assertNull(vm.uiState.value.originalName)
         assertEquals("", vm.uiState.value.input.server)
+        assertFalse(vm.uiState.value.dirty)
+
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.save()
+        assertEquals("a new id, not the missing one", listOf("p1"), repository.profiles.value.map { it.id })
     }
 }

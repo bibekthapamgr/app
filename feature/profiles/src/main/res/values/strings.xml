@@ -14,9 +14,9 @@
     <string name="profiles_edit">Edit</string>
     <string name="profiles_delete">Delete</string>
     <string name="profiles_delete_title">Delete \"%1$s\"?</string>
-    <string name="profiles_delete_body">The profile and its saved username and password are erased from this phone. This can\'t be undone.</string>
+    <string name="profiles_delete_body">The profile and its saved username and password are deleted. This can\'t be undone.</string>
     <string name="profiles_cancel">Cancel</string>
-    <string name="profiles_memory_only">This build keeps profiles only until the app is closed. Storing them safely on the phone arrives in the next milestone.</string>
+    <string name="profiles_memory_only">This build keeps profiles only while the app is running: they\'re gone once Android closes it. Storing them safely on the phone arrives in the next milestone.</string>
 
     <!-- Add/Edit proxy (boards D1, D3, D4, D8) -->
     <string name="edit_title_add">Add proxy</string>
@@ -32,6 +32,7 @@
     <string name="edit_username">Username</string>
     <string name="edit_password">Password</string>
     <string name="edit_password_keep">Leave empty to keep the saved password</string>
+    <string name="edit_password_reenter">Enter the password again: the server, port, protocol, username or TLS setting changed</string>
     <string name="edit_tls">Encrypt connection (TLS)</string>
     <string name="edit_tls_hint">Recommended. Your proxy must support TLS on this port.</string>
     <string name="edit_tls_server_name">TLS server name (optional)</string>
@@ -56,6 +57,7 @@
     <string name="error_username_colon">Usernames can\'t contain \":\" for HTTP proxies</string>
     <string name="error_username_too_long">Usernames can be at most 255 bytes for SOCKS5</string>
     <string name="error_password_without_username">Add a username for this password</string>
+    <string name="error_password_required">Enter the password</string>
     <string name="error_password_too_long">Passwords can be at most 255 bytes for SOCKS5</string>
     <string name="error_tls_server_name">Enter a valid server name or leave empty</string>
 </resources>

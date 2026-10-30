@@ -6,6 +6,7 @@ name: m1-feasibility-spike
 # first rebuilds it from proxy.golang.org — every hash checked against the
 # public checksum database sum.golang.org — and fails if it differs.
 
+# Actions are pinned to commit SHAs (tag in the comment), as in android.yml.
 # Pull requests don't trigger it: the spike takes up to 30 minutes and only
 # changes with M1 work. Run it from the Actions tab (workflow_dispatch) on a
 # branch that touches spike/.
@@ -23,8 +24,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.27.3"
           cache-dependency-path: spike/engine/go.sum
@@ -46,7 +47,7 @@ jobs:
         run: sudo -E env "PATH=$PATH" HEV_TAG=2.19.3 FUZZTIME=30s GO_TEST_REPEAT=5 spike/run_spike.sh
       - name: Upload evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: m1-spike-evidence
           path: spike/evidence/
