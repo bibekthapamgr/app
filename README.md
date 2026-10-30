@@ -5,7 +5,7 @@ ProxyFlow is a free, original Android app that routes other apps' TCP traffic th
 **Status**
 
 - **M1 — requirements, feasibility, UI/UX:** delivered (`docs/m1/M1-acceptance-report.md`). The owner chose minSdk 29 (D3).
-- **M2 — Android foundation:** source written; build and test results are in `docs/m2/M2-acceptance-report.md`. This build sets up the app only: it cannot connect yet (the VPN service is M5) and keeps profiles only in memory (storage with Keystore encryption is M3). Both limits are stated in the app itself.
+- **M2 — Android foundation:** builds, lints and passes every test in CI; awaiting the owner's review (`docs/m2/M2-acceptance-report.md`). This build sets up the app only: it cannot connect yet (the VPN service is M5) and keeps profiles only in memory (storage with Keystore encryption is M3). Both limits are stated in the app itself.
 
 ## Repository
 
@@ -52,6 +52,13 @@ scripts/check-secrets.sh                # also usable as a pre-commit hook (see 
 ```
 
 The same checks run in CI (`.github/workflows/android.yml`). Tests run on the JVM with Robolectric, so no emulator is needed; on-device instrumentation tests start in M5, where routing must be proven on real devices.
+
+What CI adds for reviewers:
+
+- Every Gradle step runs even when an earlier one failed, so one run reports every problem. On failure, `scripts/ci_error_digest.py` collects compiler errors, ktlint findings, failed tests (with a description of the screen for UI tests) and Lint issues into annotations, readable on the run page and through the GitHub API even where logs can't be downloaded.
+- `scripts/ci_build_facts.py` reports test counts per module, APK sizes, the permissions of the merged manifests and the shipped libraries as notices.
+- On pull requests, a separate job publishes the recorded screenshots on the branch `ci-screenshots/<branch>`; it is the only job with a token that can push, and it never pushes to the pull request itself. Copy the images into `app/screenshots/` when a UI change is meant.
+- Each run's **android-reports** artifact holds the APKs, test and Lint reports and screenshots.
 
 ### Application ID
 
