@@ -10,11 +10,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data object HomeDestination
 
-fun NavGraphBuilder.homeScreen(
-    viewModelFactory: ViewModelProvider.Factory,
-    onAddProxy: () -> Unit,
-    onChangeProfile: () -> Unit,
-) {
+fun NavGraphBuilder.homeScreen(viewModelFactory: ViewModelProvider.Factory, onAddProxy: () -> Unit, onChangeProfile: () -> Unit) {
     composable<HomeDestination> {
         HomeRoute(
             viewModel = viewModel(factory = viewModelFactory),

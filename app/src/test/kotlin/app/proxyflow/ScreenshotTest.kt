@@ -35,6 +35,7 @@ import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import java.util.TimeZone
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -42,7 +43,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
-import java.util.TimeZone
 
 /**
  * Screenshots of every M2 screen in light and dark theme, named after the M1

@@ -7,12 +7,6 @@ package app.proxyflow.core.model
 enum class ConnectionStatus { Disconnected, Connecting, Connected, Reconnecting, Blocked, Offline }
 
 /** One entry in the local event log (filled by the engine from M7). */
-data class LogEntry(
-    val id: Long,
-    val timeMillis: Long,
-    val level: Level,
-    val code: String?,
-    val message: String,
-) {
+data class LogEntry(val id: Long, val timeMillis: Long, val level: Level, val code: String?, val message: String) {
     enum class Level { Info, Warning, Error }
 }

@@ -10,10 +10,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data object LogsDestination
 
-fun NavGraphBuilder.logsScreen(
-    viewModelFactory: ViewModelProvider.Factory,
-    onOpenSettings: () -> Unit,
-) {
+fun NavGraphBuilder.logsScreen(viewModelFactory: ViewModelProvider.Factory, onOpenSettings: () -> Unit) {
     composable<LogsDestination> {
         LogsRoute(viewModel = viewModel(factory = viewModelFactory), onOpenSettings = onOpenSettings)
     }

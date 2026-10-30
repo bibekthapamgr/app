@@ -34,10 +34,7 @@ data class AddEditUiState(
  * the password stays in this ViewModel's memory only, so it is never written
  * into saved instance state (which Android may persist).
  */
-class AddEditProxyViewModel(
-    private val savedState: SavedStateHandle,
-    private val repository: ProfileRepository,
-) : ViewModel() {
+class AddEditProxyViewModel(private val savedState: SavedStateHandle, private val repository: ProfileRepository) : ViewModel() {
     /** Navigation argument (AddEditProxyDestination.profileId); null when adding. */
     private val profileId: String? = savedState[ARG_PROFILE_ID]
 

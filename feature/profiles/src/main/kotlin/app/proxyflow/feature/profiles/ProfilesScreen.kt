@@ -42,11 +42,7 @@ import app.proxyflow.core.designsystem.theme.Spacing
 import app.proxyflow.core.model.ProxyProfile
 
 @Composable
-internal fun ProfilesRoute(
-    viewModel: ProfilesViewModel,
-    onAddProxy: () -> Unit,
-    onEditProxy: (String) -> Unit,
-) {
+internal fun ProfilesRoute(viewModel: ProfilesViewModel, onAddProxy: () -> Unit, onEditProxy: (String) -> Unit) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     ProfilesScreen(
         state = state,
@@ -128,13 +124,7 @@ fun ProfilesScreen(
 }
 
 @Composable
-private fun ProfileItem(
-    profile: ProxyProfile,
-    active: Boolean,
-    onClick: () -> Unit,
-    onUse: () -> Unit,
-    onDelete: () -> Unit,
-) {
+private fun ProfileItem(profile: ProxyProfile, active: Boolean, onClick: () -> Unit, onUse: () -> Unit, onDelete: () -> Unit) {
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     PfCard(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(verticalAlignment = Alignment.Top) {

@@ -2,13 +2,13 @@ package app.proxyflow.core.data
 
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
+import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.util.UUID
 
 /** Saved proxy profiles and which one is active. */
 interface ProfileRepository {
@@ -35,9 +35,7 @@ interface ProfileRepository {
  * application owns it, not an Activity. M3 replaces it with Room plus a
  * Keystore-encrypted credential store (ADR-0006) behind the same interface.
  */
-class InMemoryProfileRepository(
-    private val newId: () -> String = { UUID.randomUUID().toString() },
-) : ProfileRepository {
+class InMemoryProfileRepository(private val newId: () -> String = { UUID.randomUUID().toString() }) : ProfileRepository {
     private val mutex = Mutex()
     private val passwords = mutableMapOf<String, CharArray>()
     private val profileList = MutableStateFlow<List<ProxyProfile>>(emptyList())

@@ -32,11 +32,7 @@ import app.proxyflow.core.designsystem.theme.Spacing
  * help are added once those pages exist (M9/M11).
  */
 @Composable
-fun AboutScreen(
-    version: String,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+fun AboutScreen(version: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
     Scaffold(
         modifier = modifier,
         topBar = { PfTopAppBar(title = stringResource(R.string.about_title), onBack = onBack) },

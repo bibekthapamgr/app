@@ -128,12 +128,7 @@ fun PfSwitchRow(
 
 /** One option of a radio group; the whole row is the touch target. */
 @Composable
-fun PfRadioRow(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+fun PfRadioRow(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -149,13 +144,7 @@ fun PfRadioRow(
 
 /** Choose one of a few short options (e.g. SOCKS5 / HTTP). */
 @Composable
-fun <T> PfChoiceChips(
-    options: List<T>,
-    selected: T,
-    label: (T) -> String,
-    onSelect: (T) -> Unit,
-    modifier: Modifier = Modifier,
-) {
+fun <T> PfChoiceChips(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit, modifier: Modifier = Modifier) {
     Row(modifier = modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         options.forEach { option ->
             FilterChip(

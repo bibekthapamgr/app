@@ -31,10 +31,7 @@ internal val LocalExtendedColors = staticCompositionLocalOf { LightExtendedColor
  * colours carry meaning and must stay predictable (docs/m1/05 §2).
  */
 @Composable
-fun ProxyFlowTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    content: @Composable () -> Unit,
-) {
+fun ProxyFlowTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val extended = if (darkTheme) DarkExtendedColors else LightExtendedColors
     CompositionLocalProvider(LocalExtendedColors provides extended) {
         MaterialTheme(

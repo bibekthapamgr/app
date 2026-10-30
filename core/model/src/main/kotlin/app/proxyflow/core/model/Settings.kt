@@ -4,6 +4,4 @@ package app.proxyflow.core.model
 enum class ThemePreference { System, Light, Dark }
 
 /** Settings stored on the phone (Preferences DataStore). */
-data class UserSettings(
-    val theme: ThemePreference = ThemePreference.System,
-)
+data class UserSettings(val theme: ThemePreference = ThemePreference.System)

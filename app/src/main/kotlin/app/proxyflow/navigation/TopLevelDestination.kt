@@ -15,11 +15,7 @@ import app.proxyflow.feature.profiles.ProfilesDestination
 import app.proxyflow.feature.settings.SettingsDestination
 
 /** The four bottom-navigation items (docs/m1/04 §2). */
-enum class TopLevelDestination(
-    val route: Any,
-    val icon: ImageVector,
-    @StringRes val label: Int,
-) {
+enum class TopLevelDestination(val route: Any, val icon: ImageVector, @StringRes val label: Int) {
     Home(HomeDestination, PfIcons.Home, R.string.nav_home),
     Profiles(ProfilesDestination, PfIcons.Profiles, R.string.nav_profiles),
     Logs(LogsDestination, PfIcons.Logs, R.string.nav_logs),

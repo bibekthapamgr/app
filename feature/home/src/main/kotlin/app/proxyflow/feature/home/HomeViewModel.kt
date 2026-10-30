@@ -18,17 +18,10 @@ sealed interface HomeUiState {
     data object NoProfile : HomeUiState
 
     /** Board B2 (and, from M5, B3–B7). */
-    data class Ready(
-        val profile: ProxyProfile,
-        val status: ConnectionStatus,
-        val canConnect: Boolean,
-    ) : HomeUiState
+    data class Ready(val profile: ProxyProfile, val status: ConnectionStatus, val canConnect: Boolean) : HomeUiState
 }
 
-class HomeViewModel(
-    profiles: ProfileRepository,
-    private val connection: ConnectionController,
-) : ViewModel() {
+class HomeViewModel(profiles: ProfileRepository, private val connection: ConnectionController) : ViewModel() {
     val uiState: StateFlow<HomeUiState> =
         combine(profiles.profiles, profiles.activeProfileId, connection.status) { list, activeId, status ->
             val active = list.firstOrNull { it.id == activeId } ?: list.firstOrNull()

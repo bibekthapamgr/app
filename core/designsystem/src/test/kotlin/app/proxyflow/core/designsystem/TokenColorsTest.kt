@@ -8,6 +8,8 @@ import app.proxyflow.core.designsystem.theme.DarkExtendedColors
 import app.proxyflow.core.designsystem.theme.LightColorScheme
 import app.proxyflow.core.designsystem.theme.LightExtendedColors
 import app.proxyflow.core.designsystem.theme.ProxyFlowExtendedColors
+import java.io.File
+import kotlin.math.pow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -15,8 +17,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
-import kotlin.math.pow
 
 /**
  * The colours compiled into the app must be exactly the design tokens, and the

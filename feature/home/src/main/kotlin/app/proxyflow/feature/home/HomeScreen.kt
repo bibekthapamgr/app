@@ -37,11 +37,7 @@ import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfile
 
 @Composable
-internal fun HomeRoute(
-    viewModel: HomeViewModel,
-    onAddProxy: () -> Unit,
-    onChangeProfile: () -> Unit,
-) {
+internal fun HomeRoute(viewModel: HomeViewModel, onAddProxy: () -> Unit, onChangeProfile: () -> Unit) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     HomeScreen(state = state, onAddProxy = onAddProxy, onChangeProfile = onChangeProfile, onConnect = viewModel::connect)
 }

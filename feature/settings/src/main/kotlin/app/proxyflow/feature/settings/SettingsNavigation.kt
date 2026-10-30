@@ -10,10 +10,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data object SettingsDestination
 
-fun NavGraphBuilder.settingsScreen(
-    viewModelFactory: ViewModelProvider.Factory,
-    onOpenAbout: () -> Unit,
-) {
+fun NavGraphBuilder.settingsScreen(viewModelFactory: ViewModelProvider.Factory, onOpenAbout: () -> Unit) {
     composable<SettingsDestination> {
         SettingsRoute(viewModel = viewModel(factory = viewModelFactory), onOpenAbout = onOpenAbout)
     }

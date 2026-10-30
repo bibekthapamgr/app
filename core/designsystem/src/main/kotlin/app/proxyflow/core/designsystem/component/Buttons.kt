@@ -55,12 +55,7 @@ fun PfSecondaryButton(
 
 /** Low-emphasis action, e.g. in dialogs and cards. */
 @Composable
-fun PfTextButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
+fun PfTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     TextButton(onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = Spacing.minTouchTarget)) {
         Text(text)
     }
@@ -68,12 +63,7 @@ fun PfTextButton(
 
 /** Destructive action (delete, discard): error colours, always confirmed by a dialog first. */
 @Composable
-fun PfDestructiveButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
+fun PfDestructiveButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     Button(
         onClick = onClick,
         enabled = enabled,

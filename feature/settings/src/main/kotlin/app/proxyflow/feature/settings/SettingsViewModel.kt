@@ -10,14 +10,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-data class SettingsUiState(
-    val loading: Boolean = true,
-    val theme: ThemePreference = ThemePreference.System,
-)
+data class SettingsUiState(val loading: Boolean = true, val theme: ThemePreference = ThemePreference.System)
 
-class SettingsViewModel(
-    private val settings: SettingsRepository,
-) : ViewModel() {
+class SettingsViewModel(private val settings: SettingsRepository) : ViewModel() {
     val uiState: StateFlow<SettingsUiState> =
         settings.settings
             .map { SettingsUiState(loading = false, theme = it.theme) }

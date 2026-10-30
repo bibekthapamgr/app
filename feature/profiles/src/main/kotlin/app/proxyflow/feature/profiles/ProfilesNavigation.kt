@@ -20,20 +20,13 @@ data class AddEditProxyDestination(val profileId: String? = null)
 fun NavController.navigateToAddEditProxy(profileId: String? = null, navOptions: NavOptions? = null) =
     navigate(AddEditProxyDestination(profileId), navOptions)
 
-fun NavGraphBuilder.profilesScreen(
-    viewModelFactory: ViewModelProvider.Factory,
-    onAddProxy: () -> Unit,
-    onEditProxy: (String) -> Unit,
-) {
+fun NavGraphBuilder.profilesScreen(viewModelFactory: ViewModelProvider.Factory, onAddProxy: () -> Unit, onEditProxy: (String) -> Unit) {
     composable<ProfilesDestination> {
         ProfilesRoute(viewModel = viewModel(factory = viewModelFactory), onAddProxy = onAddProxy, onEditProxy = onEditProxy)
     }
 }
 
-fun NavGraphBuilder.addEditProxyScreen(
-    viewModelFactory: ViewModelProvider.Factory,
-    onDone: () -> Unit,
-) {
+fun NavGraphBuilder.addEditProxyScreen(viewModelFactory: ViewModelProvider.Factory, onDone: () -> Unit) {
     composable<AddEditProxyDestination> {
         // dropUnlessResumed: a second tap (Save, then Back) during the exit animation cannot pop a second screen.
         AddEditProxyRoute(viewModel = viewModel(factory = viewModelFactory), onDone = dropUnlessResumed(block = onDone))

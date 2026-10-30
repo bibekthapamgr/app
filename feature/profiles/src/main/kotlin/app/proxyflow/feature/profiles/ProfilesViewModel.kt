@@ -16,9 +16,7 @@ data class ProfilesUiState(
     val activeProfileId: String? = null,
 )
 
-class ProfilesViewModel(
-    private val repository: ProfileRepository,
-) : ViewModel() {
+class ProfilesViewModel(private val repository: ProfileRepository) : ViewModel() {
     val uiState: StateFlow<ProfilesUiState> =
         combine(repository.profiles, repository.activeProfileId) { list, active ->
             ProfilesUiState(loading = false, profiles = list, activeProfileId = active)

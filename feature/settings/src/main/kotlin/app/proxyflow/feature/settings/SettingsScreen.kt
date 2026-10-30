@@ -25,10 +25,7 @@ import app.proxyflow.core.designsystem.theme.Spacing
 import app.proxyflow.core.model.ThemePreference
 
 @Composable
-internal fun SettingsRoute(
-    viewModel: SettingsViewModel,
-    onOpenAbout: () -> Unit,
-) {
+internal fun SettingsRoute(viewModel: SettingsViewModel, onOpenAbout: () -> Unit) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     SettingsScreen(state = state, onThemeChange = viewModel::setTheme, onOpenAbout = onOpenAbout)
 }

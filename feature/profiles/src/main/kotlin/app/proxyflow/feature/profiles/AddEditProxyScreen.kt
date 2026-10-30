@@ -47,10 +47,7 @@ import app.proxyflow.core.model.ProfileField
 import app.proxyflow.core.model.ProxyProtocol
 
 @Composable
-internal fun AddEditProxyRoute(
-    viewModel: AddEditProxyViewModel,
-    onDone: () -> Unit,
-) {
+internal fun AddEditProxyRoute(viewModel: AddEditProxyViewModel, onDone: () -> Unit) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     LaunchedEffect(state.saved) { if (state.saved) onDone() }
     SecureWindow()
@@ -88,11 +85,7 @@ data class AddEditActions(
 )
 
 @Composable
-fun AddEditProxyScreen(
-    state: AddEditUiState,
-    actions: AddEditActions,
-    modifier: Modifier = Modifier,
-) {
+fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier: Modifier = Modifier) {
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val back: () -> Unit = {
         if (state.dirty) {

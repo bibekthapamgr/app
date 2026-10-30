@@ -13,11 +13,7 @@ import app.proxyflow.core.designsystem.theme.Spacing
 
 /** Content card: white surface with a thin outline (dark: raised surface). Clickable when [onClick] is set. */
 @Composable
-fun PfCard(
-    modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null,
-    content: @Composable ColumnScope.() -> Unit,
-) {
+fun PfCard(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
     val colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
     val border = BorderStroke(width = CardDefaults.outlinedCardBorder().width, color = MaterialTheme.colorScheme.outlineVariant)
     val inner: @Composable ColumnScope.() -> Unit = {

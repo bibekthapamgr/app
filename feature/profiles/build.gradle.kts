@@ -29,6 +29,9 @@ kotlin {
 dependencies {
     implementation(project(":core:designsystem"))
     implementation(project(":core:data"))
+    // BackHandler and LocalActivity (FLAG_SECURE on the form) need activity-compose 1.10 or newer;
+    // without this line the module compiles against the older copy that Navigation brings in.
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)

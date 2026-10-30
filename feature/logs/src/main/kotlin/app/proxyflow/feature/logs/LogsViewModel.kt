@@ -9,15 +9,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
-data class LogsUiState(
-    val loading: Boolean = true,
-    val entries: List<LogEntry> = emptyList(),
-)
+data class LogsUiState(val loading: Boolean = true, val entries: List<LogEntry> = emptyList())
 
 /** Newest entries first. Filters and the detail sheet (boards F2, F3) arrive with the engine's log in M7. */
-class LogsViewModel(
-    logs: LogRepository,
-) : ViewModel() {
+class LogsViewModel(logs: LogRepository) : ViewModel() {
     val uiState: StateFlow<LogsUiState> =
         logs.entries
             .map { list -> LogsUiState(loading = false, entries = list.sortedByDescending { it.timeMillis }) }

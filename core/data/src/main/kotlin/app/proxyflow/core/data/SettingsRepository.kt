@@ -20,9 +20,7 @@ interface SettingsRepository {
  * Settings in Preferences DataStore. DataStore reads and writes on its own
  * I/O dispatcher, so callers on the main thread never block on disk.
  */
-class DataStoreSettingsRepository(
-    private val dataStore: DataStore<Preferences>,
-) : SettingsRepository {
+class DataStoreSettingsRepository(private val dataStore: DataStore<Preferences>) : SettingsRepository {
     override val settings: Flow<UserSettings> = dataStore.data.map { prefs ->
         UserSettings(theme = prefs[THEME]?.let(::themeFromKey) ?: ThemePreference.System)
     }

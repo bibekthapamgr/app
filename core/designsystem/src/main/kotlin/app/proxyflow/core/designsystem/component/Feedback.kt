@@ -81,13 +81,7 @@ fun PfEmptyState(
 
 /** Error state with an optional retry action. */
 @Composable
-fun PfErrorState(
-    title: String,
-    body: String,
-    modifier: Modifier = Modifier,
-    retryLabel: String? = null,
-    onRetry: (() -> Unit)? = null,
-) {
+fun PfErrorState(title: String, body: String, modifier: Modifier = Modifier, retryLabel: String? = null, onRetry: (() -> Unit)? = null) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -113,12 +107,7 @@ enum class BannerTone { Info, Warning, Error }
 
 /** Inline message block, e.g. the plaintext warning on Add/Edit (board D4). */
 @Composable
-fun PfBanner(
-    text: String,
-    tone: BannerTone,
-    modifier: Modifier = Modifier,
-    title: String? = null,
-) {
+fun PfBanner(text: String, tone: BannerTone, modifier: Modifier = Modifier, title: String? = null) {
     val (container, content, icon) = when (tone) {
         BannerTone.Info ->
             Triple(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer, PfIcons.Info)

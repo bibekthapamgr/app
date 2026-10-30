@@ -13,10 +13,7 @@ data object AboutDestination
 
 fun NavController.navigateToAbout(navOptions: NavOptions? = null) = navigate(AboutDestination, navOptions)
 
-fun NavGraphBuilder.aboutScreen(
-    version: String,
-    onBack: () -> Unit,
-) {
+fun NavGraphBuilder.aboutScreen(version: String, onBack: () -> Unit) {
     composable<AboutDestination> {
         AboutScreen(version = version, onBack = dropUnlessResumed(block = onBack))
     }
