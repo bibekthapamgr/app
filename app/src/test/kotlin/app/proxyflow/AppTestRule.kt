@@ -81,12 +81,9 @@ internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.des
                 node.config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString()?.let { "desc=$it" },
             ).joinToString(" ")
             if (label.isNotEmpty()) {
+                val indent = "  ".repeat(depth)
                 val b = node.boundsInWindow
-                appendLine(
-                    "${"  ".repeat(
-                        depth,
-                    )}#${node.id} [${b.left},${b.top},${b.right},${b.bottom}] placed=${node.layoutInfo.isPlaced} $label",
-                )
+                appendLine("$indent#${node.id} [${b.left},${b.top},${b.right},${b.bottom}] placed=${node.layoutInfo.isPlaced} $label")
             }
             node.children.forEach { visit(it, depth + 1) }
         }
