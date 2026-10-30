@@ -4,8 +4,4 @@
     <string name="pf_show_password">Show password</string>
     <string name="pf_hide_password">Hide password</string>
     <string name="pf_loading">Loading</string>
-    <string name="pf_status_connected">Connected</string>
-    <string name="pf_status_transition">In progress</string>
-    <string name="pf_status_off">Off</string>
-    <string name="pf_status_error">Error</string>
 </resources>

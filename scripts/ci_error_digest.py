@@ -24,6 +24,7 @@ import xml.etree.ElementTree as ET
 MAX_CHUNK = 3500  # characters per annotation
 LEVELS = ("error", "warning", "notice")  # GitHub keeps 10 of each per step
 MAX_TESTS = 40
+SCREEN_DUMP = 6000  # characters of a failing UI test's screen description
 ROOT = os.getcwd().rstrip("/") + "/"
 
 
@@ -78,7 +79,12 @@ def test_failures() -> list[str]:
             continue
         for case in tree.iter("testcase"):
             for problem in list(case.findall("failure")) + list(case.findall("error")):
-                message = short((problem.get("message") or "").strip())[:600]
+                full_message = short((problem.get("message") or "").strip())
+                if "--- screen ---" in full_message:
+                    # A UI test's description of the screen (see core/testing DumpOnFailureRule).
+                    found.append(f"TEST {case.get('classname')}.{case.get('name')}: {full_message[:SCREEN_DUMP]}")
+                    continue
+                message = full_message[:600]
                 body = short((problem.text or "").strip()).splitlines()
                 key = message or "\n".join(body[:2])
                 if key in seen_messages:

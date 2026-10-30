@@ -3,6 +3,7 @@ package app.proxyflow
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -10,7 +11,9 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.printToString
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.proxyflow.core.testing.DumpOnFailureRule
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -22,8 +25,11 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class NavigationTest {
-    @get:Rule
+    @get:Rule(order = 0)
     val compose = createAndroidComposeRule<MainActivity>()
+
+    @get:Rule(order = 1)
+    val dumpOnFailure = DumpOnFailureRule { compose.onAllNodes(isRoot()).printToString() }
 
     @Before
     fun waitForFirstFrame() = compose.waitForApp()

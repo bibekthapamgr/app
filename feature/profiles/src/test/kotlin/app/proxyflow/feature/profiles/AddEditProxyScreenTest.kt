@@ -7,24 +7,32 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.printToString
 import androidx.lifecycle.SavedStateHandle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.data.InMemoryProfileRepository
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ProxyProfileInput
+import app.proxyflow.core.testing.DumpOnFailureRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
+// The form is longer than a phone screen, so fields further down are scrolled to before they are checked.
 @RunWith(AndroidJUnit4::class)
 class AddEditProxyScreenTest {
-    @get:Rule
+    @get:Rule(order = 0)
     val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @get:Rule(order = 1)
+    val dumpOnFailure = DumpOnFailureRule { compose.onAllNodes(isRoot()).printToString() }
 
     /** Shows the screen with a plain state holder, so each test can change the state. */
     private fun showForm(initial: AddEditUiState = AddEditUiState()) {
@@ -39,22 +47,22 @@ class AddEditProxyScreenTest {
     @Test
     fun plaintextWarningShowsUntilTlsIsTurnedOn() {
         showForm()
-        compose.onNodeWithText("Not encrypted").assertIsDisplayed()
+        compose.onNodeWithText("Not encrypted").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("TLS server name (optional)").assertDoesNotExist()
 
-        compose.onNodeWithText("Encrypt connection (TLS)").performClick()
+        compose.onNodeWithText("Encrypt connection (TLS)").performScrollTo().performClick()
 
         compose.onNodeWithText("Not encrypted").assertDoesNotExist()
-        compose.onNodeWithText("TLS server name (optional)").assertIsDisplayed()
+        compose.onNodeWithText("TLS server name (optional)").performScrollTo().assertIsDisplayed()
     }
 
     @Test
     fun signInFieldsAppearOnlyWhenTheProxyNeedsThem() {
         showForm()
         compose.onNodeWithText("Username").assertDoesNotExist()
-        compose.onNodeWithText("Proxy requires sign-in").performClick()
-        compose.onNodeWithText("Username").assertIsDisplayed()
-        compose.onNodeWithText("Password").assertIsDisplayed()
+        compose.onNodeWithText("Proxy requires sign-in").performScrollTo().performClick()
+        compose.onNodeWithText("Username").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Password").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -63,7 +71,7 @@ class AddEditProxyScreenTest {
             AddEditUiState(isEdit = true, input = ProxyProfileInput(requiresSignIn = true, username = "user"), hasSavedPassword = true),
         )
         compose.onNodeWithText("Edit proxy").assertIsDisplayed()
-        compose.onNodeWithText("Leave empty to keep the saved password").assertIsDisplayed()
+        compose.onNodeWithText("Leave empty to keep the saved password").performScrollTo().assertIsDisplayed()
     }
 
     @Test
