@@ -42,7 +42,7 @@ Point the build at your SDK with `ANDROID_HOME` or a `local.properties` file con
 
 ```bash
 ./gradlew :app:assembleDebug            # debug APK: app/build/outputs/apk/debug/
-./gradlew testDebugUnitTest             # all JVM, ViewModel and Robolectric UI tests
+./gradlew testDebugUnitTest :core:model:test  # all JVM, ViewModel and Robolectric UI tests
 ./gradlew spotlessCheck                 # Kotlin formatting (ktlint); spotlessApply fixes it
 ./gradlew :app:lintDebug                # Android Lint for the app and every module it uses
 ./gradlew :app:assembleRelease          # R8-shrunk release APK (unsigned without signing config)

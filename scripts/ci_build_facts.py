@@ -21,7 +21,7 @@ MAX_CHUNK = 3500  # characters per annotation; GitHub keeps 10 notices per step
 
 def tests() -> list[str]:
     per_module: dict[str, list[int]] = {}
-    for report in glob.glob("**/build/test-results/testDebugUnitTest/*.xml", recursive=True):
+    for report in glob.glob("**/build/test-results/testDebugUnitTest/*.xml", recursive=True) + glob.glob("**/build/test-results/test/*.xml", recursive=True):
         module = report.split("/build/")[0] or "."
         try:
             suite = ET.parse(report).getroot()

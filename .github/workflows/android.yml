@@ -59,7 +59,7 @@ jobs:
 
       - name: Unit, ViewModel and Robolectric UI tests
         if: ${{ !cancelled() }}
-        run: ./gradlew testDebugUnitTest --continue 2>&1 | tee "$RUNNER_TEMP/gradle-3-test.log"
+        run: ./gradlew testDebugUnitTest :core:model:test --continue 2>&1 | tee "$RUNNER_TEMP/gradle-3-test.log"
 
       - name: Debug build
         if: ${{ !cancelled() }}

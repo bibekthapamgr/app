@@ -99,6 +99,7 @@ class ScreenshotTest {
         }
         compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
         compose.onNodeWithText("Delete").performClick()
+        compose.waitForIdle() // let the dialog draw before the screen is captured
         captureScreenRoboImage("$DIR/C3_delete_confirm_light.png")
     }
 
@@ -163,6 +164,7 @@ class ScreenshotTest {
             }
         }
         compose.onNodeWithContentDescription("Back").performClick()
+        compose.waitForIdle() // let the dialog draw before the screen is captured
         captureScreenRoboImage("$DIR/D8_unsaved_changes_light.png")
     }
 
@@ -178,6 +180,7 @@ class ScreenshotTest {
             ProxyFlowTheme { SettingsScreen(SettingsUiState(loading = false), onThemeChange = {}, onOpenAbout = {}) }
         }
         compose.onNodeWithText("Theme").performClick()
+        compose.waitForIdle() // let the dialog draw before the screen is captured
         captureScreenRoboImage("$DIR/E1_theme_dialog_light.png")
     }
 
