@@ -3,14 +3,12 @@ package app.proxyflow
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.printToString
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.testing.DumpOnFailureRule
 import org.junit.Before
@@ -30,7 +28,7 @@ class StateRestorationTest {
     val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule(order = 1)
-    val dumpOnFailure = DumpOnFailureRule { compose.onAllNodes(isRoot()).printToString(maxDepth = Int.MAX_VALUE) }
+    val dumpOnFailure = DumpOnFailureRule { compose.describeScreen() }
 
     @Before
     fun waitForFirstFrame() = compose.waitForApp()

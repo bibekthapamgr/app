@@ -24,7 +24,7 @@ import xml.etree.ElementTree as ET
 MAX_CHUNK = 3500  # characters per annotation
 LEVELS = ("error", "warning", "notice")  # GitHub keeps 10 of each per step
 MAX_TESTS = 40
-SCREEN_DUMP = 6000  # characters of a failing UI test's screen description
+SCREEN_DUMP = 12000  # characters of a failing UI test's screen description
 ROOT = os.getcwd().rstrip("/") + "/"
 
 
