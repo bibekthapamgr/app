@@ -202,14 +202,20 @@ class ScreenshotTest {
     @Test
     fun about() = captureBothThemes("G1_about") { AboutScreen(version = "0.2.0 (2)", onBack = {}) }
 
-    /** Renders [content] in the light theme, captures it, switches to dark and captures again. */
+    /**
+     * Renders [content] in the light theme, captures it, switches to dark and captures again.
+     * When verifying, a changed image fails at once; both themes are captured before the
+     * test fails, so one run reports and records both.
+     */
     private fun captureBothThemes(name: String, content: @Composable () -> Unit) {
         var dark by mutableStateOf(false)
         compose.setContent { ProxyFlowTheme(darkTheme = dark) { content() } }
-        compose.onRoot().captureRoboImage("$DIR/${name}_light.png")
+        val light = runCatching { compose.onRoot().captureRoboImage("$DIR/${name}_light.png") }
         dark = true
         compose.waitForIdle()
-        compose.onRoot().captureRoboImage("$DIR/${name}_dark.png")
+        val darkCapture = runCatching { compose.onRoot().captureRoboImage("$DIR/${name}_dark.png") }
+        val failures = listOfNotNull(light.exceptionOrNull(), darkCapture.exceptionOrNull())
+        if (failures.isNotEmpty()) throw AssertionError(failures.joinToString("\n") { it.message.orEmpty() }, failures.first())
     }
 
     private companion object {

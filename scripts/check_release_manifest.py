@@ -151,6 +151,8 @@ def main(argv: list[str]) -> int:
     if problems:
         print(f"::error title=release manifest::{escape(chr(10).join(problems))}")
         return 1
+    # Also as a notice, so the evidence can be read through the API like the other build facts.
+    print(f"::notice title=release manifest OK::{escape(chr(10).join(facts))}")
     return 0
 
 
