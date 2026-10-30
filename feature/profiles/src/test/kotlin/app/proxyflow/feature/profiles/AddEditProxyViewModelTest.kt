@@ -47,6 +47,21 @@ class AddEditProxyViewModelTest {
     }
 
     @Test
+    fun everyRejectedSaveIsCountedSoTheFormCanScrollToTheErrors() {
+        val vm = viewModel()
+        assertEquals(0, vm.uiState.value.rejectedSaves)
+        vm.save()
+        vm.save()
+        assertEquals(2, vm.uiState.value.rejectedSaves)
+
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.save()
+        assertEquals("a successful save is not a rejected one", 2, vm.uiState.value.rejectedSaves)
+        assertTrue(vm.uiState.value.saved)
+    }
+
+    @Test
     fun validFormIsSavedOnce() {
         val vm = viewModel()
         vm.onServerChange("proxy.example.com")

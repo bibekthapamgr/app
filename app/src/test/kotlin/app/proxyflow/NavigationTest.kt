@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.testing.DumpOnFailureRule
@@ -68,7 +69,7 @@ class NavigationTest {
         compose.tab("Home").assertDoesNotExist()
         compose.onNodeWithText("Server").performTextInput("proxy.example.com")
         compose.onNodeWithText("Port").performTextInput("1080")
-        compose.onAllNodesWithText("Save").onFirst().performClick()
+        compose.topBarSave().performClick()
 
         compose.onNodeWithText("proxy.example.com").assertIsDisplayed()
         compose.onNodeWithText("proxy.example.com:1080").assertIsDisplayed()
@@ -111,7 +112,8 @@ class NavigationTest {
     fun invalidFormStaysOpenAndSaysWhatToFix() {
         compose.onNodeWithText("Add proxy").performClick()
         compose.onNodeWithText("Server").performTextInput("not a host")
-        compose.onAllNodesWithText("Save").onFirst().performClick()
+        // Save at the end of the form: the form scrolls back up to the error summary.
+        compose.formEndSave().performScrollTo().performClick()
         compose.onNodeWithText("Fix 2 fields to save this proxy").assertIsDisplayed()
         compose.onNodeWithText("Enter a hostname or IP address (no spaces)").assertIsDisplayed()
         compose.onNodeWithText("Port must be between 1 and 65535").assertIsDisplayed()

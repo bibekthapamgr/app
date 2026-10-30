@@ -26,6 +26,8 @@ data class AddEditUiState(
     val dirty: Boolean = false,
     val saving: Boolean = false,
     val saved: Boolean = false,
+    /** Save attempts that found errors; each one scrolls the form back to the error summary. */
+    val rejectedSaves: Int = 0,
 )
 
 /**
@@ -85,7 +87,10 @@ class AddEditProxyViewModel(private val savedState: SavedStateHandle, private va
         showErrors = true
         savedState[KEY_SHOW_ERRORS] = true
         refresh()
-        if (state.value.errors.isNotEmpty()) return
+        if (state.value.errors.isNotEmpty()) {
+            state.update { it.copy(rejectedSaves = it.rejectedSaves + 1) }
+            return
+        }
         state.update { it.copy(saving = true) }
         viewModelScope.launch {
             repository.save(profileId, current.input)

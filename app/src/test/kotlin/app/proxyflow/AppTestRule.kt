@@ -7,6 +7,8 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
@@ -25,6 +27,14 @@ internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.wai
 /** A bottom-navigation item (Role.Tab), so it never matches a screen title with the same text. */
 internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.tab(label: String): SemanticsNodeInteraction =
     onNode(hasText(label) and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
+
+/** The proxy form's Save in the top app bar, which is always on screen. */
+internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.topBarSave(): SemanticsNodeInteraction =
+    onNode(hasText("Save") and !hasAnyAncestor(hasScrollAction()))
+
+/** The proxy form's Save at the end of the form, which is usually below the fold. */
+internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.formEndSave(): SemanticsNodeInteraction =
+    onNode(hasText("Save") and hasAnyAncestor(hasScrollAction()))
 
 /** System Back, as the gesture or the back button would send it. */
 internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.pressBack() {

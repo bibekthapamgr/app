@@ -1,7 +1,6 @@
 package app.proxyflow.feature.profiles
 
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.NavGraphBuilder
@@ -26,9 +25,14 @@ fun NavGraphBuilder.profilesScreen(viewModelFactory: ViewModelProvider.Factory, 
     }
 }
 
+/**
+ * The Add/Edit form. [onDone] closes it and must be safe to call more than once
+ * (pop this destination by its route, not "pop whatever is on top"): Save
+ * finishes asynchronously and can land while an animation or a second tap is in
+ * flight, and dropping the call instead would leave a saved form on screen.
+ */
 fun NavGraphBuilder.addEditProxyScreen(viewModelFactory: ViewModelProvider.Factory, onDone: () -> Unit) {
     composable<AddEditProxyDestination> {
-        // dropUnlessResumed: a second tap (Save, then Back) during the exit animation cannot pop a second screen.
-        AddEditProxyRoute(viewModel = viewModel(factory = viewModelFactory), onDone = dropUnlessResumed(block = onDone))
+        AddEditProxyRoute(viewModel = viewModel(factory = viewModelFactory), onDone = onDone)
     }
 }

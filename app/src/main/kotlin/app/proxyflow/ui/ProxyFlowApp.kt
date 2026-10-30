@@ -21,6 +21,7 @@ import app.proxyflow.feature.about.navigateToAbout
 import app.proxyflow.feature.home.HomeDestination
 import app.proxyflow.feature.home.homeScreen
 import app.proxyflow.feature.logs.logsScreen
+import app.proxyflow.feature.profiles.AddEditProxyDestination
 import app.proxyflow.feature.profiles.addEditProxyScreen
 import app.proxyflow.feature.profiles.navigateToAddEditProxy
 import app.proxyflow.feature.profiles.profilesScreen
@@ -76,7 +77,11 @@ fun ProxyFlowApp(
                 onAddProxy = { navController.navigateToAddEditProxy() },
                 onEditProxy = { id -> navController.navigateToAddEditProxy(id) },
             )
-            addEditProxyScreen(viewModelFactory = viewModelFactory, onDone = { navController.popBackStack() })
+            // Pops the form by its route, so a second call (Save landing after Back) is a no-op.
+            addEditProxyScreen(
+                viewModelFactory = viewModelFactory,
+                onDone = { navController.popBackStack<AddEditProxyDestination>(inclusive = true) },
+            )
             logsScreen(
                 viewModelFactory = viewModelFactory,
                 onOpenSettings = { navController.navigateToTopLevel(TopLevelDestination.Settings) },

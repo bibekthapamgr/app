@@ -97,6 +97,11 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
     BackHandler(enabled = state.dirty, onBack = { confirmDiscard = true })
 
     val title = stringResource(if (state.isEdit) R.string.edit_title_edit else R.string.edit_title_add)
+    val scrollState = rememberScrollState()
+    // The Save button at the end of the form can be far below the error summary: bring it into view.
+    LaunchedEffect(state.rejectedSaves) {
+        if (state.rejectedSaves > 0) scrollState.animateScrollTo(0)
+    }
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -113,7 +118,7 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
                 .padding(padding)
                 .consumeWindowInsets(padding)
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = Spacing.screenGutter, vertical = Spacing.md),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
