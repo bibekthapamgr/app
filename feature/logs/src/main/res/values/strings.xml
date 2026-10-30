@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Logs (board F1). Retention (24 hours) is promised only once M7 implements it. -->
+    <string name="logs_title">Logs</string>
+    <string name="logs_empty_title">No events yet</string>
+    <string name="logs_empty_body">Connection events and errors will appear here. Logs stay on this phone and never include passwords or page content.</string>
+    <string name="logs_settings">Log settings</string>
+    <string name="logs_level_info">Info</string>
+    <string name="logs_level_warning">Warning</string>
+    <string name="logs_level_error">Error</string>
+</resources>

@@ -2,39 +2,83 @@
 
 ProxyFlow is a free, original Android app that routes other apps' TCP traffic through a proxy the user already has — HTTP CONNECT or SOCKS5, optionally over TLS — using Android's `VpnService`. It needs no account, has no backend, and **fails closed**: when the proxy stops working, traffic is blocked instead of being sent around the proxy.
 
-**Status: Milestone 1 (requirements, feasibility, UI/UX) delivered, awaiting product-owner approval of the networking approach.** No production app code exists yet, by design: the brief requires approval of the networking approach first. Start with `docs/m1/M1-acceptance-report.md`.
+**Status**
+
+- **M1 — requirements, feasibility, UI/UX:** delivered (`docs/m1/M1-acceptance-report.md`). The owner chose minSdk 29 (D3).
+- **M2 — Android foundation:** source written; build and test results are in `docs/m2/M2-acceptance-report.md`. This build sets up the app only: it cannot connect yet (the VPN service is M5) and keeps profiles only in memory (storage with Keystore encryption is M3). Both limits are stated in the app itself.
 
 ## Repository
 
 | Path | Contents |
 |---|---|
-| `docs/m1/` | M1 deliverables: scope, traffic support matrix, user journeys, UX and error states, design tokens, architecture, threat model, dependency review, feasibility report, platform/policy constraints, acceptance report |
-| `docs/adr/` | Architecture decision records 0001–0007 |
-| `docs/diagrams/` | Mermaid sources and rendered SVGs (architecture, packet path, connect sequence, threat-model DFD) |
-| `design/` | Screen boards (design canvas files), design tokens, contrast report and checker |
-| `spike/` | Feasibility spike: Go engine prototype (gVisor netstack), Python lab harness, end-to-end tests E01–E16, committed evidence runs |
-| `.github/workflows/spike.yml` | CI for the spike, written but not run yet (Ubuntu 24.04 with IPv6; regenerates `go.sum` against the public checksum database; evidence upload) |
+| `app/` | Application shell: `MainActivity`, navigation graph, bottom bar, manual DI (`AppContainer`), app-level tests and reference screenshots (`app/screenshots/`) |
+| `core/model/` | Pure Kotlin: proxy profile model and form validation (no Android dependency) |
+| `core/designsystem/` | Theme generated from the design tokens, icons, and the reusable components (buttons, cards, fields, dialogs, loading, empty and error states, banners, status pill) |
+| `core/data/` | Repository interfaces and their M2 implementations (DataStore settings, in-memory profiles and logs, a connection controller that cannot connect yet) |
+| `core/testing/` | Test fakes and the main-dispatcher rule |
+| `feature/{home,profiles,settings,logs,about}/` | One module per area: stateless screens, ViewModels, navigation entry points, tests |
+| `config/lint/` | Android Lint configuration |
+| `gradle/libs.versions.toml` | Every dependency and plugin version |
+| `scripts/check-secrets.sh` | Fails when keys, signing files or credentials would be committed |
+| `docs/m1/`, `docs/m2/` | Milestone deliverables and acceptance reports |
+| `docs/adr/` | Architecture decision records 0001–0008 |
+| `design/` | Screen boards, design tokens, contrast checker, Compose colour generator |
+| `spike/` | M1 feasibility spike (Go engine prototype, lab harness, evidence runs) |
+| `.github/workflows/` | `android.yml` (app checks and builds), `spike.yml` (M1 spike) |
 
-## Key results (M1)
+## Environment
 
-- A TCP request from a TUN interface reached a destination through a controlled SOCKS5 proxy with the proxy resolving the hostname and nothing leaving the "phone" except to the proxy (E01).
-- SOCKS5 + auth (Dante), HTTP CONNECT + auth (Squid) and TLS-to-proxy (stunnel, six validation cases) all work and fail closed.
-- Apps' ordinary DNS lookups (UDP port 53) never leave the device; only the proxy's own hostname is looked up on the normal network, and DNS that apps send over TCP or HTTPS goes through the proxy. UDP and ping are blocked, not leaked or faked. When the proxy's port is closed, apps' connections are refused in about 11 ms, and traffic recovers automatically.
-- 20/20 end-to-end tests (149 checks), 54/54 Go tests plus 20 race-detector repeats of the engine tests, fuzzing without crashes. Canonical evidence: `spike/evidence/run-m1-20261030T003301Z`, produced by the code in this repository; three earlier runs are kept as history.
-- Two independent checks found real problems: the engine answered IPv6 pings by itself (first plain ones, then large fragmented ones), and two cleanup figures were mis-measured. All are fixed and covered by tests (feasibility report §5).
-- IPv6 end to end and everything on a real Android device are still pending (feasibility report §6).
+| Tool | Version |
+|---|---|
+| JDK | 17 or newer (CI and the M2 build use 21). Android Studio's bundled JDK works |
+| Android SDK | Platform 36 (`platforms;android-36`), current build tools, platform tools |
+| Android Studio | A release that supports the Android Gradle Plugin version in `gradle/libs.versions.toml` |
+| Gradle | Use the wrapper (`./gradlew`); it downloads the pinned Gradle version |
+| Python 3 | Only for the design-token tools (`design/tools/`) |
 
-## Run the spike
+Point the build at your SDK with `ANDROID_HOME` or a `local.properties` file containing `sdk.dir=/path/to/Android/sdk` (Android Studio writes it; it is git-ignored).
+
+## Build and test
+
+```bash
+./gradlew :app:assembleDebug            # debug APK: app/build/outputs/apk/debug/
+./gradlew testDebugUnitTest             # all JVM, ViewModel and Robolectric UI tests
+./gradlew spotlessCheck                 # Kotlin formatting (ktlint); spotlessApply fixes it
+./gradlew :app:lintDebug                # Android Lint for the app and every module it uses
+./gradlew :app:assembleRelease          # R8-shrunk release APK (unsigned without signing config)
+./gradlew :app:recordRoborazziDebug     # re-record app/screenshots/ after a UI change
+./gradlew :app:verifyRoborazziDebug     # compare screens against app/screenshots/
+scripts/check-secrets.sh                # also usable as a pre-commit hook (see the script)
+```
+
+The same checks run in CI (`.github/workflows/android.yml`). Tests run on the JVM with Robolectric, so no emulator is needed; on-device instrumentation tests start in M5, where routing must be proven on real devices.
+
+### Application ID
+
+The application ID is provisional: `app.proxyflow.android` (debug builds add `.debug`). Change it before the first Play upload in `gradle.properties` (`proxyflow.applicationId`) or per build with `-Pproxyflow.applicationId=com.example.proxyflow`. The Kotlin package (`app.proxyflow`) does not need to change with it.
+
+### Release signing
+
+Signing keys and passwords are never committed. To sign release builds locally, copy `keystore.properties.example` to `keystore.properties` (git-ignored) and fill it in, or set `PROXYFLOW_KEYSTORE_FILE`, `PROXYFLOW_KEYSTORE_PASSWORD`, `PROXYFLOW_KEY_ALIAS` and `PROXYFLOW_KEY_PASSWORD` (CI secrets). Without them, `assembleRelease` produces an unsigned APK. Keep the keystore outside the repository.
+
+### Design tokens
+
+`design/tokens/proxyflow.tokens.json` is the source of truth for colours. After changing it:
+
+```bash
+python3 design/tools/check_contrast.py          # WCAG 2.2 AA check of every required pair
+python3 design/tools/generate_compose_colors.py # rewrites core/designsystem/.../theme/Color.kt
+```
+
+`TokenColorsTest` fails if `Color.kt` and the tokens disagree.
+
+## Run the M1 spike
 
 ```bash
 cd spike
 sudo -E HEV_TAG=2.19.3 FUZZTIME=30s GO_TEST_REPEAT=20 ./run_spike.sh   # Linux + root; package list in spike/README.md
 ```
 
-## Decisions needed before M2
-
-See `docs/m1/01-scope.md` §6: networking approach (D1), plaintext proxies in the Play build (D2), minSdk (D3), credential encryption implementation (D4), DNS record handling (D5), "Test proxy" target (D6), TLS default (D7), app licence and translations (D8).
-
 ## Licence
 
-To be decided by the product owner (D8). Third-party components and their licences: `docs/m1/08-dependency-review.md`.
+To be decided by the product owner (D8). Third-party components and their licences: `docs/m1/08-dependency-review.md` (spike) and `docs/m2/` (app dependencies).

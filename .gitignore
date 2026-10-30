@@ -4,6 +4,13 @@ spike/bin/
 *.apk
 *.aab
 
+# Gradle / Kotlin / Android Studio caches
+.gradle/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+
 # Python
 __pycache__/
 *.pyc
@@ -23,7 +30,10 @@ spike/evidence/*/_lab/*.pid
 .DS_Store
 local.properties
 
-# Secrets — never commit
+# Secrets — never commit (scripts/check-secrets.sh enforces this too)
 *.jks
 *.keystore
+*.p12
+*.pfx
 keystore.properties
+google-services.json

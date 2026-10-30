@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_app_name">ProxyFlow</string>
+    <string name="home_empty_title">Add a proxy to get started</string>
+    <string name="home_empty_body">You\'ll need the server address, port and type (HTTP or SOCKS5) from your proxy provider — plus a username and password if it uses one.</string>
+    <string name="home_add_proxy">Add proxy</string>
+    <string name="home_status_disconnected">Not connected</string>
+    <string name="home_status_connecting">Connecting</string>
+    <string name="home_status_connected">Connected</string>
+    <string name="home_status_reconnecting">Reconnecting</string>
+    <string name="home_status_blocked">Traffic blocked</string>
+    <string name="home_status_offline">Waiting for network</string>
+    <string name="home_normal_network">Apps are using your normal network</string>
+    <string name="home_proxy_label">Proxy</string>
+    <string name="home_tls">TLS</string>
+    <string name="home_not_encrypted">Not encrypted</string>
+    <string name="home_change_profile">Change</string>
+    <string name="home_connect">Connect</string>
+    <string name="home_connect_unavailable">Connecting arrives with the VPN service in a later milestone. This build sets up the app only.</string>
+</resources>

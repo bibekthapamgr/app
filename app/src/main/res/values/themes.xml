@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Window theme only; Compose draws the UI (core/designsystem). The window
+      background matches the token background so app start shows no flash.
+    -->
+    <style name="Theme.ProxyFlow" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/pf_window_background</item>
+    </style>
+</resources>

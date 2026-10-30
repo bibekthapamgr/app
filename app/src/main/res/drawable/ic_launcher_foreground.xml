@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The ProxyFlow mark (shield with arrow, PfIcons.Logo) on the 108 dp adaptive-icon
+  canvas: the 24-unit icon is scaled 2.5x and centred, so the shield (45 dp tall)
+  stays inside the 66 dp safe zone every launcher mask keeps. Also used as the
+  monochrome layer for Android 13 themed icons (only its alpha is used there).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2.5"
+        android:scaleY="2.5"
+        android:translateX="24"
+        android:translateY="24">
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"
+            android:strokeWidth="2.2"
+            android:strokeColor="@color/ic_launcher_mark"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M8.5 12h7M13 9.5l2.5 2.5 -2.5 2.5"
+            android:strokeWidth="2.2"
+            android:strokeColor="@color/ic_launcher_mark"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

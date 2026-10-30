@@ -41,6 +41,13 @@ PAIRS = [
     ("statusError", "background", 4.5, "'Error' status text"),
     ("outline", "surface", 3.0, "text-field border, toggle track (non-text)"),
     ("outline", "background", 3.0, "outlined card border (non-text)"),
+    # Material 3 surface containers derived in M2 (navigation bar, menus, dialogs).
+    ("onSurface", "surfaceContainer", 4.5, "navigation bar labels"),
+    ("onSurfaceVariant", "surfaceContainer", 4.5, "inactive navigation items"),
+    ("onSurface", "surfaceContainerHigh", 4.5, "menus and dialogs"),
+    ("onSurfaceVariant", "surfaceContainerHighest", 4.5, "text in filled fields"),
+    ("inverseOnSurface", "inverseSurface", 4.5, "snackbar text"),
+    ("onTertiaryContainer", "tertiaryContainer", 4.5, "text on tertiary container"),
 ]
 
 # Informational pairs: documented, not required.

@@ -8,9 +8,10 @@ name: m1-feasibility-spike
 
 on:
   push:
+    branches: [main]
     paths: ["spike/**", ".github/workflows/spike.yml"]
   pull_request:
-    paths: ["spike/**"]
+    paths: ["spike/**", ".github/workflows/spike.yml"]
   workflow_dispatch:
 
 permissions:

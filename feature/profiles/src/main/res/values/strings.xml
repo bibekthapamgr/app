@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Profiles list (boards C1–C3) -->
+    <string name="profiles_title">Profiles</string>
+    <string name="profiles_empty_title">No proxies yet</string>
+    <string name="profiles_empty_body">Save each proxy you use as a profile. Passwords are only ever sent to that proxy.</string>
+    <string name="profiles_add">Add proxy</string>
+    <string name="profiles_active">Active</string>
+    <string name="profiles_tls">TLS</string>
+    <string name="profiles_not_encrypted">Not encrypted</string>
+    <string name="profiles_sign_in">Sign-in</string>
+    <string name="profiles_more_actions">More actions for %1$s</string>
+    <string name="profiles_use">Use this proxy</string>
+    <string name="profiles_edit">Edit</string>
+    <string name="profiles_delete">Delete</string>
+    <string name="profiles_delete_title">Delete \"%1$s\"?</string>
+    <string name="profiles_delete_body">The profile and its saved username and password are erased from this phone. This can\'t be undone.</string>
+    <string name="profiles_cancel">Cancel</string>
+    <string name="profiles_memory_only">This build keeps profiles only until the app is closed. Storing them safely on the phone arrives in the next milestone.</string>
+
+    <!-- Add/Edit proxy (boards D1, D3, D4, D8) -->
+    <string name="edit_title_add">Add proxy</string>
+    <string name="edit_title_edit">Edit proxy</string>
+    <string name="edit_save">Save</string>
+    <string name="edit_name">Name (optional)</string>
+    <string name="edit_protocol">Protocol</string>
+    <string name="edit_server">Server</string>
+    <string name="edit_port">Port</string>
+    <string name="edit_port_hint">1–65535</string>
+    <string name="edit_sign_in">Proxy requires sign-in</string>
+    <string name="edit_sign_in_hint">Username and password from your provider</string>
+    <string name="edit_username">Username</string>
+    <string name="edit_password">Password</string>
+    <string name="edit_password_keep">Leave empty to keep the saved password</string>
+    <string name="edit_tls">Encrypt connection (TLS)</string>
+    <string name="edit_tls_hint">Recommended. Your proxy must support TLS on this port.</string>
+    <string name="edit_tls_server_name">TLS server name (optional)</string>
+    <string name="edit_tls_server_name_hint">Only if the certificate names a different host</string>
+    <string name="edit_plaintext_title">Not encrypted</string>
+    <string name="edit_plaintext_body">Without TLS, your username, password and the names of sites you open can be seen by anyone on the network between this phone and the proxy.</string>
+    <plurals name="edit_fix_fields">
+        <item quantity="one">Fix %d field to save this proxy</item>
+        <item quantity="other">Fix %d fields to save this proxy</item>
+    </plurals>
+    <string name="edit_discard_title">Discard changes?</string>
+    <string name="edit_discard_body">Your edits haven\'t been saved.</string>
+    <string name="edit_discard_body_named">Your edits to %1$s haven\'t been saved.</string>
+    <string name="edit_keep_editing">Keep editing</string>
+    <string name="edit_discard">Discard</string>
+
+    <!-- Validation messages (docs/m1/04 §5) -->
+    <string name="error_name_too_long">Use 40 characters or fewer</string>
+    <string name="error_server_invalid">Enter a hostname or IP address (no spaces)</string>
+    <string name="error_port_range">Port must be between 1 and 65535</string>
+    <string name="error_username_required">Enter the username from your provider</string>
+    <string name="error_username_colon">Usernames can\'t contain \":\" for HTTP proxies</string>
+    <string name="error_username_too_long">Usernames can be at most 255 bytes for SOCKS5</string>
+    <string name="error_password_without_username">Add a username for this password</string>
+    <string name="error_password_too_long">Passwords can be at most 255 bytes for SOCKS5</string>
+    <string name="error_tls_server_name">Enter a valid server name or leave empty</string>
+</resources>
