@@ -11,6 +11,8 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.navigation.NavController
 import org.junit.rules.TestRule
 
 // Helpers shared by the app-level UI tests.
@@ -29,6 +31,31 @@ internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.pre
     runOnUiThread { activity.onBackPressedDispatcher.onBackPressed() }
     waitForIdle()
 }
+
+/**
+ * Records what navigation and the activity lifecycle do from now on, for
+ * [describeNavigation]. Call after [waitForApp].
+ */
+internal fun AndroidComposeTestRule<out TestRule, MainActivity>.recordNavigation(events: MutableList<String>) {
+    runOnUiThread {
+        events += "activity ${System.identityHashCode(activity)}"
+        activity.lifecycle.addObserver(LifecycleEventObserver { _, event -> events += "activity $event" })
+        activity.navController?.addOnDestinationChangedListener { controller, destination, _ ->
+            events += "now at ${destination.route?.substringAfterLast('.')}; back stack ${controller.backStackNames()}"
+        }
+    }
+}
+
+/** The back stack (with each entry's lifecycle state) and the recorded events. */
+internal fun AndroidComposeTestRule<out TestRule, MainActivity>.describeNavigation(events: List<String>): String {
+    val controller = activity.navController ?: return "no NavController"
+    val entries = controller.currentBackStack.value.joinToString { entry ->
+        "${entry.destination.route?.substringAfterLast('.')}#${entry.id.take(4)}:${entry.lifecycle.currentState}"
+    }
+    return "activity ${System.identityHashCode(activity)}\nback stack: $entries\nevents:\n" + events.joinToString("\n")
+}
+
+private fun NavController.backStackNames() = currentBackStack.value.joinToString { it.destination.route?.substringAfterLast('.') ?: "?" }
 
 /**
  * Every window's text, as one line per node with its bounds and whether it is

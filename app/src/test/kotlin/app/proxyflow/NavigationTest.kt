@@ -26,11 +26,16 @@ class NavigationTest {
     @get:Rule(order = 0)
     val compose = createAndroidComposeRule<MainActivity>()
 
+    private val navigationEvents = mutableListOf<String>()
+
     @get:Rule(order = 1)
-    val dumpOnFailure = DumpOnFailureRule { compose.describeScreen() }
+    val dumpOnFailure = DumpOnFailureRule { compose.describeScreen() + compose.describeNavigation(navigationEvents) }
 
     @Before
-    fun waitForFirstFrame() = compose.waitForApp()
+    fun waitForFirstFrame() {
+        compose.waitForApp()
+        compose.recordNavigation(navigationEvents)
+    }
 
     @Test
     fun everyScreenOpensAndClosesWithoutCrashing() {

@@ -6,16 +6,25 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.VisibleForTesting
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.rememberNavController
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ThemePreference
 import app.proxyflow.core.model.UserSettings
 import app.proxyflow.ui.ProxyFlowApp
 
 class MainActivity : ComponentActivity() {
+    /** The app's navigation controller, so UI tests can describe the back stack when they fail. */
+    @get:VisibleForTesting
+    internal var navController: NavHostController? = null
+        private set
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val container = (application as ProxyFlowApplication).container
@@ -38,10 +47,13 @@ class MainActivity : ComponentActivity() {
                 )
                 onDispose {}
             }
+            val navController = rememberNavController()
+            SideEffect { this@MainActivity.navController = navController }
             ProxyFlowTheme(darkTheme = darkTheme) {
                 ProxyFlowApp(
                     viewModelFactory = container.viewModelFactory,
                     version = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    navController = navController,
                 )
             }
         }
