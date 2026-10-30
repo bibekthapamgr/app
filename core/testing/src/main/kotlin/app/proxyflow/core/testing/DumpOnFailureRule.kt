@@ -13,7 +13,7 @@ import org.junit.runners.model.Statement
  *
  * ```
  * @get:Rule(order = 0) val compose = createAndroidComposeRule<MainActivity>()
- * @get:Rule(order = 1) val dump = DumpOnFailureRule { compose.onAllNodes(isRoot()).printToString() }
+ * @get:Rule(order = 1) val dump = DumpOnFailureRule { compose.onAllNodes(isRoot()).printToString(maxDepth = Int.MAX_VALUE) }
  * ```
  */
 class DumpOnFailureRule(private val describeScreen: () -> String) : TestRule {

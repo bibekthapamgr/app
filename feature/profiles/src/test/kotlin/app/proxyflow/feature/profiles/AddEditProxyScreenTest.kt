@@ -32,7 +32,7 @@ class AddEditProxyScreenTest {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     @get:Rule(order = 1)
-    val dumpOnFailure = DumpOnFailureRule { compose.onAllNodes(isRoot()).printToString() }
+    val dumpOnFailure = DumpOnFailureRule { compose.onAllNodes(isRoot()).printToString(maxDepth = Int.MAX_VALUE) }
 
     /** Shows the screen with a plain state holder, so each test can change the state. */
     private fun showForm(initial: AddEditUiState = AddEditUiState()) {

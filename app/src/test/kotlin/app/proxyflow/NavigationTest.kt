@@ -29,7 +29,7 @@ class NavigationTest {
     val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule(order = 1)
-    val dumpOnFailure = DumpOnFailureRule { compose.onAllNodes(isRoot()).printToString() }
+    val dumpOnFailure = DumpOnFailureRule { compose.onAllNodes(isRoot()).printToString(maxDepth = Int.MAX_VALUE) }
 
     @Before
     fun waitForFirstFrame() = compose.waitForApp()
