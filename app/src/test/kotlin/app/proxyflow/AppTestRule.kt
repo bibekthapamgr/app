@@ -36,8 +36,15 @@ internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.top
 internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.formEndSave(): SemanticsNodeInteraction =
     onNode(hasText("Save") and hasAnyAncestor(hasScrollAction()))
 
-/** System Back, as the gesture or the back button would send it. */
+/**
+ * System Back, as the gesture or the back button would send it. The screen is
+ * first allowed to settle: a person cannot press Back in the same frame as the
+ * tap or keystroke before it, and a Back that arrives before that input is
+ * drawn reaches the back handlers of the previous frame (the form's "Discard
+ * changes?" handler is still off, NavHost's is not yet on).
+ */
 internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.pressBack() {
+    waitForIdle()
     runOnUiThread { activity.onBackPressedDispatcher.onBackPressed() }
     waitForIdle()
 }
