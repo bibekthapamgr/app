@@ -26,6 +26,13 @@ interface TunInterface {
     /** The interface's name (`tun0`…), read from the descriptor; null when it can't be read. */
     val name: String?
 
+    /**
+     * Drops the packets apps sent while no engine read the interface (traffic held during a
+     * switch or while blocked), so the next engine never delivers them later; apps send
+     * again. Only while no engine runs. Returns how many were dropped.
+     */
+    fun drain(): Int
+
     /** Closes the descriptor; Android then removes the interface. Safe to call more than once. */
     fun close()
 }

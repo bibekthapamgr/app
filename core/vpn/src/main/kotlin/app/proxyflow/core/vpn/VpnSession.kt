@@ -387,6 +387,11 @@ class VpnSession(
         val config = engine.tunConfig()
         // A switch or a restart keeps the interface; only a first connect creates one.
         val existing = tun
+        if (existing != null) {
+            // Held means dropped: what apps sent meanwhile must not reach the next proxy later.
+            val dropped = existing.drain()
+            if (dropped > 0) log("dropped $dropped packets held while no engine ran")
+        }
         val before = if (existing == null) current.vpnNetworks() else emptyList()
         val interfaceForEngine = existing ?: run {
             val fresh = try {

@@ -252,6 +252,7 @@ def main(argv: list[str]) -> int:
     squid = read_lines(os.path.join(args.pf, "squid-access.log"), required=True)
     squid_tunnels = [line for line in squid if "TCP_TUNNEL/200" in line and f"CONNECT {DESTINATION_NAME}:{DESTINATION_PORT}" in line]
     squid_by_address = [line for line in squid if f"CONNECT {DESTINATION_ADDRESS}:{DESTINATION_PORT}" in line]
+    squid_by_address_tunnels = [line for line in squid_by_address if "TCP_TUNNEL/200" in line]
     squid_denied = [line for line in squid if "TCP_DENIED/407" in line]
     squid_preflight = [line for line in squid if "CONNECT connectivitycheck.gstatic.com:443" in line]
     dante = read_lines(os.path.join(args.pf, "danted.log"), required=True)
@@ -275,7 +276,8 @@ def main(argv: list[str]) -> int:
         problems.append(f"Squid was asked for the destination by address {len(squid_by_address)} times: the phone resolved the name itself")
     if not dante_tunnels:
         problems.append("Dante opened no tunnel to the destination")
-    through_proxies = len(squid_tunnels) + len(dante_tunnels)
+    # A tunnel asked for by address is a problem of its own (above), but it did go through a proxy.
+    through_proxies = len(squid_tunnels) + len(squid_by_address_tunnels) + len(dante_tunnels)
     if len(destination) != through_proxies:
         problems.append(
             f"{len(destination)} connections reached the destination but the proxies opened {through_proxies} tunnels to it: "

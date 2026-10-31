@@ -44,7 +44,7 @@ sequenceDiagram
 
 ## 2. States and what they mean for traffic
 
-"Held" means apps' traffic goes into the VPN interface and nothing reads it: nothing leaves the phone except to the proxy, and nothing reaches the proxy either.
+"Held" means apps' traffic goes into the VPN interface and nothing reads it: nothing leaves the phone except to the proxy, and nothing reaches the proxy either. What was held is dropped before the next engine starts on the interface, never delivered later; apps send again.
 
 | State | Interface | Engine | Apps' traffic | Home | Notification |
 |---|---|---|---|---|---|

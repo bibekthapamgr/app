@@ -12,11 +12,14 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.system.ErrnoException
+import android.system.Os
 import androidx.annotation.VisibleForTesting
 import androidx.core.app.ServiceCompat
 import app.proxyflow.core.model.ConnectionState
 import java.io.File
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -213,6 +216,20 @@ class ProxyFlowVpnService :
         override val fd: Int = descriptor.fd
         override val name: String? = interfaceName(fd)
 
+        override fun drain(): Int {
+            // The descriptor is non-blocking (Builder.setBlocking(false)): each read takes one packet, EAGAIN when none is left.
+            val packet = ByteArray(DRAIN_BUFFER_BYTES)
+            var dropped = 0
+            try {
+                while (dropped < MAX_DRAINED_PACKETS && Os.read(descriptor.fileDescriptor, packet, 0, packet.size) > 0) dropped++
+            } catch (e: ErrnoException) {
+                // EAGAIN: nothing more queued.
+            } catch (e: InterruptedIOException) {
+                // Interrupted: what is left goes to the next engine.
+            }
+            return dropped
+        }
+
         override fun close() {
             runCatching { descriptor.close() }
         }
@@ -233,6 +250,12 @@ class ProxyFlowVpnService :
 
         /** At most about three status updates a second, well inside Android's limit. */
         private const val STATUS_INTERVAL_MS = 300L
+
+        /** A packet longer than this is still taken whole off the interface (and dropped). */
+        private const val DRAIN_BUFFER_BYTES = 2048
+
+        /** More than an interface queues (500 packets by default); bounds the loop if apps keep sending. */
+        private const val MAX_DRAINED_PACKETS = 4096
 
         /** Service instances alive in this process: never more than one (device lifecycle tests). */
         @VisibleForTesting

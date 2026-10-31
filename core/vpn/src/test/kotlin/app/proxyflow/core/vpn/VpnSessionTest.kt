@@ -234,6 +234,7 @@ class VpnSessionTest {
         assertEquals(second.id, switching.profileId)
         assertFalse("existing flows end when switching", engine.running)
         assertFalse("the first interface holds traffic during the check", host.tuns[0].closed)
+        host.tuns[0].queued = 3 // apps keep sending while traffic is held
         engine.gate?.countDown()
         val connected = awaitStatus(ConnectionStatus.Connected)
 
@@ -242,6 +243,9 @@ class VpnSessionTest {
         assertEquals("the switch creates no second interface", 1, log.count("establish"))
         assertFalse(host.tuns.single().closed)
         assertTrue(log.indexOf("start ${first.id} fd=100 mtu=9000") < log.indexOf("start ${second.id} fd=100 mtu=9000"))
+        // What was held is dropped before the next engine runs, never delivered through the next proxy later.
+        assertEquals(0, host.tuns.single().queued)
+        assertTrue(log.indexOf("drain fd=100") in 0 until log.indexOf("start ${second.id} fd=100 mtu=9000"))
     }
 
     @Test
@@ -799,6 +803,8 @@ class VpnSessionTest {
         val unnamed = object : TunInterface {
             override val fd = 102
             override val name: String? = null
+
+            override fun drain() = 0
 
             override fun close() = Unit
         }

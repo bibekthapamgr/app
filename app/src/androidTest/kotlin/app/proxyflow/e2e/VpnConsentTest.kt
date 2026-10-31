@@ -139,13 +139,16 @@ class VpnConsentTest {
         waitForText("Only one VPN app can be active. Starting another turns ProxyFlow off.", substring = true)
         compose.onNodeWithText("Continue").performClick()
         val opened = device.wait(Until.hasObject(By.pkg(VPN_DIALOGS)), DIALOG_TIMEOUT_MS)
-        assertTrue("Android's VPN dialog opens\n${screenReport()}", opened)
+        // The report only for a failure: it reads ProxyFlow's screen, which isn't there while Android's dialog is.
+        if (!opened) throw AssertionError("Android's VPN dialog did not open\n${screenReport()}")
     }
 
     /** What is in front, what has focus, and what Android logged about starting activities and the VPN. */
     private fun screenReport(): String = buildString {
-        val shown = listOf("Allow a VPN connection", "VPN permission needed", "Connecting…", "Connected", "Not connected")
-            .filter { compose.onAllNodesWithText(it).fetchSemanticsNodes().isNotEmpty() }
+        val shown = runCatching {
+            listOf("Allow a VPN connection", "VPN permission needed", "Connecting…", "Connected", "Not connected")
+                .filter { compose.onAllNodesWithText(it).fetchSemanticsNodes().isNotEmpty() }
+        }.getOrElse { "not on screen (${it.javaClass.simpleName})" }
         appendLine("ProxyFlow shows: $shown")
         appendLine("activities:")
         Shell.run("dumpsys activity activities").lines()

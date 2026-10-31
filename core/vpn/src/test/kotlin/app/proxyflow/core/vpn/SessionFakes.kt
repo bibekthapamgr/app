@@ -204,6 +204,14 @@ class FakeHost(private val log: CallLog) : VpnHost {
 class FakeTun(override val fd: Int, private val log: CallLog) : TunInterface {
     override val name = "tun${fd - FakeHost.FIRST_FD}"
 
+    /** Packets apps sent while no engine read the interface. */
+    @Volatile var queued = 0
+
+    override fun drain(): Int {
+        log.add("drain fd=$fd")
+        return queued.also { queued = 0 }
+    }
+
     @Volatile var closed = false
         private set
 
