@@ -27,7 +27,16 @@ The milestone began with a separate, CI-verified toolchain upgrade, proposed in 
 
 ### Sample database export (from CI)
 
-Pending: copied from the final run's annotations.
+The `profiles` table as `StoredProfilesTest.noCredentialIsInTheDatabaseFilesOrAnExportOfIt` exported it in CI (run 41161058796), after saving a sign-in profile, editing it with the password left empty and duplicating it. The username and password were generated for that run; neither appears in the export, and every other column is plain settings:
+
+```
+Test credentials, generated for this run only: username alice-3aa55036-d8a8-41c4-ac0e-01a88f75c264, password pw-6f303f7d-06a8-42bb-89a4-a81cdbedbbc8
+table profiles: id|name|protocol|host|port|tls_mode|tls_server_name|requires_sign_in|credentials_ct|credentials_iv|credentials_format|created_at|updated_at
+271fc3bc-…|Office 2|HTTP|203.0.113.10|3128|None|NULL|1|2661a6c20d9e50163b5df861e20ae54cb0afe401…42231a281004|d7f2d9322992aab94e76ab77|1|1793414754998|1793414755076|
+afe001ec-…|Office (copy)|HTTP|203.0.113.10|3128|None|NULL|1|c6a5c2cf8f1d873e87bee2a5910a2daa17a8abf0…7f14d102e6294dd2|55d86d7064c7d41c60b9e4df|1|1793414755094|1793414755094|
+```
+
+(Ciphertexts shortened here; the annotation has them in full.) The copy has its own IV and ciphertext because it is sealed under its own key.
 
 ## The brief's tasks
 
@@ -76,7 +85,17 @@ New and changed boards, recorded in CI and committed under `app/screenshots/`; e
 
 ## What CI found, and what changed
 
-Pending.
+The M3 code was first compiled in CI ([run 41159805755](https://github.com/bibekthapamgr/app/actions/runs/41159805755), commit `bd6212e`). Formatting, Lint with warnings as errors, both builds, the release manifest, all 31 `core/data` tests (Room, Robolectric, migrations) and the emulator tests on API 29 and API 35 passed on that first run. It found:
+
+| Found | Change |
+|---|---|
+| Two app tests tapped *Add proxy* while Home was still loading the profiles from Room (in M2 they came from memory, so the button was there at once) | The app-test helper waits until the app has stopped loading before a test starts; Home's loading is off the main thread by design |
+| A Test connection test checked a banner's second line while it was below the visible area | It scrolls to each line it checks |
+| The clipboard test could not copy from the password field: Compose offers no Copy or Cut on a password field at all, even while it is shown | The test now checks exactly that, and that Copy on the username field puts nothing on the clipboard while an ordinary field's Copy does |
+| The Room schema check failed, as designed, because the schema file was not committed yet | The file exported in CI was reviewed and committed (`core/data/schemas/…/1.json`) |
+| Screens changed by this milestone, and new boards without reference images | Recorded in CI, reviewed, committed (table above) |
+
+Also changed after reading the code again before the review: Duplicate, Delete and Use now report a storage or Keystore failure once (a short message) instead of crashing the app, and a tester that throws is reported as a failure (`INTERNAL`).
 
 ## Independent review: findings and changes
 
