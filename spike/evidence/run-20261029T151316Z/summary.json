@@ -1,0 +1,295 @@
+{
+  "run": "run-20261029T151316Z",
+  "environment": {
+    "run_id": "20261029T151316Z",
+    "kernel": "6.18.44-fc-v185",
+    "python": "3.13.18",
+    "engine_binary": "/home/claude/proxyflow-android/spike/bin/pfspike",
+    "tools": {
+      "curl": [
+        "curl 8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0 OpenSSL/3.0.13 zlib/1.3.1.zlib-ng brotli/1.1.0 zstd/1.5.5 libidn2/2.3.7 libpsl/0.21.2 (+libidn2/2.3.7) libssh/0.10.6/openssl/zlib nghttp2/1.59.0 librtmp/2.3 OpenLDAP/2.6.10"
+      ],
+      "tcpdump": [
+        "tcpdump version 4.99.4"
+      ],
+      "iperf3": [
+        "iperf 3.16 (cJSON 1.7.15)"
+      ],
+      "stunnel4": [],
+      "squid": [
+        "Squid Cache: Version 6.14"
+      ],
+      "danted": [
+        "Dante v1.4.3.  Copyright (c) 1997 - 2021 Inferno Nettverk A/S, Norway"
+      ],
+      "tshark": [
+        "TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3)."
+      ]
+    }
+  },
+  "e2e": {
+    "tests": 20,
+    "passed": 20,
+    "failed": 0,
+    "skipped": [
+      {
+        "test": "test_E06_ipv6",
+        "reason": "kernel booted with ipv6.disable=1: kernel-level IPv6 cannot be exercised on this host; engine IPv6 is covered by hermetic Go tests (engine/engine_test.go TestIPv6*)"
+      }
+    ],
+    "checks": 144,
+    "checks_passed": 144
+  },
+  "go_unit_tests": {
+    "tests": 50,
+    "passed": 50,
+    "failed": 0,
+    "packages": [
+      "proxyflow/spike/engine/adapters",
+      "proxyflow/spike/engine/engine",
+      "proxyflow/spike/engine/fakedns"
+    ]
+  },
+  "tests": [
+    {
+      "test": "test_E01_socks5_tcp_through_controlled_proxy",
+      "verdict": "PASS",
+      "title": "Core M1 spike: one supported TCP request through a controlled SOCKS5 proxy.",
+      "requirement": "M1 task 9 / acceptance 'actual proxy-routed TCP traffic'.",
+      "checks": 11,
+      "metrics": {
+        "request_seconds": 0.015,
+        "engine_rss_kib": 11620,
+        "engine_stop_ms": 201
+      }
+    },
+    {
+      "test": "test_E02_socks5_auth_real_dante",
+      "verdict": "PASS",
+      "title": "SOCKS5 username/password (RFC 1929) against a real Dante server; wrong password fails closed.",
+      "requirement": "HTTP CONNECT and SOCKS5 support with optional credentials.",
+      "checks": 7,
+      "metrics": {
+        "fail_seconds": 0.03
+      }
+    },
+    {
+      "test": "test_E03_http_connect_real_squid",
+      "verdict": "PASS",
+      "title": "HTTP CONNECT with Basic auth against a real Squid; HTTPS end to end; per-destination refusal.",
+      "requirement": "HTTP CONNECT support; target-level errors must not break the tunnel.",
+      "checks": 11,
+      "metrics": {}
+    },
+    {
+      "test": "test_E04_tls_to_proxy[expired-cert]",
+      "verdict": "PASS",
+      "title": "TLS to the proxy endpoint with strict certificate and hostname validation; failures fail closed.",
+      "requirement": "optional TLS with strict certificate validation; Play VpnService encryption policy.",
+      "checks": 7,
+      "metrics": {}
+    },
+    {
+      "test": "test_E04_tls_to_proxy[hostname-mismatch]",
+      "verdict": "PASS",
+      "title": "TLS to the proxy endpoint with strict certificate and hostname validation; failures fail closed.",
+      "requirement": "optional TLS with strict certificate validation; Play VpnService encryption policy.",
+      "checks": 7,
+      "metrics": {}
+    },
+    {
+      "test": "test_E04_tls_to_proxy[tls-to-plaintext-port]",
+      "verdict": "PASS",
+      "title": "TLS to the proxy endpoint with strict certificate and hostname validation; failures fail closed.",
+      "requirement": "optional TLS with strict certificate validation; Play VpnService encryption policy.",
+      "checks": 7,
+      "metrics": {}
+    },
+    {
+      "test": "test_E04_tls_to_proxy[untrusted-issuer]",
+      "verdict": "PASS",
+      "title": "TLS to the proxy endpoint with strict certificate and hostname validation; failures fail closed.",
+      "requirement": "optional TLS with strict certificate validation; Play VpnService encryption policy.",
+      "checks": 7,
+      "metrics": {}
+    },
+    {
+      "test": "test_E04_tls_to_proxy[valid-http-tls-auth]",
+      "verdict": "PASS",
+      "title": "TLS to the proxy endpoint with strict certificate and hostname validation; failures fail closed.",
+      "requirement": "optional TLS with strict certificate validation; Play VpnService encryption policy.",
+      "checks": 9,
+      "metrics": {}
+    },
+    {
+      "test": "test_E04_tls_to_proxy[valid-socks5-tls]",
+      "verdict": "PASS",
+      "title": "TLS to the proxy endpoint with strict certificate and hostname validation; failures fail closed.",
+      "requirement": "optional TLS with strict certificate validation; Play VpnService encryption policy.",
+      "checks": 7,
+      "metrics": {}
+    },
+    {
+      "test": "test_E05_plaintext_exposure_evidence",
+      "verdict": "PASS",
+      "title": "Evidence for the Play-policy finding: plain SOCKS5/HTTP expose credentials, hostnames and payload.",
+      "requirement": "Google Play VpnService policy (encrypt device-to-tunnel-endpoint traffic).",
+      "checks": 6,
+      "metrics": {}
+    },
+    {
+      "test": "test_E07_dns_never_leaves_device",
+      "verdict": "PASS",
+      "title": "DNS: fake-IP answers, interception of any resolver, no direct DNS on the uplink.",
+      "requirement": "never fall back to direct DNS; M1 task 3 DNS behaviour.",
+      "checks": 10,
+      "metrics": {
+        "dns_outcomes": {
+          "mapped": 3,
+          "refused": 1
+        }
+      }
+    },
+    {
+      "test": "test_E08_udp_blocked_not_leaked",
+      "verdict": "PASS",
+      "title": "Non-DNS UDP (incl. QUIC-style UDP/443) is rejected inside the tunnel and never leaves the device.",
+      "requirement": "M1 task 3 UDP behaviour; unsupported UDP verified before release.",
+      "checks": 9,
+      "metrics": {
+        "icmp_unreachable_sent_to_apps": 2,
+        "udp_rejected": 2,
+        "app_saw": "ECONNREFUSED (ICMP port unreachable from the tunnel)"
+      }
+    },
+    {
+      "test": "test_E09_icmp_not_faked",
+      "verdict": "PASS",
+      "title": "ICMP echo is not proxied and never answered with a fake reply.",
+      "requirement": "M1 task 3 ICMP behaviour; diagnostics must not mislead users.",
+      "checks": 6,
+      "metrics": {}
+    },
+    {
+      "test": "test_E10_fail_closed_when_proxy_down",
+      "verdict": "PASS",
+      "title": "Proxy outage: connections are refused fast, nothing bypasses, recovery is automatic.",
+      "requirement": "do not silently bypass the configured proxy; kill-switch behaviour.",
+      "checks": 10,
+      "metrics": {
+        "outage_fail_seconds": 0.009
+      }
+    },
+    {
+      "test": "test_E11_kill_switch_semantics",
+      "verdict": "PASS",
+      "title": "What happens on engine crash vs. VPN interface teardown, with and without OS lockdown.",
+      "requirement": "kill-switch / fail-closed design input for M5/M8.",
+      "checks": 8,
+      "metrics": {}
+    },
+    {
+      "test": "test_E12_concurrency_and_cleanup",
+      "verdict": "PASS",
+      "title": "200 concurrent flows, then verify every flow and goroutine is released on stop.",
+      "requirement": "resource cleanup verified before release; resource limits.",
+      "checks": 6,
+      "metrics": {
+        "idle_rss_kib": 10688,
+        "peak_rss_kib": 20300,
+        "peak_active": 200,
+        "goroutines_before_stop": 7,
+        "goroutines_after_stop": 2,
+        "stop_ms": 202,
+        "wall_seconds": 3.17
+      }
+    },
+    {
+      "test": "test_E13_throughput_comparison",
+      "verdict": "PASS",
+      "title": "Indicative throughput / CPU / memory: spike engine vs hev-socks5-tunnel (same VM, same Dante proxy).",
+      "requirement": "M1 task 7 engine evaluation (resource limits).",
+      "checks": 1,
+      "metrics": {
+        "no_tunnel_proxy_host_to_dest": {
+          "upload_mbps": 15728.1
+        },
+        "spike_gvisor_mtu1500": {
+          "tun_mtu": 1500,
+          "upload_mbps": 1712.2,
+          "download_mbps": 686.8,
+          "engine_cpu_seconds": 9.18,
+          "cpu_seconds_per_gb": 7.65,
+          "rss_kib_after": 33248
+        },
+        "hev_no_offload_mtu1500": {
+          "tun_mtu": 1500,
+          "upload_mbps": 3145.1,
+          "download_mbps": 2720.0,
+          "engine_cpu_seconds": 6.79,
+          "cpu_seconds_per_gb": 2.32,
+          "rss_kib_after": 2468
+        },
+        "spike_gvisor_mtu9000": {
+          "tun_mtu": 9000,
+          "upload_mbps": 4555.5,
+          "download_mbps": 3346.3,
+          "engine_cpu_seconds": 7.6,
+          "cpu_seconds_per_gb": 1.92,
+          "rss_kib_after": 24444
+        },
+        "hev_no_offload_mtu9000": {
+          "tun_mtu": 9000,
+          "upload_mbps": 6084.9,
+          "download_mbps": 6339.8,
+          "engine_cpu_seconds": 5.89,
+          "cpu_seconds_per_gb": 0.95,
+          "rss_kib_after": 2504
+        },
+        "hev_linux_offloads_mtu1500 (not available on Android)": {
+          "tun_mtu": 1500,
+          "upload_mbps": 7632.1,
+          "download_mbps": 6934.8,
+          "engine_cpu_seconds": 4.88,
+          "cpu_seconds_per_gb": 0.67,
+          "rss_kib_after": 2696
+        }
+      }
+    },
+    {
+      "test": "test_E14_log_hygiene",
+      "verdict": "PASS",
+      "title": "Credentials, payload and (by default) destinations never appear in engine logs, stats or events.",
+      "requirement": "never log credentials or application payloads.",
+      "checks": 3,
+      "metrics": {}
+    },
+    {
+      "test": "test_E15_hev_baseline_behaviour",
+      "verdict": "PASS",
+      "title": "Same harness against hev-socks5-tunnel (comparison candidate): SOCKS5 only.",
+      "requirement": "M1 task 7 engine evaluation.",
+      "checks": 6,
+      "metrics": {
+        "hev_idle_rss_kib": 2256,
+        "hev_udp_probe": {
+          "sent": 3,
+          "error": "timeout"
+        },
+        "hev_udp_associate_attempts": [
+          "cmd_3_unsupported",
+          "cmd_3_unsupported",
+          "cmd_3_unsupported"
+        ]
+      }
+    },
+    {
+      "test": "test_E16_proxy_hostname_resolved_on_underlying_network",
+      "verdict": "PASS",
+      "title": "The proxy's own hostname is resolved via the underlying network with a protected socket; nothing else is.",
+      "requirement": "routing loop prevention; DNS handling.",
+      "checks": 6,
+      "metrics": {}
+    }
+  ]
+}

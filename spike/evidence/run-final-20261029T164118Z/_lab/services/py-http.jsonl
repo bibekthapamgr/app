@@ -1,0 +1,8 @@
+{"auth": "required", "event": "listening", "listen": ["10.20.0.2:3128"], "proxy": "http", "ts": 1793292211.072983}
+{"client": "10.20.0.2:54950", "event": "session", "proxy": "http", "result": "io_error:IncompleteReadError", "ts": 1793292211.165141}
+{"auth": "ok", "client": "10.20.0.2:43358", "event": "connected", "host_header": "web.test:80", "method": "CONNECT", "proxy": "http", "result": "ok", "target": "web.test:80", "ts": 1793292226.731958, "upstream_src": "10.20.0.2"}
+{"auth": "ok", "bytes_down": 245, "bytes_up": 97, "client": "10.20.0.2:43358", "event": "session", "host_header": "web.test:80", "method": "CONNECT", "proxy": "http", "result": "ok", "target": "web.test:80", "ts": 1793292226.734188, "upstream_src": "10.20.0.2"}
+{"auth": "ok", "client": "10.10.0.2:41740", "event": "connected", "host_header": "web.test:80", "method": "CONNECT", "proxy": "http", "result": "ok", "target": "web.test:80", "ts": 1793292244.340617, "upstream_src": "10.20.0.2"}
+{"auth": "ok", "bytes_down": 249, "bytes_up": 99, "client": "10.10.0.2:41740", "event": "session", "host_header": "web.test:80", "method": "CONNECT", "proxy": "http", "result": "ok", "target": "web.test:80", "ts": 1793292244.341834, "upstream_src": "10.20.0.2"}
+{"auth": "ok", "client": "10.20.0.2:47908", "event": "connected", "host_header": "web.test:80", "method": "CONNECT", "proxy": "http", "result": "ok", "target": "web.test:80", "ts": 1793292334.322253, "upstream_src": "10.20.0.2"}
+{"auth": "ok", "bytes_down": 245, "bytes_up": 97, "client": "10.20.0.2:47908", "event": "session", "host_header": "web.test:80", "method": "CONNECT", "proxy": "http", "result": "ok", "target": "web.test:80", "ts": 1793292334.324627, "upstream_src": "10.20.0.2"}

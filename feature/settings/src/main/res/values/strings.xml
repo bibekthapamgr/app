@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings (board E1). Only settings that work in this build are shown. -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_coming">Kill switch, reconnect and log settings will appear here when the VPN service is added.</string>
+    <string name="settings_section_app">App</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">System default</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_cancel">Cancel</string>
+    <string name="settings_about">About &amp; privacy</string>
+</resources>

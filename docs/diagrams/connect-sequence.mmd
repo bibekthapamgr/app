@@ -1,0 +1,32 @@
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant UI as Home (Compose)
+    participant C as ConnectionController
+    participant V as ProxyFlowVpnService
+    participant K as CredentialStore
+    participant G as Engine (Go)
+    participant O as Android
+    U->>UI: Connect
+    UI->>O: VpnService.prepare() (first time → B9 + system dialog)
+    O-->>UI: granted
+    UI->>C: connect(profileId)
+    C->>K: decrypt password (Keystore)
+    K-->>C: secret (in memory only)
+    C->>V: startForegroundService (systemExempted)
+    V->>G: preflight(profile) — TCP/TLS/auth handshake via protected socket
+    alt pre-flight fails
+        G-->>V: error code
+        V-->>UI: B6b layout, not connected (nothing switched over)
+    else pre-flight OK
+        V->>O: Builder: addAddress 198.18.0.1/32 + fd00:66::1/128, routes 0.0.0.0/0 + ::/0, DNS 198.18.0.2, MTU, addDisallowedApplication(self), setUnderlyingNetworks
+        O-->>V: TUN fd
+        V->>G: start(fd, profile, limits)
+        G-->>V: running · stats/events stream
+        V-->>UI: Connected (B4) + notification (B10)
+    end
+    Note over V,G: Network change → setUnderlyingNetworks + engine.resetFlows() · proxy failures → Reconnecting (blocked)
+    U->>UI: Disconnect
+    UI->>C: disconnect()
+    C->>G: stop() — closes flows, releases goroutines
+    C->>V: close TUN fd, stopForeground, stopSelf

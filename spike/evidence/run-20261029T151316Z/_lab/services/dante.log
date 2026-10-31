@@ -1,0 +1,75 @@
+Oct 30 00:14:54 (1793286894.290997) danted[13634]: info: Dante/server[1/1] v1.4.3 running
+Oct 30 00:14:54 (1793286894.532081) danted[13641]: info: pass(1): tcp/accept [: 10.20.0.2.36274 10.20.0.2.1081
+Oct 30 00:14:54 (1793286894.532346) danted[13641]: info: block(1): tcp/accept ]: 10.20.0.2.36274 10.20.0.2.1081: error after reading 0 bytes in 0 seconds: eof from local client
+Oct 30 00:14:58 (1793286898.964132) danted[13641]: info: pass(1): tcp/accept [: 10.10.0.2.44674 10.20.0.2.1081
+Oct 30 00:14:58 (1793286898.983874) danted[13658]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.44674 10.20.0.2.1081 -> 10.20.0.2.44674 10.30.0.2.80
+Oct 30 00:14:58 (1793286898.985244) danted[13658]: info: pass(1): tcp/connect ]: 192 -> username%pfdante@10.10.0.2.44674 10.20.0.2.1081 -> 77, 77 -> 10.20.0.2.44674 10.30.0.2.80 -> 192: remote peer closed.  Session duration: 0s
+Oct 30 00:15:00 (1793286900.063561) danted[13641]: info: pass(1): tcp/accept [: 10.10.0.2.44678 10.20.0.2.1081
+Oct 30 00:15:00 (1793286900.081449) danted[13641]: info: block(1): tcp/accept ]: 10.10.0.2.44678 10.20.0.2.1081: error after reading 28 bytes in 0 seconds: system password authentication failed for user "pfdante"
+Oct 30 00:16:02 (1793286962.533356) danted[13641]: info: pass(1): tcp/accept [: 10.10.0.2.42780 10.20.0.2.1081
+Oct 30 00:16:02 (1793286962.558777) danted[13711]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42780 10.20.0.2.1081 -> 10.20.0.2.42780 10.30.0.2.5201
+Oct 30 00:16:02 (1793286962.560451) danted[13668]: info: pass(1): tcp/accept [: 10.10.0.2.42796 10.20.0.2.1081
+Oct 30 00:16:02 (1793286962.577095) danted[13711]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42796 10.20.0.2.1081 -> 10.20.0.2.42796 10.30.0.2.5201
+Oct 30 00:16:06 (1793286966.588344) danted[13711]: info: pass(1): tcp/connect ]: 0 -> username%pfdante@10.10.0.2.42796 10.20.0.2.1081 -> 858483437, 858483437 -> 10.20.0.2.42796 10.30.0.2.5201 -> 0: remote peer error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:06 (1793286966.588375) danted[13711]: info: pass(1): tcp/accept ]: 0 -> 10.10.0.2.42796 10.20.0.2.1081 -> 858483437: remote peer error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:06 (1793286966.592225) danted[13711]: info: pass(1): tcp/connect ]: 335 -> username%pfdante@10.10.0.2.42780 10.20.0.2.1081 -> 479, 479 -> 10.20.0.2.42780 10.30.0.2.5201 -> 335: local client closed.  Session duration: 4s
+Oct 30 00:16:06 (1793286966.596348) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.42806 10.20.0.2.1081
+Oct 30 00:16:06 (1793286966.616916) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42806 10.20.0.2.1081 -> 10.20.0.2.42806 10.30.0.2.5201
+Oct 30 00:16:06 (1793286966.618643) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.42812 10.20.0.2.1081
+Oct 30 00:16:06 (1793286966.634353) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42812 10.20.0.2.1081 -> 10.20.0.2.42812 10.30.0.2.5201
+Oct 30 00:16:10 (1793286970.641003) danted[14061]: info: pass(1): tcp/connect ]: 363278176 -> username%pfdante@10.10.0.2.42812 10.20.0.2.1081 -> 37, 37 -> 10.20.0.2.42812 10.30.0.2.5201 -> 363278176: local client error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:10 (1793286970.641025) danted[14061]: info: pass(1): tcp/accept ]: 363278176 -> 10.10.0.2.42812 10.20.0.2.1081 -> 37: local client error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:10 (1793286970.641238) danted[14061]: info: pass(1): tcp/connect ]: 335 -> username%pfdante@10.10.0.2.42806 10.20.0.2.1081 -> 509, 509 -> 10.20.0.2.42806 10.30.0.2.5201 -> 335: local client closed.  Session duration: 4s
+Oct 30 00:16:12 (1793286972.974972) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.49294 10.20.0.2.1081
+Oct 30 00:16:13 (1793286973.405136) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.49294 10.20.0.2.1081 -> 10.20.0.2.49294 10.30.0.2.5201
+Oct 30 00:16:13 (1793286973.405790) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.49304 10.20.0.2.1081
+Oct 30 00:16:13 (1793286973.832907) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.49304 10.20.0.2.1081 -> 10.20.0.2.49304 10.30.0.2.5201
+Oct 30 00:16:17 (1793286977.836603) danted[14061]: info: pass(1): tcp/connect ]: 0 -> username%pfdante@10.10.0.2.49304 10.20.0.2.1081 -> 1573588533, 1573588533 -> 10.20.0.2.49304 10.30.0.2.5201 -> 0: remote peer error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:17 (1793286977.836634) danted[14061]: info: pass(1): tcp/accept ]: 0 -> 10.10.0.2.49304 10.20.0.2.1081 -> 1573588533: remote peer error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:17 (1793286977.837935) danted[14061]: info: pass(1): tcp/connect ]: 335 -> username%pfdante@10.10.0.2.49294 10.20.0.2.1081 -> 496, 496 -> 10.20.0.2.49294 10.30.0.2.5201 -> 335: local client closed.  Session duration: 5s
+Oct 30 00:16:17 (1793286977.843987) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.42314 10.20.0.2.1081
+Oct 30 00:16:18 (1793286978.273875) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42314 10.20.0.2.1081 -> 10.20.0.2.42314 10.30.0.2.5201
+Oct 30 00:16:18 (1793286978.275077) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.42326 10.20.0.2.1081
+Oct 30 00:16:18 (1793286978.708767) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42326 10.20.0.2.1081 -> 10.20.0.2.42326 10.30.0.2.5201
+Oct 30 00:16:22 (1793286982.711774) danted[14061]: info: pass(1): tcp/connect ]: 1362493440 -> username%pfdante@10.10.0.2.42326 10.20.0.2.1081 -> 37, 37 -> 10.20.0.2.42326 10.30.0.2.5201 -> 1362558976: local client error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:22 (1793286982.712173) danted[14061]: info: pass(1): tcp/connect ]: 335 -> username%pfdante@10.10.0.2.42314 10.20.0.2.1081 -> 511, 511 -> 10.20.0.2.42314 10.30.0.2.5201 -> 335: local client closed.  Session duration: 5s
+Oct 30 00:16:23 (1793286983.480163) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.42342 10.20.0.2.1081
+Oct 30 00:16:23 (1793286983.499197) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42342 10.20.0.2.1081 -> 10.20.0.2.42342 10.30.0.2.5201
+Oct 30 00:16:23 (1793286983.500881) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.42346 10.20.0.2.1081
+Oct 30 00:16:23 (1793286983.518740) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42346 10.20.0.2.1081 -> 10.20.0.2.42346 10.30.0.2.5201
+Oct 30 00:16:27 (1793286987.523383) danted[14061]: info: pass(1): tcp/connect ]: 0 -> username%pfdante@10.10.0.2.42346 10.20.0.2.1081 -> 2281569917, 2281569917 -> 10.20.0.2.42346 10.30.0.2.5201 -> 0: remote peer error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:27 (1793286987.523412) danted[14061]: info: pass(1): tcp/accept ]: 0 -> 10.10.0.2.42346 10.20.0.2.1081 -> 2281569917: remote peer error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:27 (1793286987.525256) danted[14061]: info: pass(1): tcp/connect ]: 336 -> username%pfdante@10.10.0.2.42342 10.20.0.2.1081 -> 494, 494 -> 10.20.0.2.42342 10.30.0.2.5201 -> 336: local client closed.  Session duration: 4s
+Oct 30 00:16:27 (1793286987.530898) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.42340 10.20.0.2.1081
+Oct 30 00:16:27 (1793286987.548515) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42340 10.20.0.2.1081 -> 10.20.0.2.42340 10.30.0.2.5201
+Oct 30 00:16:27 (1793286987.549625) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.42354 10.20.0.2.1081
+Oct 30 00:16:27 (1793286987.564780) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42354 10.20.0.2.1081 -> 10.20.0.2.42354 10.30.0.2.5201
+Oct 30 00:16:31 (1793286991.573026) danted[14061]: info: pass(1): tcp/connect ]: 1679562808 -> username%pfdante@10.10.0.2.42354 10.20.0.2.1081 -> 37, 37 -> 10.20.0.2.42354 10.30.0.2.5201 -> 1679562808: local client error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:31 (1793286991.573047) danted[14061]: info: pass(1): tcp/accept ]: 1679562808 -> 10.10.0.2.42354 10.20.0.2.1081 -> 37: local client error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:31 (1793286991.573174) danted[14061]: info: pass(1): tcp/connect ]: 337 -> username%pfdante@10.10.0.2.42340 10.20.0.2.1081 -> 511, 511 -> 10.20.0.2.42340 10.30.0.2.5201 -> 337: local client closed.  Session duration: 4s
+Oct 30 00:16:33 (1793286993.909385) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.42368 10.20.0.2.1081
+Oct 30 00:16:34 (1793286994.340808) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42368 10.20.0.2.1081 -> 10.20.0.2.42368 10.30.0.2.5201
+Oct 30 00:16:34 (1793286994.341775) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.42372 10.20.0.2.1081
+Oct 30 00:16:34 (1793286994.772816) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.42372 10.20.0.2.1081 -> 10.20.0.2.42372 10.30.0.2.5201
+Oct 30 00:16:38 (1793286998.775925) danted[14061]: info: pass(1): tcp/connect ]: 0 -> username%pfdante@10.10.0.2.42372 10.20.0.2.1081 -> 3044520918, 3044455382 -> 10.20.0.2.42372 10.30.0.2.5201 -> 0: remote peer error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:38 (1793286998.819380) danted[14061]: info: pass(1): tcp/connect ]: 335 -> username%pfdante@10.10.0.2.42368 10.20.0.2.1081 -> 492, 492 -> 10.20.0.2.42368 10.30.0.2.5201 -> 335: local client closed.  Session duration: 5s
+Oct 30 00:16:38 (1793286998.824829) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.53644 10.20.0.2.1081
+Oct 30 00:16:39 (1793286999.257198) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.53644 10.20.0.2.1081 -> 10.20.0.2.53644 10.30.0.2.5201
+Oct 30 00:16:39 (1793286999.257905) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.53658 10.20.0.2.1081
+Oct 30 00:16:39 (1793286999.689242) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.53658 10.20.0.2.1081 -> 10.20.0.2.53658 10.30.0.2.5201
+Oct 30 00:16:43 (1793287003.735316) danted[14061]: info: pass(1): tcp/connect ]: 3173005224 -> username%pfdante@10.10.0.2.53658 10.20.0.2.1081 -> 37, 37 -> 10.20.0.2.53658 10.30.0.2.5201 -> 3173070760: local client error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:43 (1793287003.735497) danted[14061]: info: pass(1): tcp/connect ]: 334 -> username%pfdante@10.10.0.2.53644 10.20.0.2.1081 -> 511, 511 -> 10.20.0.2.53644 10.30.0.2.5201 -> 334: local client closed.  Session duration: 5s
+Oct 30 00:16:45 (1793287005.254540) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.53668 10.20.0.2.1081
+Oct 30 00:16:45 (1793287005.693840) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.53668 10.20.0.2.1081 -> 10.20.0.2.53668 10.30.0.2.5201
+Oct 30 00:16:45 (1793287005.694463) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.53684 10.20.0.2.1081
+Oct 30 00:16:46 (1793287006.123998) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.53684 10.20.0.2.1081 -> 10.20.0.2.53684 10.30.0.2.5201
+Oct 30 00:16:50 (1793287010.125502) danted[14061]: info: pass(1): tcp/connect ]: 0 -> username%pfdante@10.10.0.2.53684 10.20.0.2.1081 -> 3817073785, 3817008249 -> 10.20.0.2.53684 10.30.0.2.5201 -> 0: remote peer error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:50 (1793287010.167044) danted[14061]: info: pass(1): tcp/connect ]: 334 -> username%pfdante@10.10.0.2.53668 10.20.0.2.1081 -> 490, 490 -> 10.20.0.2.53668 10.30.0.2.5201 -> 334: local client closed.  Session duration: 5s
+Oct 30 00:16:50 (1793287010.175966) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.53360 10.20.0.2.1081
+Oct 30 00:16:50 (1793287010.608978) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.53360 10.20.0.2.1081 -> 10.20.0.2.53360 10.30.0.2.5201
+Oct 30 00:16:50 (1793287010.609543) danted[14062]: info: pass(1): tcp/accept [: 10.10.0.2.53376 10.20.0.2.1081
+Oct 30 00:16:51 (1793287011.045252) danted[14061]: info: pass(1): tcp/connect [: username%pfdante@10.10.0.2.53376 10.20.0.2.1081 -> 10.20.0.2.53376 10.30.0.2.5201
+Oct 30 00:16:55 (1793287015.047428) danted[14061]: info: pass(1): tcp/connect ]: 3481598376 -> username%pfdante@10.10.0.2.53376 10.20.0.2.1081 -> 37, 37 -> 10.20.0.2.53376 10.30.0.2.5201 -> 3481663912: local client error (Connection reset by peer).  Session duration: 4s
+Oct 30 00:16:55 (1793287015.047801) danted[14061]: info: pass(1): tcp/connect ]: 338 -> username%pfdante@10.10.0.2.53360 10.20.0.2.1081 -> 509, 509 -> 10.20.0.2.53360 10.30.0.2.5201 -> 338: local client closed.  Session duration: 4s
+Oct 30 00:17:14 (1793287034.038954) danted[13634]: info: sigterm(): exiting on signal 15
+Oct 30 00:17:14 (1793287034.041661) danted[13634]: alert: mother[1/1]: shutting down

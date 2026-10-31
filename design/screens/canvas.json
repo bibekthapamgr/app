@@ -1,0 +1,449 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-29T15:30:00Z"
+  },
+  "title": "ProxyFlow V1 — Screens & Error States",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "A1 Welcome",
+      "is_interactive": true
+    },
+    "A2-HowItWorks.dc.html": {
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "A2 How it works & limits",
+      "is_interactive": true
+    },
+    "A3-Notifications.dc.html": {
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "A3 Notifications (Android 13+)",
+      "is_interactive": true
+    },
+    "B9-VpnPermission.dc.html": {
+      "x": 1410,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "B9 VPN permission explainer",
+      "is_interactive": true
+    },
+    "H1-VpnDenied.dc.html": {
+      "x": 1880,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "H1 VPN permission denied",
+      "is_interactive": true
+    },
+    "B1-HomeEmpty.dc.html": {
+      "x": 0,
+      "y": 1244,
+      "w": 390,
+      "h": 844,
+      "title": "B1 Home — no profile",
+      "is_interactive": true
+    },
+    "B2-HomeDisconnected.dc.html": {
+      "x": 470,
+      "y": 1244,
+      "w": 390,
+      "h": 844,
+      "title": "B2 Home — disconnected",
+      "is_interactive": true
+    },
+    "B3-HomeConnecting.dc.html": {
+      "x": 940,
+      "y": 1244,
+      "w": 390,
+      "h": 844,
+      "title": "B3 Home — connecting",
+      "is_interactive": true
+    },
+    "B4-HomeConnected.dc.html": {
+      "x": 1410,
+      "y": 1244,
+      "w": 390,
+      "h": 844,
+      "title": "B4 Home — connected",
+      "is_interactive": true
+    },
+    "B5-HomeReconnecting.dc.html": {
+      "x": 1880,
+      "y": 1244,
+      "w": 390,
+      "h": 844,
+      "title": "B5 Home — reconnecting (blocked)",
+      "is_interactive": true
+    },
+    "B7-HomeOffline.dc.html": {
+      "x": 2350,
+      "y": 1244,
+      "w": 390,
+      "h": 844,
+      "title": "B7 Home — offline (blocked)",
+      "is_interactive": true
+    },
+    "B8-ProfilePicker.dc.html": {
+      "x": 2820,
+      "y": 1244,
+      "w": 390,
+      "h": 844,
+      "title": "B8 Profile picker sheet",
+      "is_interactive": true
+    },
+    "B6a-AuthFailed.dc.html": {
+      "x": 0,
+      "y": 2488,
+      "w": 390,
+      "h": 844,
+      "title": "B6 Error — AUTH_FAILED",
+      "is_interactive": true
+    },
+    "B6b-ConnectFailed.dc.html": {
+      "x": 470,
+      "y": 2488,
+      "w": 390,
+      "h": 844,
+      "title": "B6 Error — PROXY_UNREACHABLE on connect",
+      "is_interactive": true
+    },
+    "B6c-TlsUntrusted.dc.html": {
+      "x": 940,
+      "y": 2488,
+      "w": 390,
+      "h": 844,
+      "title": "B6 Error — TLS_UNTRUSTED",
+      "is_interactive": true
+    },
+    "B6d-VpnRevoked.dc.html": {
+      "x": 1410,
+      "y": 2488,
+      "w": 390,
+      "h": 844,
+      "title": "B6 System — VPN revoked",
+      "is_interactive": true
+    },
+    "H2-AlwaysOnOther.dc.html": {
+      "x": 1880,
+      "y": 2488,
+      "w": 390,
+      "h": 844,
+      "title": "H2 Another app is Always-on VPN",
+      "is_interactive": true
+    },
+    "H3-CredentialUnreadable.dc.html": {
+      "x": 2350,
+      "y": 2488,
+      "w": 390,
+      "h": 844,
+      "title": "H3 Saved password unreadable",
+      "is_interactive": true
+    },
+    "ErrorCatalogue.dc.html": {
+      "x": 2820,
+      "y": 2488,
+      "w": 1180,
+      "h": 1700,
+      "title": "Error catalogue — every code"
+    },
+    "C1-ProfilesEmpty.dc.html": {
+      "x": 0,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "C1 Profiles — empty",
+      "is_interactive": true
+    },
+    "C2-ProfilesList.dc.html": {
+      "x": 470,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "C2 Profiles — list",
+      "is_interactive": true
+    },
+    "C3-DeleteConfirm.dc.html": {
+      "x": 940,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "C3 Delete confirmation",
+      "is_interactive": true
+    },
+    "D1-AddProxy.dc.html": {
+      "x": 1410,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "D1 Add proxy — empty",
+      "is_interactive": true
+    },
+    "D3-ValidationErrors.dc.html": {
+      "x": 1880,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "D3 Add proxy — validation errors",
+      "is_interactive": true
+    },
+    "D4-PlaintextWarning.dc.html": {
+      "x": 2350,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "D4 Edit — TLS off warning",
+      "is_interactive": true
+    },
+    "D5-Testing.dc.html": {
+      "x": 2820,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "D5 Testing proxy",
+      "is_interactive": true
+    },
+    "D6-TestPassed.dc.html": {
+      "x": 3290,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "D6 Test passed",
+      "is_interactive": true
+    },
+    "D7-TestFailed.dc.html": {
+      "x": 3760,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "D7 Test failed",
+      "is_interactive": true
+    },
+    "D8-UnsavedChanges.dc.html": {
+      "x": 4230,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "D8 Unsaved changes",
+      "is_interactive": true
+    },
+    "E1-Settings.dc.html": {
+      "x": 0,
+      "y": 5772,
+      "w": 390,
+      "h": 844,
+      "title": "E1 Settings",
+      "is_interactive": true
+    },
+    "E2-LockdownGuide.dc.html": {
+      "x": 470,
+      "y": 5772,
+      "w": 390,
+      "h": 844,
+      "title": "E2 System kill switch guide",
+      "is_interactive": true
+    },
+    "F1-LogsEmpty.dc.html": {
+      "x": 940,
+      "y": 5772,
+      "w": 390,
+      "h": 844,
+      "title": "F1 Logs — empty",
+      "is_interactive": true
+    },
+    "F2-Logs.dc.html": {
+      "x": 1410,
+      "y": 5772,
+      "w": 390,
+      "h": 844,
+      "title": "F2 Logs — list",
+      "is_interactive": true
+    },
+    "F3-LogDetail.dc.html": {
+      "x": 1880,
+      "y": 5772,
+      "w": 390,
+      "h": 844,
+      "title": "F3 Log entry detail",
+      "is_interactive": true
+    },
+    "G1-About.dc.html": {
+      "x": 2350,
+      "y": 5772,
+      "w": 390,
+      "h": 844,
+      "title": "G1 About & privacy",
+      "is_interactive": true
+    },
+    "B10-Notifications.dc.html": {
+      "x": 2820,
+      "y": 5772,
+      "w": 420,
+      "h": 640,
+      "title": "B10 Status notifications"
+    },
+    "Dark-Disconnected.dc.html": {
+      "x": 0,
+      "y": 7016,
+      "w": 390,
+      "h": 844,
+      "title": "Dark — disconnected"
+    },
+    "Dark-Connected.dc.html": {
+      "x": 470,
+      "y": 7016,
+      "w": 390,
+      "h": 844,
+      "title": "Dark — connected"
+    },
+    "Dark-AuthFailed.dc.html": {
+      "x": 940,
+      "y": 7016,
+      "w": 390,
+      "h": 844,
+      "title": "Dark — AUTH_FAILED"
+    },
+    "Dark-Profiles.dc.html": {
+      "x": 1410,
+      "y": 7016,
+      "w": 390,
+      "h": 844,
+      "title": "Dark — profiles"
+    },
+    "D9-ReconnectWithChanges.dc.html": {
+      "x": 4700,
+      "y": 4528,
+      "w": 390,
+      "h": 844,
+      "title": "D9 Reconnect with changes",
+      "is_interactive": true
+    },
+    "E1b-SettingsProtected.dc.html": {
+      "x": 3290,
+      "y": 5772,
+      "w": 390,
+      "h": 844,
+      "title": "E1b Settings — system kill switch on, notifications off",
+      "is_interactive": true
+    },
+    "B11-QuickSettingsTile.dc.html": {
+      "x": 3760,
+      "y": 5772,
+      "w": 420,
+      "h": 520,
+      "title": "B11 Quick Settings tile"
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "A2-HowItWorks.dc.html",
+    "A3-Notifications.dc.html",
+    "B9-VpnPermission.dc.html",
+    "H1-VpnDenied.dc.html",
+    "B1-HomeEmpty.dc.html",
+    "B2-HomeDisconnected.dc.html",
+    "B3-HomeConnecting.dc.html",
+    "B4-HomeConnected.dc.html",
+    "B5-HomeReconnecting.dc.html",
+    "B7-HomeOffline.dc.html",
+    "B8-ProfilePicker.dc.html",
+    "B6a-AuthFailed.dc.html",
+    "B6b-ConnectFailed.dc.html",
+    "B6c-TlsUntrusted.dc.html",
+    "B6d-VpnRevoked.dc.html",
+    "H2-AlwaysOnOther.dc.html",
+    "H3-CredentialUnreadable.dc.html",
+    "ErrorCatalogue.dc.html",
+    "C1-ProfilesEmpty.dc.html",
+    "C2-ProfilesList.dc.html",
+    "C3-DeleteConfirm.dc.html",
+    "D1-AddProxy.dc.html",
+    "D3-ValidationErrors.dc.html",
+    "D4-PlaintextWarning.dc.html",
+    "D5-Testing.dc.html",
+    "D6-TestPassed.dc.html",
+    "D7-TestFailed.dc.html",
+    "D8-UnsavedChanges.dc.html",
+    "D9-ReconnectWithChanges.dc.html",
+    "E1-Settings.dc.html",
+    "E1b-SettingsProtected.dc.html",
+    "E2-LockdownGuide.dc.html",
+    "F1-LogsEmpty.dc.html",
+    "F2-Logs.dc.html",
+    "F3-LogDetail.dc.html",
+    "G1-About.dc.html",
+    "B10-Notifications.dc.html",
+    "B11-QuickSettingsTile.dc.html",
+    "Dark-Disconnected.dc.html",
+    "Dark-Connected.dc.html",
+    "Dark-AuthFailed.dc.html",
+    "Dark-Profiles.dc.html"
+  ],
+  "notes": {
+    "row1": {
+      "x": 0,
+      "y": -300,
+      "text": "First run & permissions",
+      "kind": "title1",
+      "maxW": 2270
+    },
+    "row2": {
+      "x": 0,
+      "y": 944,
+      "text": "Home — connection states",
+      "kind": "title1",
+      "maxW": 3210
+    },
+    "row3": {
+      "x": 0,
+      "y": 2188,
+      "text": "Errors — traffic stays blocked, never bypassed",
+      "kind": "title1",
+      "maxW": 4000
+    },
+    "row4": {
+      "x": 0,
+      "y": 4228,
+      "text": "Profiles & proxy editor",
+      "kind": "title1",
+      "maxW": 5090
+    },
+    "row5": {
+      "x": 0,
+      "y": 5472,
+      "text": "Settings, logs, about, notifications",
+      "kind": "title1",
+      "maxW": 4180
+    },
+    "row6": {
+      "x": 0,
+      "y": 6716,
+      "text": "Dark theme",
+      "kind": "title1",
+      "maxW": 1800
+    },
+    "legend": {
+      "x": 2350,
+      "y": -300,
+      "w": 420,
+      "text": "Tokens: design/tokens/proxyflow.tokens.json (all text pairs ≥ 4.5:1, see contrast-report.md).\nBrand teal #20B8A5 is a FILL with navy content in light theme; text/links use teal-700 #157A6D.\nError codes match the engine (docs/m1/04-ux-screens-and-error-states.md).",
+      "fill": "teal",
+      "size": "s"
+    }
+  },
+  "designSystems": []
+}

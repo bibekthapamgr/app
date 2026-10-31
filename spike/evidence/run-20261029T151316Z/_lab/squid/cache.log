@@ -1,0 +1,66 @@
+2026/10/30 00:14:54| aclIpParseIpData: IPv6 has not been enabled.
+2026/10/30 00:14:54| aclIpParseIpData: IPv6 has not been enabled.
+2026/10/30 00:14:54| aclIpParseIpData: IPv6 has not been enabled.
+2026/10/30 00:14:54| Processing Configuration File: /home/claude/proxyflow-android/spike/evidence/run-20261029T151316Z/_lab/squid/squid.conf (depth 0)
+2026/10/30 00:14:54| ERROR: Directive 'dns_v4_first' is obsolete.
+2026/10/30 00:14:54| dns_v4_first : Remove this line. Squid no longer supports preferential treatment of DNS A records.
+2026/10/30 00:14:54| Created PID file (/home/claude/proxyflow-android/spike/evidence/run-20261029T151316Z/_lab/squid/squid.pid)
+2026/10/30 00:14:54| Set Current Directory to /home/claude/proxyflow-android/spike/evidence/run-20261029T151316Z/_lab/squid
+2026/10/30 00:14:54| Starting Squid Cache version 6.14 for x86_64-pc-linux-gnu...
+2026/10/30 00:14:54| Service Name: squid
+2026/10/30 00:14:54| Process ID 13636
+2026/10/30 00:14:54| Process Roles: master worker
+2026/10/30 00:14:54| With 20000 file descriptors available
+2026/10/30 00:14:54| Initializing IP Cache...
+2026/10/30 00:14:54| DNS IPv4 socket created at 0.0.0.0, FD 8
+2026/10/30 00:14:54| Adding nameserver 127.0.0.1 from /etc/resolv.conf
+2026/10/30 00:14:54| helperOpenServers: Starting 0/20 'basic_ncsa_auth' processes
+2026/10/30 00:14:54| helperOpenServers: No 'basic_ncsa_auth' processes needed.
+2026/10/30 00:14:54| Logfile: opening log stdio:/home/claude/proxyflow-android/spike/evidence/run-20261029T151316Z/_lab/squid/access.log
+2026/10/30 00:14:54| Local cache digest enabled; rebuild/rewrite every 3600/3600 sec
+2026/10/30 00:14:54| Store logging disabled
+2026/10/30 00:14:54| Swap maxSize 0 + 262144 KB, estimated 20164 objects
+2026/10/30 00:14:54| Target number of buckets: 1008
+2026/10/30 00:14:54| Using 8192 Store buckets
+2026/10/30 00:14:54| Max Mem  size: 262144 KB
+2026/10/30 00:14:54| Max Swap size: 0 KB
+2026/10/30 00:14:54| Using Least Load store dir selection
+2026/10/30 00:14:54| Set Current Directory to /home/claude/proxyflow-android/spike/evidence/run-20261029T151316Z/_lab/squid
+2026/10/30 00:14:54| Finished loading MIME types and icons.
+2026/10/30 00:14:54| HTCP Disabled.
+2026/10/30 00:14:54| Pinger socket opened on FD 12
+2026/10/30 00:14:54| Squid plugin modules loaded: 0
+2026/10/30 00:14:54| Adaptation support is off.
+2026/10/30 00:14:54| Accepting HTTP Socket connections at conn2 local=10.20.0.2:3129 remote=[::] FD 10 flags=9
+    listening port: 10.20.0.2:3129
+2026/10/30 00:14:54 pinger| Initialising ICMP pinger ...
+2026/10/30 00:14:54 pinger| ICMP socket opened.
+2026/10/30 00:14:54 pinger| Open  icmp_sock: (97) Address family not supported by protocol
+2026/10/30 00:14:54 pinger| ERROR: Unable to start ICMPv6 pinger.
+2026/10/30 00:14:55| storeLateRelease: released 0 objects
+2026/10/30 00:15:03| Starting new basicauthenticator helpers...
+    current master transaction: master54
+2026/10/30 00:15:03| helperOpenServers: Starting 1/20 'basic_ncsa_auth' processes
+    current master transaction: master54
+2026/10/30 00:17:14| Preparing for shutdown after 5 requests
+2026/10/30 00:17:14| Waiting 1 seconds for active connections to finish
+2026/10/30 00:17:14| Closing HTTP(S) port 10.20.0.2:3129
+    listening port: 10.20.0.2:3129
+2026/10/30 00:17:14| Closing Pinger socket on FD 12
+2026/10/30 00:17:16| Shutdown: Negotiate authentication.
+2026/10/30 00:17:16| Shutdown: Digest authentication.
+2026/10/30 00:17:16| Shutdown: Basic authentication.
+2026/10/30 00:17:16| Shutting down...
+2026/10/30 00:17:16| storeDirWriteCleanLogs: Starting...
+2026/10/30 00:17:16|   Finished.  Wrote 0 entries.
+2026/10/30 00:17:16|   Took 0.00 seconds (  0.00 entries/sec).
+CPU Usage: 0.039 seconds = 0.023 user + 0.016 sys
+Maximum Resident Size: 146688 KB
+Page faults with physical i/o: 0
+2026/10/30 00:17:16| Logfile: closing log stdio:/home/claude/proxyflow-android/spike/evidence/run-20261029T151316Z/_lab/squid/access.log
+2026/10/30 00:17:16| Open FD UNSTARTED     0 stdin
+2026/10/30 00:17:16| Open FD UNSTARTED     1 stdout
+2026/10/30 00:17:16| Open FD UNSTARTED     2 stderr
+2026/10/30 00:17:16| Open FD READ/WRITE   13 basic_ncsa_auth #1
+2026/10/30 00:17:16| Squid Cache (Version 6.14): Exiting normally.
+2026/10/30 00:17:16| Removing PID file (/home/claude/proxyflow-android/spike/evidence/run-20261029T151316Z/_lab/squid/squid.pid)

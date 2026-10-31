@@ -1,0 +1,62 @@
+{
+  "test": "test_E09_icmp_not_faked",
+  "title": "ICMP echo is not proxied and never answered with a fake reply.",
+  "requirement": "M1 task 3 ICMP behaviour; diagnostics must not mislead users.",
+  "checks": [
+    {
+      "check": "IPv4 ping: 100% loss",
+      "passed": true,
+      "detail": "PING 10.30.0.2 (10.30.0.2) 56(84) bytes of data.\n\n--- 10.30.0.2 ping statistics ---\n3 packets transmitted, 0 received, 100% packet loss, time 2026ms\n\n"
+    },
+    {
+      "check": "raw echo requests injected at the TUN (IPv4, IPv6, IPv6 behind an extension header) get no reply",
+      "passed": true,
+      "detail": {
+        "sent": [
+          "ipv4",
+          "ipv6",
+          "ipv6_ext_header"
+        ],
+        "echo_replies": []
+      }
+    },
+    {
+      "check": "engine sent zero ICMP echo replies",
+      "passed": true,
+      "detail": 0
+    },
+    {
+      "check": "engine dropped the echo requests before its stack (and blocked any reply)",
+      "passed": true,
+      "detail": {
+        "icmp_echo_requests_dropped": 5,
+        "icmp_echo_replies_blocked": 1
+      }
+    },
+    {
+      "check": "uplink: nothing left the device except to the proxy endpoint(s) [('10.20.0.2', 1080)]",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "check": "uplink: no packet from the device reached a destination address directly",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: no DNS (port 53) left the device",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "zero ICMP on the uplink",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "metrics": {},
+  "notes": [
+    "Kernel IPv6 ping skipped: kernel booted with ipv6.disable=1: kernel-level IPv6 cannot be exercised on this host; engine IPv6 is covered by hermetic Go tests (engine/engine_test.go TestIPv6*) \u2014 raw IPv6 echo requests are injected at the TUN instead"
+  ],
+  "verdict": "PASS"
+}

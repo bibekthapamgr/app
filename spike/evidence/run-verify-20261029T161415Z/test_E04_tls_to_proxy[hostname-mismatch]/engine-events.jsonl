@@ -1,0 +1,4 @@
+{"time":"2026-10-30T01:16:10.455727705+09:00","type":"engine_started"}
+{"time":"2026-10-30T01:16:10.709278962+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T01:16:10.712701465+09:00","type":"conn_fail","proto":"tcp","dst_kind":"hostname","port":80,"code":"TLS_HOSTNAME","detail":"proxy certificate does not match the proxy hostname"}
+{"time":"2026-10-30T01:16:10.718701832+09:00","type":"engine_stopped"}

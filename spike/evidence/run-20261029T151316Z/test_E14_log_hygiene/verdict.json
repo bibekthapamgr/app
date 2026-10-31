@@ -1,0 +1,25 @@
+{
+  "test": "test_E14_log_hygiene",
+  "title": "Credentials, payload and (by default) destinations never appear in engine logs, stats or events.",
+  "requirement": "never log credentials or application payloads.",
+  "checks": [
+    {
+      "check": "no username, password or payload in any engine output",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "check": "destinations omitted by default",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "destinations included only when the privacy switch is on",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "metrics": {},
+  "notes": [],
+  "verdict": "PASS"
+}

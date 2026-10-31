@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Welcome to ProxyFlow</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; display: flex; flex-direction: column; padding: 56px 24px 32px; gap: 32px">
+  <div style="display: flex; align-items: center; gap: 12px">
+    <div style="width: 56px; height: 56px; border-radius: 16px; background: #20B8A5; color: #14243A; display: flex; align-items: center; justify-content: center">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M8.5 12h7M13 9.5l2.5 2.5-2.5 2.5"/></svg>
+    </div>
+    <span style="font-size: 22px; font-weight: 700; letter-spacing: 0.2px">ProxyFlow</span>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 12px">
+    <h1 style="margin: 0; font-size: 32px; line-height: 40px; font-weight: 500">Route your apps through your own proxy</h1>
+    <p style="margin: 0; font-size: 16px; line-height: 24px; color: #465569">Use an HTTP or SOCKS5 proxy you already have. ProxyFlow sends supported app traffic to it — and nowhere else.</p>
+  </div>
+  <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 20px">
+    <li style="display: flex; gap: 16px; align-items: flex-start">
+      <span style="width: 40px; height: 40px; flex: none; border-radius: 12px; background: #C7F0EA; color: #0B2F2A; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></svg></span>
+      <span style="display: flex; flex-direction: column; gap: 2px"><strong style="font-size: 16px; font-weight: 500">Bring your own proxy</strong><span style="font-size: 14px; line-height: 20px; color: #465569">HTTP CONNECT or SOCKS5, with optional username, password and TLS.</span></span>
+    </li>
+    <li style="display: flex; gap: 16px; align-items: flex-start">
+      <span style="width: 40px; height: 40px; flex: none; border-radius: 12px; background: #C7F0EA; color: #0B2F2A; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>
+      <span style="display: flex; flex-direction: column; gap: 2px"><strong style="font-size: 16px; font-weight: 500">No account, no tracking</strong><span style="font-size: 14px; line-height: 20px; color: #465569">Profiles, passwords and logs stay on this phone. Passwords are encrypted.</span></span>
+    </li>
+    <li style="display: flex; gap: 16px; align-items: flex-start">
+      <span style="width: 40px; height: 40px; flex: none; border-radius: 12px; background: #C7F0EA; color: #0B2F2A; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span>
+      <span style="display: flex; flex-direction: column; gap: 2px"><strong style="font-size: 16px; font-weight: 500">Fails closed</strong><span style="font-size: 14px; line-height: 20px; color: #465569">If the proxy stops working, traffic is paused — never sent around it.</span></span>
+    </li>
+  </ul>
+  <div style="flex: 1"></div>
+  <div style="display: flex; flex-direction: column; gap: 16px; align-items: stretch">
+    <div aria-label="Step 1 of 3" style="display: flex; gap: 8px; justify-content: center">
+      <span style="width: 24px; height: 8px; border-radius: 4px; background: #157A6D"></span>
+      <span style="width: 8px; height: 8px; border-radius: 4px; background: #C9D1DC"></span>
+      <span style="width: 8px; height: 8px; border-radius: 4px; background: #C9D1DC"></span>
+    </div>
+    <a href="A2-HowItWorks.dc.html" style="height: 52px; border-radius: 26px; background: #157A6D; color: #FFFFFF; font-size: 16px; font-weight: 500; display: flex; align-items: center; justify-content: center; text-decoration: none">Get started</a>
+    <p style="margin: 0; font-size: 13px; line-height: 18px; color: #465569; text-align: center">ProxyFlow doesn't sell or provide proxies. Use one from a provider you trust.</p>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Another app is Always-on VPN</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; position: relative; overflow: hidden">
+  <div aria-hidden="true" style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding-top: 72px; gap: 40px">
+    <span style="font-size: 22px; font-weight: 500; align-self: flex-start; margin-left: 16px">ProxyFlow</span>
+    <span style="width: 176px; height: 176px; border-radius: 88px; background: #20B8A5"></span>
+    <span style="width: 340px; height: 88px; border-radius: 16px; background: #FFFFFF"></span>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(16, 24, 32, 0.5)"></div>
+  <section role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-body" style="position: absolute; left: 32px; right: 32px; top: 230px; background: #FFFFFF; border-radius: 28px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#14243A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="align-self: center"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M12 9v4M12 16h.01"/></svg>
+    <h2 id="dlg-title" style="margin: 0; font-size: 24px; line-height: 32px; font-weight: 400; text-align: center">Another app is your Always-on VPN</h2>
+    <div id="dlg-body" style="display: flex; flex-direction: column; gap: 10px; font-size: 14px; line-height: 20px; color: #465569">
+      <p style="margin: 0">Android only allows one VPN, and another app is set to Always-on, so ProxyFlow can't start.</p>
+      <p style="margin: 0">In VPN settings, turn off Always-on for that app — or choose ProxyFlow instead — then try again.</p>
+    </div>
+    <p style="margin: 0; font-size: 12px; line-height: 16px; color: #465569">Code: ALWAYS_ON_OTHER_APP</p>
+    <div style="display: flex; gap: 8px; justify-content: flex-end">
+      <a href="B2-HomeDisconnected.dc.html" style="height: 48px; padding: 0 16px; border-radius: 24px; color: #157A6D; font-size: 14px; font-weight: 500; display: flex; align-items: center; text-decoration: none">Cancel</a>
+      <a href="E2-LockdownGuide.dc.html" style="height: 48px; padding: 0 16px; border-radius: 24px; color: #157A6D; font-size: 14px; font-weight: 500; display: flex; align-items: center; text-decoration: none">Open VPN settings</a>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

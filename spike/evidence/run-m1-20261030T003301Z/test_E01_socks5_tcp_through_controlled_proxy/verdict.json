@@ -1,0 +1,134 @@
+{
+  "test": "test_E01_socks5_tcp_through_controlled_proxy",
+  "title": "Core M1 spike: one supported TCP request through a controlled SOCKS5 proxy.",
+  "requirement": "M1 task 9 / acceptance 'actual proxy-routed TCP traffic'.",
+  "checks": [
+    {
+      "check": "HTTP 200 received by the app",
+      "passed": true,
+      "detail": {
+        "rc": 0,
+        "code": 200,
+        "body": "{\"client_ip\": \"10.20.0.2\", \"client_port\": 58840, \"server_port\": 80, \"tls\": false, \"path\": \"/nonce/715d6e82d14778ea\", \"nonce\": \"715d6e82d14778ea\"}\n",
+        "seconds": 0.027,
+        "stderr": ""
+      }
+    },
+    {
+      "check": "end-to-end payload intact (nonce echoed)",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "destination saw the PROXY's address, not the phone's",
+      "passed": true,
+      "detail": "10.20.0.2"
+    },
+    {
+      "check": "proxy received CONNECT web.test:80 as a HOSTNAME (remote DNS)",
+      "passed": true,
+      "detail": [
+        {
+          "atyp": "domain",
+          "auth": "none",
+          "bytes_down": 237,
+          "bytes_up": 93,
+          "client": "10.10.0.2:38340",
+          "event": "session",
+          "methods_offered": [
+            0
+          ],
+          "proxy": "socks5",
+          "result": "ok",
+          "target": "web.test:80",
+          "ts": 1793320525.737578,
+          "upstream_src": "10.20.0.2"
+        }
+      ]
+    },
+    {
+      "check": "app DNS query entered the tunnel (UDP/53 on tun0)",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "app TCP SYN to a fake IP (198.18.0.0/15) entered the tunnel",
+      "passed": true,
+      "detail": [
+        "198.18.0.1->198.18.1.0"
+      ]
+    },
+    {
+      "check": "uplink: nothing left the device except to the proxy endpoint(s) [('10.20.0.2', 1080)] (14 packets captured)",
+      "passed": true,
+      "detail": {
+        "capture": "/home/claude/proxyflow-android/spike/evidence/run-m1-20261030T003301Z/test_E01_socks5_tcp_through_controlled_proxy/pcap/2-device-uplink.pcap",
+        "exists": true,
+        "packets": 14,
+        "violations": []
+      }
+    },
+    {
+      "check": "uplink: no packet from the device reached a destination address directly",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: no DNS (port 53) left the device",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "every destination request came from the proxy",
+      "passed": true,
+      "detail": [
+        "10.20.0.2"
+      ]
+    },
+    {
+      "check": "engine counted the flow and the fake-DNS mapping",
+      "passed": true,
+      "detail": {
+        "bytes_down": 237,
+        "bytes_up": 93,
+        "consecutive_proxy_failures": 0,
+        "dns": {
+          "mapped": 1
+        },
+        "failures": {},
+        "fake_dns_mappings": 1,
+        "goroutines": 2,
+        "goroutines_after_stop": 2,
+        "goroutines_before_stop": 9,
+        "heap_inuse_kib": 1304,
+        "icmp_echo_replies_blocked": 0,
+        "icmp_echo_replies_sent": 0,
+        "icmp_echo_requests_dropped": 0,
+        "icmp_fragments_dropped": 0,
+        "idle_timeouts": 0,
+        "malformed_in": 0,
+        "packets_in": 6,
+        "packets_out": 7,
+        "recovered_panics": 0,
+        "rss_kib": 12252,
+        "settle_ms": 200,
+        "stop_ms": 0,
+        "stopped": true,
+        "tcp_active": 0,
+        "tcp_active_at_stop": 0,
+        "tcp_failed": 0,
+        "tcp_opened": 1,
+        "time": "2026-10-30T09:35:25.940728672+09:00",
+        "udp_rejected": 0,
+        "udp_rejected_ports": {}
+      }
+    }
+  ],
+  "metrics": {
+    "request_seconds": 0.027,
+    "engine_rss_kib": 12252,
+    "engine_stop_ms": 0
+  },
+  "notes": [],
+  "verdict": "PASS"
+}

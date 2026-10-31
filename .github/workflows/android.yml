@@ -1,0 +1,153 @@
+name: android
+
+# M2 app checks: formatting (ktlint), Android Lint, JVM and Robolectric tests,
+# debug and release builds, the release manifest, and screenshots of every
+# screen compared with the committed ones. The secrets scan has its own
+# workflow (secrets.yml), which runs on every push whatever changed.
+# Third-party actions are pinned to commit SHAs (tag in the comment) so a
+# moved tag cannot change what runs. Each Gradle step runs even when an
+# earlier one failed, so one run reports every problem at once; none runs
+# unless the Gradle wrapper passed validation.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["spike/**", "docs/**", "**/*.md"]
+  pull_request:
+    paths-ignore: ["spike/**", "docs/**", "**/*.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash # -eo pipefail, so a failing Gradle run fails its step even through tee
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # the build runs project code; it needs no token
+
+      - name: Design tokens and generated colours agree
+        run: |
+          python3 design/tools/check_contrast.py
+          python3 design/tools/generate_compose_colors.py
+          git diff --exit-code -- core/designsystem/src/main/kotlin/app/proxyflow/core/designsystem/theme/Color.kt
+
+      # Gradle steps run only after this passed: a tampered wrapper jar must never run.
+      - id: wrapper
+        if: ${{ !cancelled() }}
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - id: java
+        if: ${{ !cancelled() && steps.wrapper.outcome == 'success' }}
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - id: gradle
+        if: ${{ !cancelled() && steps.java.outcome == 'success' }}
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Formatting (ktlint via Spotless)
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: ./gradlew spotlessCheck --continue 2>&1 | tee "$RUNNER_TEMP/gradle-1-spotless.log"
+
+      - name: Android Lint (app and every module it uses)
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: ./gradlew :app:lintDebug --continue 2>&1 | tee "$RUNNER_TEMP/gradle-2-lint.log"
+
+      - name: Unit, ViewModel and Robolectric UI tests
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: ./gradlew testDebugUnitTest :core:model:test --continue 2>&1 | tee "$RUNNER_TEMP/gradle-3-test.log"
+
+      - name: Debug build
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: ./gradlew :app:assembleDebug 2>&1 | tee "$RUNNER_TEMP/gradle-4-debug.log"
+
+      - name: Release build (R8, unsigned unless signing secrets are configured)
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: ./gradlew :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle-5-release.log"
+
+      - name: Release manifest (permissions, backups, debuggable, cleartext, exported components)
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: python3 scripts/check_release_manifest.py
+
+      # Fails when a screen no longer matches its copy in app/screenshots, and records the new
+      # image there; the screenshots job publishes it for review (ci-screenshots/<branch>).
+      - name: Screenshots of every screen, light and dark, match app/screenshots (Roborazzi)
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: ./gradlew :app:verifyAndRecordRoborazziDebug 2>&1 | tee "$RUNNER_TEMP/gradle-6-screenshots.log"
+
+      - name: Build facts (test counts, APK sizes, permissions, libraries; emitted as notices)
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: |
+          ./gradlew -q :app:dependencies --configuration releaseRuntimeClasspath > "$RUNNER_TEMP/release-runtime-classpath.txt"
+          python3 scripts/ci_build_facts.py "$RUNNER_TEMP/release-runtime-classpath.txt"
+
+      - name: Error digest (also emitted as annotations, readable through the API)
+        if: failure()
+        run: python3 scripts/ci_error_digest.py "$RUNNER_TEMP"/gradle-*.log
+
+      - name: Upload screenshots (for the screenshots job)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots
+          path: app/screenshots/
+          if-no-files-found: error
+
+      - name: Upload reports, screenshots and APKs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-reports
+          path: |
+            **/build/reports/
+            **/build/test-results/
+            app/screenshots/
+            app/build/outputs/roborazzi/
+            app/build/outputs/apk/
+          if-no-files-found: warn
+
+  # Publishes the recorded screenshots on a side branch (ci-screenshots/<branch>), so
+  # they can be reviewed and committed as reference images without downloading
+  # artifacts. Also after a failed build: when a screen changed, its new image is
+  # what needs reviewing. Runs separately from the build so that only this job,
+  # which runs no project code, holds a token that can push; it never pushes to
+  # the PR branch itself.
+  screenshots:
+    needs: build
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: screenshots
+          path: app/screenshots
+
+      - name: Push the screenshots to ci-screenshots/<branch>
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/screenshots
+          git commit --allow-empty -m "Screenshots recorded in CI for $(git rev-parse --short HEAD)"
+          git push --force origin "HEAD:refs/heads/ci-screenshots/$HEAD_REF"

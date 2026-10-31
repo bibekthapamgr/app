@@ -1,0 +1,32 @@
+{
+  "bytes_down": 0,
+  "bytes_up": 0,
+  "consecutive_proxy_failures": 1,
+  "dns": {
+    "mapped": 1
+  },
+  "failures": {
+    "PROXY_DNS_FAILED": 1
+  },
+  "fake_dns_mappings": 1,
+  "goroutines": 2,
+  "goroutines_after_stop": 2,
+  "goroutines_before_stop": 8,
+  "heap_inuse_kib": 1256,
+  "icmp_echo_replies_sent": 0,
+  "idle_timeouts": 0,
+  "last_proxy_error": "PROXY_DNS_FAILED",
+  "malformed_in": 0,
+  "packets_in": 2,
+  "packets_out": 2,
+  "recovered_panics": 0,
+  "rss_kib": 11744,
+  "stop_ms": 201,
+  "stopped": true,
+  "tcp_active": 0,
+  "tcp_failed": 1,
+  "tcp_opened": 0,
+  "time": "2026-10-30T01:18:10.194194363+09:00",
+  "udp_rejected": 0,
+  "udp_rejected_ports": {}
+}

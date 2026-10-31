@@ -1,0 +1,4 @@
+{"time":"2026-10-30T00:15:15.81474392+09:00","type":"engine_started"}
+{"time":"2026-10-30T00:15:16.066591176+09:00","type":"dns","proto":"udp","port":53,"detail":"mapped"}
+{"time":"2026-10-30T00:15:16.068602672+09:00","type":"conn_fail","proto":"tcp","dst_kind":"hostname","port":80,"code":"TLS_EXPIRED","detail":"proxy certificate is expired or not yet valid"}
+{"time":"2026-10-30T00:15:16.074186029+09:00","type":"engine_stopped"}

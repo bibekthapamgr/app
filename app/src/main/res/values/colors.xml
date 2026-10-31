@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- From design/tokens/proxyflow.tokens.json (brand.backgroundLight, brand.teal, brand.navy). -->
+    <color name="pf_window_background">#FFF6F8FB</color>
+    <color name="ic_launcher_background">#FF20B8A5</color>
+    <color name="ic_launcher_mark">#FF14243A</color>
+</resources>

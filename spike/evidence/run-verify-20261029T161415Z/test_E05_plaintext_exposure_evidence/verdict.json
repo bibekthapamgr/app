@@ -1,0 +1,42 @@
+{
+  "test": "test_E05_plaintext_exposure_evidence",
+  "title": "Evidence for the Play-policy finding: plain SOCKS5/HTTP expose credentials, hostnames and payload.",
+  "requirement": "Google Play VpnService policy (encrypt device-to-tunnel-endpoint traffic).",
+  "checks": [
+    {
+      "check": "both plaintext modes work (HTTP 200)",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SOCKS5 plain: password visible on the network (RFC 1929 is cleartext)",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SOCKS5 plain: destination hostname visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "SOCKS5 plain: app payload of a non-TLS app visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "HTTP plain: Proxy-Authorization (base64 credentials) visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "HTTP plain: CONNECT line with hostname visible",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "metrics": {},
+  "notes": [
+    "Contrast with test_E04 valid-* cases, where none of these appear on the wire."
+  ],
+  "verdict": "PASS"
+}

@@ -1,0 +1,25 @@
+sequenceDiagram
+    autonumber
+    participant A as Other app
+    participant T as TUN (VpnService)
+    participant E as Engine (netstack)
+    participant D as Fake-IP DNS
+    participant P as Adapter (SOCKS5/HTTP[/TLS])
+    participant X as Proxy
+    participant S as Destination
+    A->>T: DNS A? example.com (UDP/53, any resolver)
+    T->>E: UDP packet
+    E->>D: query
+    D-->>A: A 198.18.4.7 (TTL 5 s) — never leaves the phone
+    A->>T: TCP SYN to 198.18.4.7:443
+    T->>E: SYN (not answered yet)
+    E->>D: reverse 198.18.4.7 → example.com
+    E->>P: Dial(example.com:443)
+    P->>X: TCP (+TLS) to proxy, protected socket
+    P->>X: SOCKS5 CONNECT example.com:443 / HTTP CONNECT example.com:443
+    X->>S: proxy resolves and connects
+    X-->>P: success
+    P-->>E: tunnel ready
+    E-->>A: SYN-ACK (handshake completes only now)
+    A->>S: app bytes ⇄ relayed through the tunnel
+    Note over E,X: If the dial fails: RST to the app (fail closed), error code to Logs/UI

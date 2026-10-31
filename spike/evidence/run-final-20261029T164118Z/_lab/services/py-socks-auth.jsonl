@@ -1,0 +1,5 @@
+{"auth": "required", "event": "listening", "listen": ["10.20.0.2:1082"], "proxy": "socks5", "ts": 1793292211.036518}
+{"client": "10.20.0.2:45274", "event": "session", "proxy": "socks5", "result": "io_error:IncompleteReadError", "ts": 1793292211.153589}
+{"atyp": "domain", "auth": "ok", "auth_version": 1, "client": "10.10.0.2:40940", "event": "connected", "methods_offered": [0, 2], "proxy": "socks5", "result": "ok", "target": "web.test:80", "ts": 1793292241.51877, "upstream_src": "10.20.0.2"}
+{"atyp": "domain", "auth": "ok", "auth_version": 1, "bytes_down": 249, "bytes_up": 99, "client": "10.10.0.2:40940", "event": "session", "methods_offered": [0, 2], "proxy": "socks5", "result": "ok", "target": "web.test:80", "ts": 1793292241.519938, "upstream_src": "10.20.0.2"}
+{"auth": "failed", "auth_version": 1, "client": "10.10.0.2:47094", "event": "session", "methods_offered": [0, 2], "proxy": "socks5", "ts": 1793292335.399808}

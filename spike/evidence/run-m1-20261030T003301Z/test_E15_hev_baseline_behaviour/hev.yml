@@ -1,0 +1,23 @@
+tunnel:
+  name: tun0
+  mtu: 1500
+  ipv4: 198.18.0.1
+  icmp: 'off'
+  offload:
+    tso: false
+    uso: false
+    jumbo: false
+socks5:
+  port: 1080
+  address: 10.20.0.2
+  udp: 'udp'
+  mark: 438
+mapdns:
+  address: 198.18.0.2
+  port: 53
+  network: 100.64.0.0
+  netmask: 255.192.0.0
+  cache-size: 10000
+misc:
+  log-file: /home/claude/proxyflow-android/spike/evidence/run-m1-20261030T003301Z/test_E15_hev_baseline_behaviour/hev.log
+  log-level: warn

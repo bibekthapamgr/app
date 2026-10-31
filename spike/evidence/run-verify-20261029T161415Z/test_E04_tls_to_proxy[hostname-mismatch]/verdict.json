@@ -1,0 +1,53 @@
+{
+  "test": "test_E04_tls_to_proxy[hostname-mismatch]",
+  "title": "TLS to the proxy endpoint with strict certificate and hostname validation; failures fail closed.",
+  "requirement": "optional TLS with strict certificate validation; Play VpnService encryption policy.",
+  "checks": [
+    {
+      "check": "app connection fails",
+      "passed": true,
+      "detail": {
+        "rc": 7,
+        "code": 0,
+        "body": "",
+        "seconds": 0.013,
+        "stderr": "curl: (7) Failed to connect to web.test port 80 after 4 ms: Couldn't connect to server"
+      }
+    },
+    {
+      "check": "failure categorised TLS_HOSTNAME",
+      "passed": true,
+      "detail": {
+        "TLS_HOSTNAME": 1
+      }
+    },
+    {
+      "check": "categorised as a proxy-level (global) error",
+      "passed": true,
+      "detail": "TLS_HOSTNAME"
+    },
+    {
+      "check": "no request reached the destination",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: nothing left the device except to the proxy endpoint(s) [('10.20.0.2', 1443)]",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "check": "uplink: no packet from the device reached a destination address directly",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: no DNS (port 53) left the device",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "metrics": {},
+  "notes": [],
+  "verdict": "PASS"
+}

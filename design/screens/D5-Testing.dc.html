@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Testing proxy</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; position: relative; overflow: hidden">
+  <div aria-hidden="true" style="position: absolute; inset: 0; display: flex; flex-direction: column; padding: 20px 16px; gap: 14px">
+    <span style="font-size: 22px; font-weight: 500; margin-left: 48px; margin-bottom: 12px">Edit proxy</span>
+    <span style="height: 48px; border-radius: 8px; background: #FFFFFF; border: 1px solid #C9D1DC"></span>
+    <span style="height: 48px; border-radius: 8px; background: #FFFFFF; border: 1px solid #C9D1DC"></span>
+    <span style="height: 48px; border-radius: 8px; background: #FFFFFF; border: 1px solid #C9D1DC"></span>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(16, 24, 32, 0.5)"></div>
+  <section role="dialog" aria-modal="true" aria-labelledby="t-title" style="position: absolute; left: 0; right: 0; bottom: 0; background: #FFFFFF; border-radius: 28px 28px 0 0; padding: 12px 24px 28px; display: flex; flex-direction: column; gap: 16px">
+    <span aria-hidden="true" style="width: 32px; height: 4px; border-radius: 2px; background: #C9D1DC; align-self: center; margin-bottom: 4px"></span>
+    <h2 id="t-title" style="margin: 0; font-size: 22px; font-weight: 400">Testing Tokyo residential</h2>
+    <ol role="status" aria-live="polite" style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; font-size: 15px">
+      <li style="display: flex; gap: 12px; align-items: flex-start"><span style="width: 24px; height: 24px; border-radius: 12px; background: #157A6D; color: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg></span><span style="display: flex; flex-direction: column; gap: 2px">Reached the proxy<span style="font-size: 13px; color: #465569; font-family: 'Roboto Mono', monospace">proxy.example.com:1443 · 38 ms</span></span></li>
+      <li style="display: flex; gap: 12px; align-items: flex-start"><span style="width: 24px; height: 24px; border-radius: 12px; background: #157A6D; color: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg></span><span style="display: flex; flex-direction: column; gap: 2px">Secure connection verified<span style="font-size: 13px; color: #465569">TLS 1.3 · certificate valid for proxy.example.com</span></span></li>
+      <li style="display: flex; gap: 12px; align-items: flex-start; font-weight: 500"><span style="width: 24px; height: 24px; border-radius: 12px; border: 3px solid #8A5300; border-right-color: #FFE2B8; box-sizing: border-box; flex: none"></span>Signing in…</li>
+      <li style="display: flex; gap: 12px; align-items: flex-start; color: #465569"><span style="width: 24px; height: 24px; border-radius: 12px; border: 2px solid #6E7D92; box-sizing: border-box; flex: none"></span>Opening a test connection through the proxy</li>
+    </ol>
+    <p style="margin: 0; font-size: 13px; line-height: 18px; color: #465569">The test doesn't change your phone's network. Credentials are only sent to this proxy.</p>
+    <div style="display: flex; justify-content: flex-end; gap: 8px">
+      <a href="D4-PlaintextWarning.dc.html" style="height: 48px; padding: 0 20px; border-radius: 24px; color: #157A6D; font-size: 15px; font-weight: 500; display: flex; align-items: center; text-decoration: none">Cancel</a>
+      <a href="D6-TestPassed.dc.html" style="height: 48px; padding: 0 20px; border-radius: 24px; color: #157A6D; font-size: 15px; font-weight: 500; display: flex; align-items: center; text-decoration: none">Show result</a>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

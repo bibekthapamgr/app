@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Add proxy</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+input::placeholder{color:#6E7D92}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; display: flex; flex-direction: column">
+  <header style="height: 64px; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 4px; box-sizing: border-box">
+    <a href="C2-ProfilesList.dc.html" aria-label="Close" style="width: 48px; height: 48px; border-radius: 24px; display: flex; align-items: center; justify-content: center; color: #14243A"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></a>
+    <h1 style="margin: 0; flex: 1; font-size: 22px; font-weight: 500">Add proxy</h1>
+    <span aria-disabled="true" style="height: 40px; padding: 0 12px; display: flex; align-items: center; font-size: 15px; font-weight: 500; color: #6E7D92">Save</span>
+  </header>
+  <form style="flex: 1; display: flex; flex-direction: column; gap: 18px; padding: 8px 16px 24px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <label for="name" style="font-size: 13px; font-weight: 500; color: #465569">Name (optional)</label>
+      <input id="name" placeholder="e.g. Tokyo residential" style="height: 52px; box-sizing: border-box; border: 1px solid #6E7D92; border-radius: 8px; padding: 0 14px; font: inherit; font-size: 16px; color: #14243A; background: #FFFFFF">
+    </div>
+    <div role="group" aria-labelledby="proto-label" style="display: flex; flex-direction: column; gap: 6px">
+      <span id="proto-label" style="font-size: 13px; font-weight: 500; color: #465569">Protocol</span>
+      <div style="display: flex; border: 1px solid #6E7D92; border-radius: 24px; overflow: hidden; height: 44px">
+        <button type="button" aria-pressed="true" style="flex: 1; border: 0; background: #C7F0EA; color: #0B2F2A; font: inherit; font-size: 15px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>SOCKS5</button>
+        <span style="width: 1px; background: #6E7D92"></span>
+        <button type="button" aria-pressed="false" style="flex: 1; border: 0; background: #FFFFFF; color: #14243A; font: inherit; font-size: 15px; font-weight: 500">HTTP</button>
+      </div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+      <div style="grid-column: span 2; display: flex; flex-direction: column; gap: 6px">
+        <label for="server" style="font-size: 13px; font-weight: 500; color: #465569">Server</label>
+        <input id="server" placeholder="host or IP address" autocapitalize="none" style="height: 52px; box-sizing: border-box; border: 1px solid #6E7D92; border-radius: 8px; padding: 0 14px; font: inherit; font-size: 16px; color: #14243A; background: #FFFFFF">
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <label for="port" style="font-size: 13px; font-weight: 500; color: #465569">Port</label>
+        <input id="port" inputmode="numeric" placeholder="1080" style="height: 52px; box-sizing: border-box; border: 1px solid #6E7D92; border-radius: 8px; padding: 0 14px; font: inherit; font-size: 16px; color: #14243A; background: #FFFFFF">
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 16px; min-height: 56px; border-top: 1px solid #E6EBF1; padding-top: 8px">
+      <label for="auth" style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 16px">Proxy requires sign-in</span><span style="font-size: 13px; color: #465569">Username and password from your provider</span></label>
+      <span id="auth" role="switch" aria-checked="false" aria-label="Proxy requires sign-in" style="width: 52px; height: 32px; border-radius: 16px; border: 2px solid #6E7D92; box-sizing: border-box; background: #E6EBF1; display: flex; align-items: center; padding: 0 4px; flex: none"><span style="width: 16px; height: 16px; border-radius: 8px; background: #6E7D92"></span></span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 16px; min-height: 56px; border-top: 1px solid #E6EBF1; padding-top: 8px">
+      <label for="tls" style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 16px">Encrypt connection (TLS)</span><span style="font-size: 13px; color: #465569">Recommended. Your proxy must support TLS on this port.</span></label>
+      <span id="tls" role="switch" aria-checked="true" aria-label="Encrypt connection with TLS" style="width: 52px; height: 32px; border-radius: 16px; background: #157A6D; display: flex; align-items: center; justify-content: flex-end; padding: 0 4px; box-sizing: border-box; flex: none"><span style="width: 24px; height: 24px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; color: #157A6D"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg></span></span>
+    </div>
+    <div style="flex: 1"></div>
+    <span aria-disabled="true" style="height: 48px; border-radius: 24px; border: 1px solid #C9D1DC; color: #6E7D92; font-size: 15px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3L5 13h6l-1 8 8-10h-6z"/></svg>Test proxy</span>
+    <a href="D3-ValidationErrors.dc.html" style="height: 52px; border-radius: 26px; background: #157A6D; color: #FFFFFF; font-size: 16px; font-weight: 500; display: flex; align-items: center; justify-content: center; text-decoration: none">Save</a>
+  </form>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

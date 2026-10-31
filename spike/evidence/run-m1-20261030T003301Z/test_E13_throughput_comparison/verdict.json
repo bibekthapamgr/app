@@ -1,0 +1,68 @@
+{
+  "test": "test_E13_throughput_comparison",
+  "title": "Indicative throughput / CPU / memory: spike engine vs hev-socks5-tunnel (same VM, same Dante proxy).",
+  "requirement": "M1 task 7 engine evaluation (resource limits).",
+  "checks": [
+    {
+      "check": "spike engine moved data in both directions",
+      "passed": true,
+      "detail": {
+        "tun_mtu": 1500,
+        "upload_mbps": 1171.8,
+        "download_mbps": 575.0,
+        "engine_cpu_seconds": 9.28,
+        "cpu_seconds_per_gb": 10.63,
+        "rss_kib_after": 27952
+      }
+    }
+  ],
+  "metrics": {
+    "no_tunnel_proxy_host_to_dest": {
+      "upload_mbps": 14935.2
+    },
+    "spike_gvisor_mtu1500": {
+      "tun_mtu": 1500,
+      "upload_mbps": 1171.8,
+      "download_mbps": 575.0,
+      "engine_cpu_seconds": 9.28,
+      "cpu_seconds_per_gb": 10.63,
+      "rss_kib_after": 27952
+    },
+    "hev_no_offload_mtu1500": {
+      "tun_mtu": 1500,
+      "upload_mbps": 2120.8,
+      "download_mbps": 2118.6,
+      "engine_cpu_seconds": 6.37,
+      "cpu_seconds_per_gb": 3.01,
+      "rss_kib_after": 2468
+    },
+    "spike_gvisor_mtu9000": {
+      "tun_mtu": 9000,
+      "upload_mbps": 3802.8,
+      "download_mbps": 2749.0,
+      "engine_cpu_seconds": 7.57,
+      "cpu_seconds_per_gb": 2.31,
+      "rss_kib_after": 23660
+    },
+    "hev_no_offload_mtu9000": {
+      "tun_mtu": 9000,
+      "upload_mbps": 5319.2,
+      "download_mbps": 4379.1,
+      "engine_cpu_seconds": 5.62,
+      "cpu_seconds_per_gb": 1.16,
+      "rss_kib_after": 2492
+    },
+    "hev_linux_offloads_mtu1500 (not available on Android)": {
+      "tun_mtu": 1500,
+      "upload_mbps": 5793.2,
+      "download_mbps": 5592.4,
+      "engine_cpu_seconds": 4.98,
+      "cpu_seconds_per_gb": 0.87,
+      "rss_kib_after": 2648
+    }
+  },
+  "notes": [
+    "Single 2-vCPU VM, veth links, Dante as proxy: numbers are relative, not phone performance."
+  ],
+  "verdict": "PASS"
+}

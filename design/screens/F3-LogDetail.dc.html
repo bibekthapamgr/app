@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Log entry detail</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; position: relative; overflow: hidden">
+  <div aria-hidden="true" style="position: absolute; inset: 0; display: flex; flex-direction: column; padding: 20px 16px; gap: 12px">
+    <span style="font-size: 22px; font-weight: 500; margin-bottom: 8px">Logs</span>
+    <span style="height: 32px; width: 220px; border-radius: 8px; background: #E6EBF1"></span>
+    <span style="height: 360px; border-radius: 16px; background: #FFFFFF"></span>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(16, 24, 32, 0.5)"></div>
+  <section role="dialog" aria-modal="true" aria-labelledby="d-title" style="position: absolute; left: 0; right: 0; bottom: 0; background: #FFFFFF; border-radius: 28px 28px 0 0; padding: 12px 24px 28px; display: flex; flex-direction: column; gap: 14px">
+    <span aria-hidden="true" style="width: 32px; height: 4px; border-radius: 2px; background: #C9D1DC; align-self: center; margin-bottom: 4px"></span>
+    <div style="display: flex; align-items: center; gap: 12px">
+      <span style="width: 40px; height: 40px; border-radius: 20px; background: #F9DEDC; color: #410E0B; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></span>
+      <h2 id="d-title" style="margin: 0; font-size: 22px; font-weight: 400">Proxy sign-in failed</h2>
+    </div>
+    <dl style="margin: 0; display: grid; grid-template-columns: 112px minmax(0, 1fr); row-gap: 10px; column-gap: 12px; font-size: 14px">
+      <dt style="color: #465569">Time</dt><dd style="margin: 0; font-family: 'Roboto Mono', monospace">Today 14:31:57</dd>
+      <dt style="color: #465569">Profile</dt><dd style="margin: 0">Office HTTP · HTTP · not encrypted</dd>
+      <dt style="color: #465569">Code</dt><dd style="margin: 0; font-family: 'Roboto Mono', monospace">AUTH_FAILED</dd>
+      <dt style="color: #465569">What happened</dt><dd style="margin: 0; line-height: 20px">The proxy answered HTTP 407 to the username and password ProxyFlow sent.</dd>
+      <dt style="color: #465569">Traffic</dt><dd style="margin: 0; line-height: 20px">Blocked. Nothing was sent around your proxy.</dd>
+      <dt style="color: #465569">What to do</dt><dd style="margin: 0; line-height: 20px">Check the username and password with your proxy provider, then test again.</dd>
+    </dl>
+    <p style="margin: 0; font-size: 12px; line-height: 16px; color: #465569">Copied text never includes passwords, payload, or destinations unless "Record destinations" is on.</p>
+    <div style="display: flex; justify-content: flex-end; gap: 8px">
+      <button type="button" style="height: 48px; padding: 0 16px; border-radius: 24px; border: 0; background: transparent; color: #157A6D; font: inherit; font-size: 15px; font-weight: 500">Copy</button>
+      <a href="D7-TestFailed.dc.html" style="height: 48px; padding: 0 22px; border-radius: 24px; background: #157A6D; color: #FFFFFF; font-size: 15px; font-weight: 500; display: flex; align-items: center; text-decoration: none">Edit profile</a>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

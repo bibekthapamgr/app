@@ -1,0 +1,80 @@
+{
+  "test": "test_E03_http_connect_real_squid",
+  "title": "HTTP CONNECT with Basic auth against a real Squid; HTTPS end to end; per-destination refusal.",
+  "requirement": "HTTP CONNECT support; target-level errors must not break the tunnel.",
+  "checks": [
+    {
+      "check": "HTTPS through CONNECT: 200, certificate verified by the app",
+      "passed": true,
+      "detail": {
+        "rc": 0,
+        "code": 200,
+        "body": "{\"client_ip\": \"10.20.0.2\", \"client_port\": 45388, \"server_port\": 443, \"tls\": true, \"path\": \"/whoami\"}\n",
+        "seconds": 0.042,
+        "stderr": ""
+      }
+    },
+    {
+      "check": "HTTP through CONNECT: 200 from the proxy address",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "port 8081 refused by Squid policy -> app connection fails",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "refusal categorised TARGET_NOT_ALLOWED",
+      "passed": true,
+      "detail": {
+        "TARGET_NOT_ALLOWED": 1
+      }
+    },
+    {
+      "check": "target-level refusal did not set a global proxy error",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "tunnel still works after a refused destination",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "wrong password categorised AUTH_FAILED",
+      "passed": true,
+      "detail": {
+        "AUTH_FAILED": 1
+      }
+    },
+    {
+      "check": "Squid access log shows CONNECT web.test:443 by hostname",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: nothing left the device except to the proxy endpoint(s) [('10.20.0.2', 3129)] (63 packets captured)",
+      "passed": true,
+      "detail": {
+        "capture": "/home/claude/proxyflow-android/spike/evidence/run-m1-20261030T003301Z/test_E03_http_connect_real_squid/pcap/2-device-uplink.pcap",
+        "exists": true,
+        "packets": 63,
+        "violations": []
+      }
+    },
+    {
+      "check": "uplink: no packet from the device reached a destination address directly",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: no DNS (port 53) left the device",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "metrics": {},
+  "notes": [],
+  "verdict": "PASS"
+}

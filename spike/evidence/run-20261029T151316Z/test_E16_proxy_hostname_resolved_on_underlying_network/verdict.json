@@ -1,0 +1,51 @@
+{
+  "test": "test_E16_proxy_hostname_resolved_on_underlying_network",
+  "title": "The proxy's own hostname is resolved via the underlying network with a protected socket; nothing else is.",
+  "requirement": "routing loop prevention; DNS handling.",
+  "checks": [
+    {
+      "check": "TLS proxy addressed by hostname works",
+      "passed": true,
+      "detail": {
+        "rc": 0,
+        "code": 200,
+        "body": "{\"client_ip\": \"10.20.0.2\", \"client_port\": 41454, \"server_port\": 80, \"tls\": false, \"path\": \"/whoami\"}\n",
+        "seconds": 0.03,
+        "stderr": ""
+      }
+    },
+    {
+      "check": "underlay resolver saw only the proxy hostnames",
+      "passed": true,
+      "detail": [
+        "no-such-proxy.test",
+        "proxy.test"
+      ]
+    },
+    {
+      "check": "unknown proxy hostname categorised PROXY_DNS_FAILED",
+      "passed": true,
+      "detail": {
+        "PROXY_DNS_FAILED": 1
+      }
+    },
+    {
+      "check": "uplink: nothing left the device except to the proxy endpoint(s) [('10.20.0.2', 1443)]",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "check": "uplink: no packet from the device reached a destination address directly",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "check": "uplink: no DNS (port 53) left the device",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "metrics": {},
+  "notes": [],
+  "verdict": "PASS"
+}

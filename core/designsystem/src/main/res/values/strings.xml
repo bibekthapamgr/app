@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pf_navigate_back">Back</string>
+    <string name="pf_show_password">Show password</string>
+    <string name="pf_hide_password">Hide password</string>
+    <string name="pf_loading">Loading</string>
+</resources>

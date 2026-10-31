@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Android Lint configuration for the whole app (warnings are errors; see app/build.gradle.kts).
+  Checks whose result depends on the network or on the date (a newer library
+  or SDK being published) are switched off so the same commit always gives
+  the same lint result. Dependency updates are made on purpose instead, as a
+  reviewed change to gradle/libs.versions.toml (docs/adr/0008-app-architecture.md).
+-->
+<lint>
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+    <issue id="OldTargetApi" severity="ignore" />
+</lint>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Proxy test failed — sign-in rejected</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#157A6D}a:hover{color:#0B2F2A}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F6F8FB; font-family: Roboto, system-ui, sans-serif; color: #14243A; display: flex; flex-direction: column">
+  <header style="height: 64px; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 4px; box-sizing: border-box">
+    <a href="D8-UnsavedChanges.dc.html" aria-label="Back" style="width: 48px; height: 48px; border-radius: 24px; display: flex; align-items: center; justify-content: center; color: #14243A"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></a>
+    <h1 style="margin: 0; flex: 1; font-size: 22px; font-weight: 500">Edit proxy</h1>
+    <a href="C2-ProfilesList.dc.html" style="height: 40px; padding: 0 12px; display: flex; align-items: center; font-size: 15px; font-weight: 500; text-decoration: none">Save</a>
+  </header>
+  <form style="flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 4px 16px 20px">
+    <section role="alert" style="background: #F9DEDC; color: #410E0B; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; align-items: center; gap: 10px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><strong style="font-size: 16px; font-weight: 500">Test failed: sign-in rejected</strong></div>
+      <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 14px">
+        <li style="display: flex; gap: 8px; align-items: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>Reached 203.0.113.10:3128</li>
+        <li style="display: flex; gap: 8px; align-items: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>HTTP proxy answered (CONNECT supported)</li>
+        <li style="display: flex; gap: 8px; align-items: center; font-weight: 500"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>Username or password rejected (HTTP 407)</li>
+      </ol>
+      <span style="font-size: 12px; font-family: 'Roboto Mono', monospace">AUTH_FAILED</span>
+    </section>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <label for="user" style="font-size: 13px; font-weight: 500; color: #B3261E">Username</label>
+      <input id="user" value="office-user" aria-invalid="true" aria-describedby="cred-err" style="height: 52px; box-sizing: border-box; border: 2px solid #B3261E; border-radius: 8px; padding: 0 13px; font: inherit; font-size: 16px; color: #14243A; background: #FFFFFF">
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <label for="pass" style="font-size: 13px; font-weight: 500; color: #B3261E">Password</label>
+      <div style="display: flex; align-items: center; height: 52px; box-sizing: border-box; border: 2px solid #B3261E; border-radius: 8px; background: #FFFFFF; padding-left: 13px">
+        <input id="pass" type="password" value="example-password" aria-invalid="true" aria-describedby="cred-err" style="flex: 1; border: 0; font: inherit; font-size: 16px; color: #14243A; background: transparent; min-width: 0">
+        <button type="button" aria-label="Show password" style="width: 48px; height: 48px; border: 0; background: transparent; color: #465569; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+      </div>
+      <span id="cred-err" style="font-size: 12px; line-height: 16px; color: #B3261E">The proxy rejected these credentials. Check them with your provider.</span>
+    </div>
+    <div style="flex: 1"></div>
+    <a href="D5-Testing.dc.html" style="height: 48px; border-radius: 24px; background: #157A6D; color: #FFFFFF; font-size: 15px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3L5 13h6l-1 8 8-10h-6z"/></svg>Test again</a>
+    <a href="C2-ProfilesList.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; color: #157A6D; font-size: 15px; font-weight: 500; text-decoration: none">Save anyway</a>
+  </form>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
