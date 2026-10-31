@@ -55,25 +55,42 @@ wifi_down() {
     case "$out" in *inet*) return 1 ;; esac
     return 0
 }
+# Wi-Fi must stay off for the whole run: the app does not follow network changes until M7, and a run
+# whose Wi-Fi came back on by itself (run 41233261642, API 35) lost the route to the proxies twice.
+# Android's "turn on Wi-Fi automatically" and scanning are switched off first, and Wi-Fi is switched
+# off until it stays off for 5 seconds (a disable issued while Wi-Fi is still starting can be undone).
+wifi_off() {
+    timeout 30 adb shell settings put global wifi_wakeup_enabled 0 >/dev/null 2>&1 || true
+    timeout 30 adb shell settings put global wifi_scan_always_enabled 0 >/dev/null 2>&1 || true
+    for _ in 1 2 3; do
+        timeout 30 adb shell svc wifi disable >/dev/null 2>&1 || true
+        for _ in $(seq 1 15); do
+            if wifi_down; then break; fi
+            sleep 1
+        done
+        sleep 5
+        if wifi_down; then return 0; fi
+    done
+    return 1
+}
+# What the phone actually uses, read after the check: Wi-Fi's address shows whether it came back.
+uplink_name() {
+    if wifi_down; then echo "mobile data"; else echo "Wi-Fi"; fi
+}
 START=$SECONDS
-adb shell svc wifi disable >/dev/null 2>&1 || true
-for _ in $(seq 1 15); do
-    if wifi_down; then break; fi
-    sleep 1
-done
-MOBILE="mobile data"
-if ! wifi_down; then MOBILE="mobile data or Wi-Fi (Wi-Fi did not switch off)"; fi
+WIFI_NOTE=""
+if ! wifi_off; then WIFI_NOTE=" (Wi-Fi would not stay off)"; fi
 UPLINK=""
 if uplink_within 60; then
-    UPLINK="$MOBILE"
+    UPLINK="$(uplink_name)$WIFI_NOTE"
 else
-    adb shell svc data disable >/dev/null 2>&1 || true
+    timeout 30 adb shell svc data disable >/dev/null 2>&1 || true
     sleep 3
-    adb shell svc data enable >/dev/null 2>&1 || true
+    timeout 30 adb shell svc data enable >/dev/null 2>&1 || true
     if uplink_within 60; then
-        UPLINK="$MOBILE (after switching mobile data off and on)"
+        UPLINK="$(uplink_name)$WIFI_NOTE (after switching mobile data off and on)"
     else
-        adb shell svc wifi enable >/dev/null 2>&1 || true
+        timeout 30 adb shell svc wifi enable >/dev/null 2>&1 || true
         if uplink_within 60; then UPLINK="Wi-Fi (mobile data never reached the runner)"; fi
     fi
 fi
@@ -143,6 +160,11 @@ fi
 
 timeout 120 adb logcat -d > "$OUT/logcat.txt" 2>&1 || true
 kill "$LIVE_LOGCAT" 2>/dev/null || true
+# The phone's network after the tests: the same uplink as before them, or what changed.
+{
+    echo "after the tests: Wi-Fi $(if wifi_down; then echo off; else echo on; fi)"
+    echo "addresses after the tests: $(timeout 30 adb shell ip -o -4 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
+} >> "$OUT/guest-network.txt"
 if [ "$GUEST_CAPTURE" = 1 ]; then
     restart_adbd root || true
     echo "tcpdump at the end: $(timeout 30 adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"

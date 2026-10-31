@@ -252,6 +252,19 @@ def instrumentation_summary(logcat: list[str], first_lines: int = 2, max_failure
     return facts
 
 
+NETWORK_EVENT = re.compile(r"(Switching to new default network|got DISCONNECTED|setWifiEnabled)")
+
+
+def network_changes(logcat: list[str], last: int = 6) -> list[str]:
+    """Android's own record of network changes during the run (ConnectivityService, Wi-Fi): the app
+    follows none until M7, so a change in the middle of the tests explains a lost route."""
+    # ProxyFlow's own VPN networks come and go with every connection; only the uplink's changes count here.
+    events = [re.sub(r"\s+", " ", line)[:200] for line in logcat if NETWORK_EVENT.search(line) and "VPN" not in line]
+    if not events:
+        return ["network changes in logcat: none"]
+    return [f"network changes in logcat: {len(events)}; last: {events[-last:]}"]
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", required=True)
@@ -404,6 +417,7 @@ def main(argv: list[str]) -> int:
         facts.append(f"{covering} of {len(captures)} captures saw the app's connections to both proxies (they cover the uplink)")
 
     facts += instrumentation_summary(logcat)
+    facts += network_changes(logcat)
 
     # The VPN layer's own account of what happened (connection steps, service starts and stops).
     lifecycle = [m.group(1) for line in logcat if (m := re.search(r"ProxyFlowVpn\s*:\s*(.*)$", line))]
