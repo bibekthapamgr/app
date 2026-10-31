@@ -386,7 +386,7 @@ class VpnEndToEndTest {
 
     private companion object {
         const val TAG = "ProxyFlowE2E"
-        const val TEST_TIMEOUT_S = 240L
+        const val TEST_TIMEOUT_S = 90L
         const val CYCLES = 10
         const val THREAD_SLACK = 6
         const val CHECK_RUNNING_MS = 1_500L

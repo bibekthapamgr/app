@@ -10,7 +10,6 @@ import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
@@ -43,11 +42,12 @@ internal class VpnNotifications(private val context: Context) {
 
     /** The foreground notification for [state]. */
     fun status(state: ConnectionState): Notification {
-        val title = context.getString(statusTitle(state.status))
+        val content = StatusContent.of(state)
+        val title = context.getString(titleOf(content.title))
         val builder = NotificationCompat.Builder(context, STATUS_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_proxyflow)
             .setContentTitle(title)
-            .setContentText(statusText(state))
+            .setContentText(context.getString(textOf(content.text)))
             .setSubText(state.profileName)
             .setOngoing(true)
             .setSilent(true)
@@ -63,18 +63,20 @@ internal class VpnNotifications(private val context: Context) {
         } else {
             builder.setShowWhen(false)
         }
-        val disconnect = ProxyFlowVpnService.pendingAction(context, ProxyFlowVpnService.ACTION_DISCONNECT, REQUEST_DISCONNECT)
-        when (state.status) {
-            ConnectionStatus.Connecting -> builder.addAction(0, context.getString(R.string.vpn_action_cancel), disconnect)
-            ConnectionStatus.Blocked -> {
-                val restart = ProxyFlowVpnService.pendingAction(context, ProxyFlowVpnService.ACTION_RESTART, REQUEST_RESTART)
-                builder.addAction(0, context.getString(R.string.vpn_action_restart), restart)
-                builder.addAction(0, context.getString(R.string.vpn_action_disconnect), disconnect)
+        for (action in content.actions) {
+            when (action) {
+                StatusContent.Action.CANCEL -> builder.addAction(0, context.getString(R.string.vpn_action_cancel), disconnect())
+                StatusContent.Action.RESTART -> builder.addAction(0, context.getString(R.string.vpn_action_restart), restart())
+                StatusContent.Action.DISCONNECT -> builder.addAction(0, context.getString(R.string.vpn_action_disconnect), disconnect())
             }
-            else -> builder.addAction(0, context.getString(R.string.vpn_action_disconnect), disconnect)
         }
         return builder.build()
     }
+
+    private fun disconnect(): PendingIntent =
+        ProxyFlowVpnService.pendingAction(context, ProxyFlowVpnService.ACTION_DISCONNECT, REQUEST_DISCONNECT)
+
+    private fun restart(): PendingIntent = ProxyFlowVpnService.pendingAction(context, ProxyFlowVpnService.ACTION_RESTART, REQUEST_RESTART)
 
     /** The alert after Android revoked the VPN (board B6d). Without the notification permission there is none; the app shows B6d. */
     fun problem(state: ConnectionState) {
@@ -109,33 +111,24 @@ internal class VpnNotifications(private val context: Context) {
         PendingIntent.getActivity(context, REQUEST_OPEN, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
-    private fun statusTitle(status: ConnectionStatus): Int = when (status) {
-        ConnectionStatus.Connecting -> R.string.vpn_notification_connecting
-        ConnectionStatus.Reconnecting -> R.string.vpn_notification_reconnecting
-        ConnectionStatus.Connected -> R.string.vpn_notification_connected
-        ConnectionStatus.Blocked, ConnectionStatus.Offline -> R.string.vpn_notification_blocked
-        ConnectionStatus.Disconnected -> R.string.vpn_notification_disconnected
+    private fun titleOf(title: StatusContent.Title): Int = when (title) {
+        StatusContent.Title.CONNECTING -> R.string.vpn_notification_connecting
+        StatusContent.Title.RECONNECTING -> R.string.vpn_notification_reconnecting
+        StatusContent.Title.CONNECTED -> R.string.vpn_notification_connected
+        StatusContent.Title.BLOCKED -> R.string.vpn_notification_blocked
+        StatusContent.Title.DISCONNECTED -> R.string.vpn_notification_disconnected
     }
 
-    private fun statusText(state: ConnectionState): String = context.getString(
-        when (state.status) {
-            ConnectionStatus.Connecting ->
-                if (state.step == ConnectStep.StartingProtection) {
-                    R.string.vpn_notification_starting_protection
-                } else {
-                    R.string.vpn_notification_checking_proxy
-                }
-            ConnectionStatus.Reconnecting -> R.string.vpn_notification_reconnecting_text
-            ConnectionStatus.Connected -> R.string.vpn_notification_connected_text
-            ConnectionStatus.Blocked, ConnectionStatus.Offline ->
-                if (state.error?.code == ConnectionError.ENGINE_STOPPED) {
-                    R.string.vpn_notification_blocked_engine
-                } else {
-                    R.string.vpn_notification_blocked_text
-                }
-            ConnectionStatus.Disconnected -> R.string.vpn_notification_disconnected_text
-        },
-    )
+    private fun textOf(text: StatusContent.Text): Int = when (text) {
+        StatusContent.Text.CHECKING_PROXY -> R.string.vpn_notification_checking_proxy
+        StatusContent.Text.STARTING_PROTECTION -> R.string.vpn_notification_starting_protection
+        StatusContent.Text.RECONNECTING -> R.string.vpn_notification_reconnecting_text
+        StatusContent.Text.CONNECTED -> R.string.vpn_notification_connected_text
+        StatusContent.Text.ENGINE_STOPPED -> R.string.vpn_notification_blocked_engine
+        StatusContent.Text.PROFILE_DELETED -> R.string.vpn_notification_blocked_profile_deleted
+        StatusContent.Text.PROXY_FAILED -> R.string.vpn_notification_blocked_text
+        StatusContent.Text.DISCONNECTED -> R.string.vpn_notification_disconnected_text
+    }
 
     private fun publicVersion(channel: String, title: String): Notification = NotificationCompat.Builder(context, channel)
         .setSmallIcon(R.drawable.ic_stat_proxyflow)

@@ -18,6 +18,7 @@
     <string name="vpn_notification_blocked">Traffic blocked</string>
     <string name="vpn_notification_blocked_engine">Protection stopped unexpectedly. Apps stay offline until you restart it or disconnect.</string>
     <string name="vpn_notification_blocked_text">ProxyFlow couldn\'t connect to your proxy. Apps stay offline until you try again or disconnect.</string>
+    <string name="vpn_notification_blocked_profile_deleted">The profile this connection used was deleted. Apps stay offline until you disconnect.</string>
     <string name="vpn_notification_disconnected">Not connected</string>
     <string name="vpn_notification_disconnected_text">Apps are using your normal network</string>
     <string name="vpn_notification_revoked">Disconnected by Android</string>

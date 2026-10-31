@@ -206,6 +206,51 @@ def properties(path: str) -> dict[str, str]:
     return values
 
 
+TEST_EVENT = re.compile(r"TestRunner\s*:\s*(started|failed|finished): (\S+)\(([\w.$]+)\)")
+TEST_EXCEPTION = re.compile(r"TestRunner\s*:\s*(.*)$")
+
+
+def instrumentation_summary(logcat: list[str], first_lines: int = 2, max_failures: int = 12) -> list[str]:
+    """How far the device tests got, from AndroidJUnitRunner's own logcat lines: useful when the
+    Gradle run was stopped before it wrote its reports (a hanging test)."""
+    started: list[str] = []
+    failed: list[str] = []
+    finished: set[str] = set()
+    excerpts: dict[str, list[str]] = {}
+    current: str | None = None
+    in_exception = False
+    for line in logcat:
+        event = TEST_EVENT.search(line)
+        if event:
+            kind, name = event.group(1), f"{event.group(3).rsplit('.', 1)[-1]}.{event.group(2)}"
+            if kind == "started":
+                started.append(name)
+            elif kind == "failed":
+                failed.append(name)
+                current = name
+            else:
+                finished.add(name)
+            continue
+        if "TestRunner" not in line:
+            continue
+        if "----- begin exception -----" in line:
+            in_exception = True
+        elif "----- end exception -----" in line:
+            in_exception = False
+        elif in_exception and current is not None:
+            text = TEST_EXCEPTION.search(line)
+            if text and len(excerpts.setdefault(current, [])) < first_lines:
+                excerpts[current].append(text.group(1).strip()[:200])
+    if not started:
+        return ["device tests in logcat: none (the instrumentation logged no test)"]
+    unfinished = [name for name in started if name not in finished]
+    facts = [f"device tests in logcat: {len(started)} started, {len(failed)} failed, {len(unfinished)} never finished"]
+    facts += [f"  never finished: {name}" for name in unfinished]
+    for name in failed[:max_failures]:
+        facts.append(f"  failed: {name}: {' | '.join(excerpts.get(name, []))}")
+    return facts
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", required=True)
@@ -290,6 +335,10 @@ def main(argv: list[str]) -> int:
     for name, lines in (("squid-access.log", squid), ("danted.log", dante)):
         sample = [line for line in lines if "connect" in line.lower()][-3:] or lines[-3:]
         facts.append(f"{name}: {len(lines)} lines; last: {[line[:220] for line in sample]}")
+    network = read_lines(os.path.join(args.out, "guest-network.txt"))
+    facts += [f"phone network: {line}" for line in network]
+    if network and network[0].startswith("uplink: none"):
+        problems.append("the phone's uplink never reached the runner, so no test could reach a proxy")
     guest = read_lines(os.path.join(args.out, "guest-capture.txt"))
     if guest:
         facts.append("in-phone capture: " + " | ".join(guest))
@@ -327,6 +376,8 @@ def main(argv: list[str]) -> int:
         problems.append("no packet capture saw the app's connections to both proxies, so none shows the uplink")
     else:
         facts.append(f"{covering} of {len(captures)} captures saw the app's connections to both proxies (they cover the uplink)")
+
+    facts += instrumentation_summary(logcat)
 
     # The VPN layer's own account of what happened (connection steps, service starts and stops).
     lifecycle = [m.group(1) for line in logcat if (m := re.search(r"ProxyFlowVpn\s*:\s*(.*)$", line))]
