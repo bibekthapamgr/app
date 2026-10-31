@@ -1,6 +1,6 @@
 # ADR-0003 — DNS: fake-IP with resolution at the proxy
 
-**Status:** Proposed (owner decision D5 on record types) · **Date:** 2026-10-30
+**Status:** Accepted 2026-10-31 (decision D5 delegated by the owner: the recommended record-type handling in point 4) · **Date:** 2026-10-30
 
 ## Context
 
@@ -31,3 +31,9 @@ Apps resolve hostnames before connecting. If those lookups go to the ISP's resol
 ## Evidence
 
 E07 (A mapped, TXT refused, queries to 8.8.8.8 and to the underlay resolver intercepted, zero port-53 packets on the uplink), E16 (only proxy hostnames reached the underlying resolver; unknown proxy host → `PROXY_DNS_FAILED`), unit tests `TestResponder*`, `TestPool*`, fuzz target `FuzzResponder`.
+
+## Implementation (M4)
+
+`engine/fakedns` and `engine/tunnel/udp.go` (UDP/53 to any address answered locally; at most 256 DNS sockets at once, extra ones dropped and counted). The proxy's own hostname is resolved through the app's `Platform.ResolveProxyHost` callback (`Network.getAllByName` on the underlying network), cached for 60 s and forgotten on a network change; the engine has no other resolver in production.
+
+The reuse delay from the consequences above is in place: an address goes to another name only after its mapping was unused for 10 minutes — no answer, no new connection, and no connection still open (open connections pin their mapping) — and freed addresses queue behind every address never used and every one freed earlier. The table holds at most 16 384 names; when every mapping is in use or recent, a new name gets `SERVFAIL` instead of an address another app may still hold. The pool lives for the app process, across reconnects, and starts at a random address in each process (`docs/m4/protocol-compatibility.md` §6; tests `TestPoolNeverReusesARecentAddress`, `TestPoolNeverReassignsAnAddressWithAConnectionOpen`, `TestPoolFreedAddressesQueueOldestFirst`, `TestOpenConnectionPinsItsFakeAddress`, `TestResponderAnswersServfailWhenExhausted`).

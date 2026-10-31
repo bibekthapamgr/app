@@ -1,6 +1,6 @@
 # ADR-0002 — In-process protocol adapters, dial-before-accept, no local listener
 
-**Status:** Proposed (part of D1) · **Date:** 2026-10-30
+**Status:** Accepted 2026-10-31 (part of D1, delegated by the owner) · **Date:** 2026-10-30
 
 ## Context
 
@@ -29,3 +29,7 @@ Separately, a proxy failure must never let an app's connection proceed elsewhere
 ## Evidence
 
 E01–E04 (all protocols through real servers), E10 (proxy port closed → RST in 0.011 s, no direct packets), E15 (hev would need a front-end for HTTP/TLS). M5 adds an instrumentation test asserting no listening sockets belong to the app.
+
+## Implementation (M4)
+
+`engine/adapters` (SOCKS5, HTTP CONNECT, TLS, categorised errors, credentials kept as wipeable bytes) and `engine/tunnel/tcp.go` (dial before the app's handshake completes; any failure answers the SYN with a RST). Cancellation: a tunnel being set up stops at once when the engine stops (`CANCELED`, never counted as a proxy failure). The engine opens no listening socket; the M5 instrumentation test for that remains planned.

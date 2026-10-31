@@ -12,7 +12,8 @@ What it promises, and where that ends (the single source for these claims is `do
 
 - **M1 — requirements, feasibility, UI/UX:** delivered (`docs/m1/M1-acceptance-report.md`). The owner chose minSdk 29 (D3).
 - **M2 — Android foundation:** delivered and merged (`docs/m2/M2-acceptance-report.md`).
-- **M3 — proxy profiles and secure storage:** every acceptance criterion passes in CI, including the Keystore tests on Android 10 and 15 emulators; awaiting the owner's review (`docs/m3/M3-acceptance-report.md`). Profiles are stored in Room; usernames and passwords are encrypted under an Android Keystore key made for each set of credentials (ADR-0006, ADR-0009). The app still cannot connect: the engine arrives in M4 and the VPN service in M5, so "Test connection" says that testing isn't available yet, and the app says so too.
+- **M3 — proxy profiles and secure storage:** delivered and merged (`docs/m3/M3-acceptance-report.md`). Profiles are stored in Room; usernames and passwords are encrypted under an Android Keystore key made for each set of credentials (ADR-0006, ADR-0009).
+- **M4 — HTTP CONNECT, SOCKS5 and the engine:** in review (`docs/m4/M4-acceptance-report.md`). The Go packet engine (`engine/`) carries TCP through SOCKS5 and HTTP CONNECT proxies, optionally over TLS checked by Android's trust manager, and runs on Android emulators through `:core:engine`. The app does not use it yet: the VPN service arrives in M5, so "Test connection" still says that testing isn't available yet.
 
 ## Repository
 
@@ -23,12 +24,14 @@ What it promises, and where that ends (the single source for these claims is `do
 | `core/designsystem/` | Theme generated from the design tokens, icons, and the reusable components (buttons, cards, fields, dialogs, loading, empty and error states, banners, status pill) |
 | `core/data/` | Repositories: profiles in Room (`db/`) with credentials sealed by per-profile Android Keystore keys (`crypto/`), settings and the active profile in DataStore, in-memory logs, a connection controller and tester that cannot connect yet. `src/androidTest/` runs on emulators (Android Keystore) |
 | `core/data/schemas/` | Exported Room schema for every database version (checked in CI, used by the migration tests) |
+| `core/engine/` | The packet engine for Android: unpacks `engine/build/pfengine.aar` and wraps it (`ProxyEngine`, `EngineSecret`, `AndroidEnginePlatform` with the platform trust manager). `src/androidTest/` runs the real engine on emulators against mock proxies |
+| `engine/` | The packet engine in Go (gVisor netstack, SOCKS5 / HTTP CONNECT / TLS adapters, fake-IP DNS, the gomobile API) and `build-aar.sh`; see `engine/README.md` |
 | `core/testing/` | Test fakes (in-memory profile store, software keys standing in for the Keystore on the JVM, a fake connection tester) and the main-dispatcher rule |
 | `feature/{home,profiles,settings,logs,about}/` | One module per area: stateless screens, ViewModels, navigation entry points, tests |
 | `config/lint/` | Android Lint configuration |
 | `gradle/libs.versions.toml` | Every dependency and plugin version |
 | `scripts/` | `check-secrets.sh` (keys, signing files and credentials in the files or anywhere in the history; rules in `check_secrets.py`), `check_release_manifest.py` (permissions, backups and exported components of the release build), `ci_error_digest.py` and `ci_build_facts.py` (CI summaries) |
-| `docs/m1/`, `docs/m2/`, `docs/m3/` | Milestone deliverables and acceptance reports |
+| `docs/m1/` … `docs/m4/` | Milestone deliverables and acceptance reports |
 | `docs/adr/` | Architecture decision records 0001–0009 |
 | `design/` | Screen boards, design tokens, contrast checker, Compose colour generator |
 | `spike/` | M1 feasibility spike (Go engine prototype, lab harness, evidence runs) |
@@ -43,15 +46,19 @@ What it promises, and where that ends (the single source for these claims is `do
 | Android Studio | A release that supports the Android Gradle Plugin version in `gradle/libs.versions.toml` |
 | Gradle | Use the wrapper (`./gradlew`); it downloads the pinned Gradle version |
 | Python 3 | For the design-token tools (`design/tools/`) and the checks in `scripts/` |
+| Go | 1.27.3, for `engine/` (tests need nothing else; `engine/build-aar.sh` also needs the Android SDK and installs the pinned NDK) |
 
 Point the build at your SDK with `ANDROID_HOME` or a `local.properties` file containing `sdk.dir=/path/to/Android/sdk` (Android Studio writes it; it is git-ignored).
 
 ## Build and test
 
 ```bash
+(cd engine && go test -race ./...)      # the Go engine: adapters, mock proxies, netstack, lifecycle, leaks
+engine/build-aar.sh                     # engine/build/pfengine.aar, needed by :core:engine (Go, JDK, Android SDK)
 ./gradlew :app:assembleDebug            # debug APK: app/build/outputs/apk/debug/
 ./gradlew testDebugUnitTest :core:model:test  # all JVM, ViewModel and Robolectric UI tests
 ./gradlew :core:data:connectedDebugAndroidTest  # Keystore and storage tests on a connected phone or emulator
+./gradlew :core:engine:connectedDebugAndroidTest  # the engine on a phone or emulator (needs the AAR)
 ./gradlew spotlessCheck                 # Kotlin formatting (ktlint); spotlessApply fixes it
 ./gradlew :app:lintDebug                # Android Lint for the app and every module it uses
 ./gradlew :app:assembleRelease          # R8-shrunk release APK (unsigned without signing config)
@@ -74,7 +81,8 @@ What CI adds for reviewers:
 - The release build's merged manifest must pass `scripts/check_release_manifest.py`: only allow-listed permissions (none but androidx.core's own receiver permission in M2), backups and device transfers off, not debuggable, no cleartext opt-in, nothing exported without a permission except the launcher activity.
 - Every screen is compared with its committed image (`verifyAndRecordRoborazziDebug`); a changed screen fails the run and its new image is recorded. On pull requests a separate job publishes the images on the branch `ci-screenshots/<branch>`, also after a failed run; copy them into `app/screenshots/` when the change is meant. That job is the only one with a token that can push, and it never pushes to the pull request itself.
 - The Room schema generated from the entities must equal the committed one in `core/data/schemas/`; the generated file is published with the screenshots (`ci-screenshots/<branch>`).
-- The `device` job runs `core/data`'s instrumented tests on Android emulators with the real Android Keystore (API 29, the minimum, and API 35) and reports every test and its result as a notice.
+- The `engine` job checks the Go modules against the checksum database (it rebuilds `go.sum` from nothing and compares), runs gofmt, vet, the engine tests with the race detector and a 30-second fuzz run of every parser, and builds the AAR — only from verified modules, after govulncheck passed over the engine and gomobile's runtime package — reporting its size, hashes, page alignment, linked modules and the govulncheck verdict. The `build` and `device` jobs use that AAR.
+- The `device` job runs `core/data`'s and `core/engine`'s instrumented tests on Android emulators (API 29, the minimum, and API 35) — the real Android Keystore, and the real engine against mock proxies — and reports every test and its result as a notice.
 - `secrets.yml` runs the secrets scan on every push and pull request, whatever changed, over the current files and every commit; findings name the file and line, never the value.
 - Each run's **android-reports** artifact holds the APKs, test and Lint reports, screenshots and, for changed screens, Roborazzi's comparison images.
 

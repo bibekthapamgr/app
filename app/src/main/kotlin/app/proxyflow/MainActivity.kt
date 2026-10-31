@@ -18,6 +18,7 @@ import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ThemePreference
 import app.proxyflow.core.model.UserSettings
 import app.proxyflow.ui.ProxyFlowApp
+import kotlinx.coroutines.Dispatchers
 
 class MainActivity : ComponentActivity() {
     /** The app's navigation controller, so UI tests can describe the back stack when they fail. */
@@ -30,7 +31,14 @@ class MainActivity : ComponentActivity() {
         val container = (application as ProxyFlowApplication).container
         enableEdgeToEdge()
         setContent {
-            val settings: UserSettings? by container.settingsRepository.settings.collectAsStateWithLifecycle(initialValue = null)
+            // DataStore emits on its own I/O threads. Collecting on the main dispatcher keeps the
+            // handling of every emission on the main thread, whatever dispatcher runs the
+            // composition's effects (UI tests run them unconfined, so an emission could otherwise
+            // drive composition from an I/O thread and touch views there).
+            val settings: UserSettings? by container.settingsRepository.settings.collectAsStateWithLifecycle(
+                initialValue = null,
+                context = Dispatchers.Main.immediate,
+            )
             // Until the saved theme is read (a few ms) only the window background shows,
             // so a dark-theme user never sees a light frame.
             val theme = settings?.theme ?: return@setContent
