@@ -85,6 +85,14 @@ wifi_only() {
     timeout 30 adb shell svc data disable >/dev/null 2>&1 || true
     timeout 30 adb shell svc wifi enable >/dev/null 2>&1 || true
 }
+# Airplane mode turns the radio off, so mobile data cannot come up by itself: on API 35 it did, switched off,
+# in the middle of the tests (run 41243886217), and a proxy handshake was reset. Wi-Fi goes back on inside it.
+wifi_in_airplane_mode() {
+    timeout 30 adb shell cmd connectivity airplane-mode enable >/dev/null 2>&1 ||
+        timeout 30 adb shell settings put global airplane_mode_on 1 >/dev/null 2>&1 || true
+    sleep 5
+    timeout 30 adb shell svc wifi enable >/dev/null 2>&1 || true
+}
 # What the phone uses, read from its interfaces' addresses.
 uplink_name() {
     local cell=0 wifi=0
@@ -99,13 +107,14 @@ uplink_name() {
 }
 choose_uplink() {
     UPLINK=""
-    # The API 35 image's mobile data came up late or never, or dropped during the tests, in four of its last
-    # seven runs, while Wi-Fi with mobile data off held (run 41235735086, attempt 1): there Wi-Fi is the uplink.
+    # The API 35 image's mobile data came up late or never, or dropped or appeared during the tests, in five of
+    # its last nine runs, while Wi-Fi alone held: there Wi-Fi is the uplink, in airplane mode.
     if [ "$API" = 35 ]; then
-        wifi_only
+        wifi_in_airplane_mode
         if uplink_within 60; then
-            UPLINK="$(uplink_name) (mobile data off: unreliable on this image)"
+            UPLINK="$(uplink_name) (airplane mode, so the radio is off: mobile data is unreliable on this image)"
         else
+            timeout 30 adb shell cmd connectivity airplane-mode disable >/dev/null 2>&1 || true
             timeout 30 adb shell svc data enable >/dev/null 2>&1 || true
             wifi_off || true
             if uplink_within 90; then UPLINK="$(uplink_name) (Wi-Fi did not reach the runner)"; fi
