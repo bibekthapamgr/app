@@ -252,7 +252,7 @@ def instrumentation_summary(logcat: list[str], first_lines: int = 2, max_failure
     return facts
 
 
-NETWORK_EVENT = re.compile(r"(Switching to new default network|got DISCONNECTED|setWifiEnabled)")
+NETWORK_EVENT = re.compile(r"(ConnectivityService.*[Dd]efault network|got DISCONNECTED|setWifiEnabled)")
 
 
 def network_changes(logcat: list[str], last: int = 6) -> list[str]:

@@ -55,10 +55,18 @@ wifi_down() {
     case "$out" in *inet*) return 1 ;; esac
     return 0
 }
-# Wi-Fi must stay off for the whole run: the app does not follow network changes until M7, and a run
-# whose Wi-Fi came back on by itself (run 41233261642, API 35) lost the route to the proxies twice.
-# Android's "turn on Wi-Fi automatically" and scanning are switched off first, and Wi-Fi is switched
-# off until it stays off for 5 seconds (a disable issued while Wi-Fi is still starting can be undone).
+# One uplink for the whole run, and the other one off: the app follows no network change until M7.
+# On API 35 mobile data sometimes comes up late or never, and Wi-Fi then switches itself back on
+# (runs 41219399550, 41233261642, 41234640020: routes lost in the middle of the tests). So mobile
+# data is waited for first; once it is up, Wi-Fi is switched off (its automatic re-enabling and
+# scanning off too) until it stays off. If mobile data never comes up, Wi-Fi is the uplink and
+# mobile data is switched off, so it cannot appear in the middle of the tests.
+addresses() {
+    timeout 30 adb shell 'ip -o -4 addr show' 2>&1 | tr -d '\r'
+}
+cellular_up() {
+    addresses | grep -Eq '^[0-9]+: (eth[0-9]+|radio[0-9]+|rmnet[0-9]+) +inet '
+}
 wifi_off() {
     timeout 30 adb shell settings put global wifi_wakeup_enabled 0 >/dev/null 2>&1 || true
     timeout 30 adb shell settings put global wifi_scan_always_enabled 0 >/dev/null 2>&1 || true
@@ -68,31 +76,52 @@ wifi_off() {
             if wifi_down; then break; fi
             sleep 1
         done
-        sleep 5
+        sleep 10
         if wifi_down; then return 0; fi
     done
     return 1
 }
-# What the phone actually uses, read after the check: Wi-Fi's address shows whether it came back.
+wifi_only() {
+    timeout 30 adb shell svc data disable >/dev/null 2>&1 || true
+    timeout 30 adb shell svc wifi enable >/dev/null 2>&1 || true
+}
+# What the phone uses, read from its interfaces' addresses.
 uplink_name() {
-    if wifi_down; then echo "mobile data"; else echo "Wi-Fi"; fi
+    local cell=0 wifi=0
+    if cellular_up; then cell=1; fi
+    if ! wifi_down; then wifi=1; fi
+    case "$cell$wifi" in
+        10) echo "mobile data" ;;
+        01) echo "Wi-Fi" ;;
+        11) echo "mobile data and Wi-Fi, both up" ;;
+        *) echo "no interface with an address" ;;
+    esac
 }
 START=$SECONDS
-WIFI_NOTE=""
-if ! wifi_off; then WIFI_NOTE=" (Wi-Fi would not stay off)"; fi
+for _ in $(seq 1 45); do
+    if cellular_up; then break; fi
+    sleep 2
+done
 UPLINK=""
-if uplink_within 60; then
-    UPLINK="$(uplink_name)$WIFI_NOTE"
-else
-    timeout 30 adb shell svc data disable >/dev/null 2>&1 || true
-    sleep 3
-    timeout 30 adb shell svc data enable >/dev/null 2>&1 || true
+if cellular_up; then
+    NOTE=""
+    if ! wifi_off; then NOTE=", Wi-Fi would not stay off"; fi
     if uplink_within 60; then
-        UPLINK="$(uplink_name)$WIFI_NOTE (after switching mobile data off and on)"
+        UPLINK="$(uplink_name)$NOTE"
     else
-        timeout 30 adb shell svc wifi enable >/dev/null 2>&1 || true
-        if uplink_within 60; then UPLINK="Wi-Fi (mobile data never reached the runner)"; fi
+        timeout 30 adb shell svc data disable >/dev/null 2>&1 || true
+        sleep 3
+        timeout 30 adb shell svc data enable >/dev/null 2>&1 || true
+        if uplink_within 60; then
+            UPLINK="$(uplink_name)$NOTE (after switching mobile data off and on)"
+        else
+            wifi_only
+            if uplink_within 60; then UPLINK="$(uplink_name) (mobile data did not reach the runner)"; fi
+        fi
     fi
+else
+    wifi_only
+    if uplink_within 60; then UPLINK="$(uplink_name) (mobile data never came up, so it is off)"; fi
 fi
 {
     echo "uplink: ${UPLINK:-none: the phone never reached the runner} ($((SECONDS - START)) s)"
@@ -162,7 +191,7 @@ timeout 120 adb logcat -d > "$OUT/logcat.txt" 2>&1 || true
 kill "$LIVE_LOGCAT" 2>/dev/null || true
 # The phone's network after the tests: the same uplink as before them, or what changed.
 {
-    echo "after the tests: Wi-Fi $(if wifi_down; then echo off; else echo on; fi)"
+    echo "after the tests: $(uplink_name)"
     echo "addresses after the tests: $(timeout 30 adb shell ip -o -4 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
 } >> "$OUT/guest-network.txt"
 if [ "$GUEST_CAPTURE" = 1 ]; then
