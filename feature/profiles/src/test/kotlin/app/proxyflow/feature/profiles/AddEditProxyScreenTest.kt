@@ -149,17 +149,17 @@ class AddEditProxyScreenTest {
 
         state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Unavailable))
         compose.onNodeWithText("Testing isn't available yet").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Nothing was sent to your proxy", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Nothing was sent to your proxy", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Test passed").assertDoesNotExist()
 
         state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Failed("AUTH_FAILED")))
         compose.onNodeWithText("Test failed").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("AUTH_FAILED", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("AUTH_FAILED", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Test passed").assertDoesNotExist()
 
         state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Passed(latencyMillis = 87)))
         compose.onNodeWithText("Test passed").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("87 ms", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("87 ms", substring = true).performScrollTo().assertIsDisplayed()
     }
 
     private companion object {

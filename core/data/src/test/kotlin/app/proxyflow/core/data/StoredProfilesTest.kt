@@ -97,19 +97,30 @@ class StoredProfilesTest {
 
         // An export: every column of every row of every table, as text and as bytes.
         val export = StringBuilder()
+        val sample = StringBuilder() // the same rows as a person would read them, blobs in hex
         val db = opened.single().openHelper.readableDatabase
         db.query("SELECT name FROM sqlite_master WHERE type = 'table'").use { tables ->
             while (tables.moveToNext()) {
-                db.query("SELECT * FROM \"${tables.getString(0)}\"").use { rows ->
+                val table = tables.getString(0)
+                db.query("SELECT * FROM \"$table\"").use { rows ->
+                    sample.append("table ").append(table).append(": ").append(rows.columnNames.joinToString("|")).append('\n')
                     while (rows.moveToNext()) {
                         for (column in 0 until rows.columnCount) {
                             when (rows.getType(column)) {
-                                Cursor.FIELD_TYPE_BLOB -> export.append(rows.getBlob(column).decodeToString())
-                                Cursor.FIELD_TYPE_NULL -> Unit
-                                else -> export.append(rows.getString(column))
+                                Cursor.FIELD_TYPE_BLOB -> rows.getBlob(column).let { blob ->
+                                    export.append(blob.decodeToString())
+                                    sample.append(blob.toHex())
+                                }
+                                Cursor.FIELD_TYPE_NULL -> sample.append("NULL")
+                                else -> rows.getString(column).let { value ->
+                                    export.append(value)
+                                    sample.append(value)
+                                }
                             }
                             export.append('|')
+                            sample.append('|')
                         }
+                        sample.append('\n')
                     }
                 }
             }
@@ -117,6 +128,10 @@ class StoredProfilesTest {
         assertTrue("the export has the profile", "203.0.113.10" in export)
         assertFalse(username in export)
         assertFalse(password in export)
+        // Kept as evidence for the acceptance report (CI prints it with the build facts).
+        File("build/reports/database-export").apply { mkdirs() }.resolve("profiles.txt").writeText(
+            "Test credentials, generated for this run only: username $username, password $password\n$sample",
+        )
 
         // The files themselves, including the write-ahead log, in the encodings SQLite and Java use.
         opened.forEach { it.close() }
@@ -159,6 +174,8 @@ class StoredProfilesTest {
             }
         }
     }
+
+    private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
 
     private fun ByteArray.contains(slice: ByteArray): Boolean =
         (0..size - slice.size).any { start -> slice.indices.all { this[start + it] == slice[it] } }

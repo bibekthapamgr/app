@@ -393,4 +393,16 @@ class AddEditProxyViewModelTest {
         assertEquals(saved.id, tester.requests.single().first)
         assertEquals("", tester.requests.single().second.password)
     }
+
+    @Test
+    fun aTesterThatBreaksIsReportedAsAFailureNeverAPass() = runTest {
+        val broken = object : app.proxyflow.core.data.ConnectionTester {
+            override suspend fun test(profileId: String?, input: ProxyProfileInput): ConnectionTestResult = error("engine crashed")
+        }
+        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, broken)
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.testConnection()
+        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Failed(AddEditProxyViewModel.INTERNAL_ERROR)), vm.uiState.value.test)
+    }
 }

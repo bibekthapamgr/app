@@ -8,6 +8,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
@@ -65,9 +67,14 @@ class ComponentsTest {
                 }
             }
         }
-        // Shown, selected and copied, as someone would from the text toolbar.
+        // The password field offers no Copy or Cut at all, not even while the password is shown and selected.
         compose.onNodeWithContentDescription("Show password").performClick()
-        copyAll("Password", "s3cret-pw")
+        val password = compose.onNode(hasText("Password") and hasSetTextAction())
+        password.performTextInputSelection(TextRange(0, "s3cret-pw".length))
+        password.assert(SemanticsMatcher.keyNotDefined(SemanticsActions.CopyText))
+        password.assert(SemanticsMatcher.keyNotDefined(SemanticsActions.CutText))
+
+        // The username field offers Copy, as someone would use it from the text toolbar, but nothing reaches the clipboard.
         copyAll("Username", "office-user")
         compose.waitForIdle()
         assertFalse("nothing copied", clipboard.hasPrimaryClip() && clipboard.primaryClip?.getItemAt(0)?.text?.isNotEmpty() == true)

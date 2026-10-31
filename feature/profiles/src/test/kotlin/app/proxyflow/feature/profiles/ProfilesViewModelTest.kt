@@ -1,6 +1,8 @@
 package app.proxyflow.feature.profiles
 
 import app.proxyflow.core.data.CredentialsRead
+import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
@@ -10,6 +12,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -71,5 +74,23 @@ class ProfilesViewModelTest {
         assertEquals(listOf("Office", "Office (copy)", "Office (copy 2)", "Kopie 1 von Office"), vm.uiState.value.profiles.map { it.name })
         assertEquals("pw", String((repository.readCredentials("p2") as CredentialsRead.Available).password))
         assertEquals("the original stays active", "p1", vm.uiState.value.activeProfileId)
+    }
+
+    @Test
+    fun aDuplicateThatFailsIsReportedOnceAndChangesNothing() = runTest {
+        // For example a Keystore error while sealing the copy's credentials.
+        val broken = object : ProfileRepository by repository {
+            override suspend fun duplicate(id: String, name: String): ProxyProfile? = throw IllegalStateException("Keystore unavailable")
+        }
+        val vm = ProfilesViewModel(broken)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
+        repository.save(null, ProxyProfileInput(name = "Office", server = "a.example.com", port = "1080"))
+
+        vm.duplicate("p1")
+        assertEquals(ProfileAction.Duplicate, vm.uiState.value.failed)
+        assertEquals(listOf("Office"), vm.uiState.value.profiles.map { it.name })
+
+        vm.onFailureShown()
+        assertNull(vm.uiState.value.failed)
     }
 }

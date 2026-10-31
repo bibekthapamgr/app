@@ -154,7 +154,14 @@ class AddEditProxyViewModel(
         val id = profileId.takeIf { state.value.isEdit }
         state.update { it.copy(test = ConnectionTestState.Testing) }
         testJob = viewModelScope.launch {
-            val result = tester.test(id, input)
+            val result = try {
+                tester.test(id, input)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A tester that broke tested nothing: that is a failure, never a pass.
+                ConnectionTestResult.Failed(INTERNAL_ERROR)
+            }
             // A result is only shown for the form it was made with.
             if (state.value.input == input) state.update { it.copy(test = ConnectionTestState.Done(result)) }
         }
@@ -214,6 +221,9 @@ class AddEditProxyViewModel(
     companion object {
         /** Must match the property name in [AddEditProxyDestination]. */
         const val ARG_PROFILE_ID = "profileId"
+
+        /** Error code for a test that could not run (docs/m1/04 error catalogue: `INTERNAL`). */
+        const val INTERNAL_ERROR = "INTERNAL"
         private const val KEY_NAME = "form.name"
         private const val KEY_PROTOCOL = "form.protocol"
         private const val KEY_SERVER = "form.server"

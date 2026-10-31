@@ -65,6 +65,15 @@ def dependencies(path: str) -> list[str]:
     return [f"RELEASE RUNTIME CLASSPATH {len(modules)} libraries"] + [f"  {m}" for m in sorted(modules)]
 
 
+def database_export() -> list[str]:
+    """The profiles table as StoredProfilesTest exported it: the credential columns hold ciphertext only."""
+    path = "core/data/build/reports/database-export/profiles.txt"
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return ["DATABASE EXPORT (core/data StoredProfilesTest, Room on Robolectric)"] + [f"  {line}" for line in f.read().splitlines()]
+
+
 def device_tests(label: str) -> list[str]:
     lines: list[str] = []
     for report in sorted(glob.glob("**/build/outputs/androidTest-results/connected/**/*.xml", recursive=True)):
@@ -117,4 +126,4 @@ if __name__ == "__main__":
     if sys.argv[1] == "--device-tests":
         emit(device_tests(sys.argv[2]))
     else:
-        emit(tests() + apks() + manifests() + dependencies(sys.argv[1]))
+        emit(tests() + apks() + manifests() + database_export() + dependencies(sys.argv[1]))

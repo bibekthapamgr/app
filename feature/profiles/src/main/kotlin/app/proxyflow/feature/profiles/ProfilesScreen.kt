@@ -18,10 +18,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -58,6 +62,7 @@ internal fun ProfilesRoute(viewModel: ProfilesViewModel, onAddProxy: () -> Unit,
                 if (number == 1) copyPattern.format(locale, base) else numberedCopyPattern.format(locale, base, number)
             }
         },
+        onFailureShown = viewModel::onFailureShown,
     )
 }
 
@@ -70,12 +75,30 @@ fun ProfilesScreen(
     onDeleteProxy: (String) -> Unit,
     modifier: Modifier = Modifier,
     onDuplicateProxy: (String) -> Unit = {},
+    onFailureShown: () -> Unit = {},
 ) {
     // Saved by id so the confirmation survives rotation; it closes by itself if the profile disappears.
     var pendingDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    val failure = state.failed?.let { action ->
+        stringResource(
+            when (action) {
+                ProfileAction.Use -> R.string.profiles_use_failed
+                ProfileAction.Duplicate -> R.string.profiles_duplicate_failed
+                ProfileAction.Delete -> R.string.profiles_delete_failed
+            },
+        )
+    }
+    LaunchedEffect(state.failed) {
+        if (failure != null) {
+            snackbar.showSnackbar(failure)
+            onFailureShown()
+        }
+    }
     Scaffold(
         modifier = modifier,
         topBar = { PfTopAppBar(title = stringResource(R.string.profiles_title)) },
+        snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
             if (state.profiles.isNotEmpty()) {
                 ExtendedFloatingActionButton(
