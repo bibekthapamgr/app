@@ -3,6 +3,8 @@
 
     <!-- The engine's and the pre-flight check's connections to the user's proxy. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android's view of the VPN network: Connected waits until Android routes apps into the interface (ADR-0010 §3). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- The VPN runs as a foreground service of type systemExempted (ADR-0007, ADR-0010 §8). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />

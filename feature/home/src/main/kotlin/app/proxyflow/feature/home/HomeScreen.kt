@@ -352,25 +352,34 @@ private fun BlockedContent(state: HomeUiState.Ready, actions: HomeActions) {
     PfBanner(title = errorTitle(error, state.profile), text = errorMessage(error, state.profile), tone = BannerTone.Error)
     Note(stringResource(R.string.home_blocked_note))
     ErrorCode(error)
-    PfPrimaryButton(
-        text = stringResource(if (error.code == ConnectionError.ENGINE_STOPPED) R.string.home_restart else R.string.home_try_again),
-        onClick = actions.onConnect,
-        icon = PfIcons.Refresh,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    if (error.code != ConnectionError.ENGINE_STOPPED) {
-        PfSecondaryButton(
-            text = stringResource(R.string.home_edit_profile),
-            onClick = { actions.onEditProfile(state.profile.id) },
-            icon = PfIcons.Edit,
+    if (error.code == ConnectionError.PROFILE_DELETED) {
+        // Nothing to restart or edit: stopping is the way out, and it is still confirmed.
+        PfPrimaryButton(
+            text = stringResource(R.string.home_stop_normal_network),
+            onClick = actions.onStop,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    } else {
+        PfPrimaryButton(
+            text = stringResource(if (error.code == ConnectionError.ENGINE_STOPPED) R.string.home_restart else R.string.home_try_again),
+            onClick = actions.onConnect,
+            icon = PfIcons.Refresh,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (error.code != ConnectionError.ENGINE_STOPPED) {
+            PfSecondaryButton(
+                text = stringResource(R.string.home_edit_profile),
+                onClick = { actions.onEditProfile(state.profile.id) },
+                icon = PfIcons.Edit,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        PfTextButton(
+            text = stringResource(R.string.home_stop_normal_network),
+            onClick = actions.onStop,
             modifier = Modifier.fillMaxWidth(),
         )
     }
-    PfTextButton(
-        text = stringResource(R.string.home_stop_normal_network),
-        onClick = actions.onStop,
-        modifier = Modifier.fillMaxWidth(),
-    )
 }
 
 @Composable
@@ -533,8 +542,12 @@ private fun errorTitle(error: ConnectionError, profile: ProxyProfile): String = 
     "TLS_HANDSHAKE" -> stringResource(R.string.home_error_tls_handshake_title)
     "PROTOCOL_ERROR" -> stringResource(R.string.home_error_protocol_title, profile.protocol.name)
     "HANDSHAKE_TIMEOUT" -> stringResource(R.string.home_error_timeout_title)
+    "TARGET_NOT_ALLOWED" -> stringResource(R.string.home_error_refused_title)
+    "PROXY_GENERAL_FAILURE" -> stringResource(R.string.home_error_proxy_failure_title)
+    "TARGET_UNSUPPORTED" -> stringResource(R.string.home_error_unsupported_title)
     ConnectionError.CREDENTIAL_UNREADABLE -> stringResource(R.string.home_error_credentials_title)
     ConnectionError.ENGINE_STOPPED -> stringResource(R.string.home_error_engine_stopped_title)
+    ConnectionError.PROFILE_DELETED -> stringResource(R.string.home_error_profile_deleted_title)
     else -> stringResource(R.string.home_error_internal_title)
 }
 
@@ -551,8 +564,12 @@ private fun errorMessage(error: ConnectionError, profile: ProxyProfile): String 
     "TLS_HANDSHAKE" -> stringResource(R.string.home_error_tls_handshake_message)
     "PROTOCOL_ERROR" -> stringResource(R.string.home_error_protocol_message)
     "HANDSHAKE_TIMEOUT" -> stringResource(R.string.home_error_timeout_message)
+    "TARGET_NOT_ALLOWED" -> stringResource(R.string.home_error_refused_message, profile.endpoint)
+    "PROXY_GENERAL_FAILURE" -> stringResource(R.string.home_error_proxy_failure_message, profile.endpoint)
+    "TARGET_UNSUPPORTED" -> stringResource(R.string.home_error_unsupported_message)
     ConnectionError.CREDENTIAL_UNREADABLE -> stringResource(R.string.home_error_credentials_message)
     ConnectionError.ENGINE_STOPPED -> stringResource(R.string.home_error_engine_stopped_message)
+    ConnectionError.PROFILE_DELETED -> stringResource(R.string.home_error_profile_deleted_message)
     else -> stringResource(R.string.home_error_internal_message)
 }
 

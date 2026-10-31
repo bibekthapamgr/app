@@ -35,6 +35,7 @@ class ManifestTest {
         val requested = info.requestedPermissions.orEmpty().filterNot { it == ownReceiverPermission }.sorted()
         assertEquals(
             listOf(
+                "android.permission.ACCESS_NETWORK_STATE",
                 "android.permission.FOREGROUND_SERVICE",
                 "android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED",
                 "android.permission.INTERNET",

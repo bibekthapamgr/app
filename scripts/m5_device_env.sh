@@ -4,6 +4,8 @@
 #
 #   Dante  127.0.0.1:1080  SOCKS5, username/password (RFC 1929) against a system account
 #   Squid  127.0.0.1:3128  HTTP CONNECT, Basic sign-in; tunnels to ports 443 and 8080 only
+#   Both reach the Internet too: the app's pre-flight check opens a tunnel to
+#   connectivitycheck.gstatic.com:443 through them (ADR-0010 §4).
 #   silent 127.0.0.1:1081  accepts connections and never answers (pre-flight timeout/cancel)
 #   closed 127.0.0.1:1082  nothing listens (PROXY_UNREACHABLE)
 #   destination 10.99.0.1:8080, named proxyflow.test in /etc/hosts: the proxies resolve the
@@ -42,13 +44,17 @@ echo "10.99.0.1 proxyflow.test" | sudo tee -a /etc/hosts >/dev/null
 touch "$PF/danted.log" "$PF/squid-access.log" "$PF/squid-cache.log"
 chmod 0666 "$PF/danted.log" "$PF/squid-access.log" "$PF/squid-cache.log"
 
-# Dante.
+# Dante. It connects out from the runner's own interface (the default route's): from the loopback
+# it could reach only local addresses, and the pre-flight check needs the Internet. The destination
+# is still reached locally.
+EXTERNAL_IF="$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')"
+test -n "$EXTERNAL_IF" || { echo "::error title=M5 proxies::the runner has no default route"; exit 1; }
 sudo useradd --no-create-home --shell /usr/sbin/nologin "$SOCKS_USER"
 echo "$SOCKS_USER:$SOCKS_PASS" | sudo chpasswd
 cat > "$PF/danted.conf" <<EOF
 logoutput: $PF/danted.log
 internal: 127.0.0.1 port = 1080
-external: lo
+external: $EXTERNAL_IF
 clientmethod: none
 socksmethod: username
 user.privileged: root
@@ -130,4 +136,21 @@ retry() {
 }
 retry check_socks
 retry check_http
-echo "::notice title=M5 proxies::Dante $(danted -v 2>&1 | head -1) on :1080 (SOCKS5, sign-in); $(squid -v | head -1) on :3128 (HTTP CONNECT, sign-in); silent proxy :1081; closed port :1082; destination proxyflow.test = 10.99.0.1:8080. Both proxies carried a line to the destination from the runner."
+
+# Both proxies reach the pre-flight check's target, as a working proxy of a user's does.
+PREFLIGHT_URL=https://connectivitycheck.gstatic.com/generate_204
+check_preflight_socks() {
+    test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -x "socks5h://$SOCKS_USER:$SOCKS_PASS@127.0.0.1:1080" "$PREFLIGHT_URL")" = 204
+}
+check_preflight_http() {
+    test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -p -x http://127.0.0.1:3128 --proxy-user "$HTTP_USER:$HTTP_PASS" "$PREFLIGHT_URL")" = 204
+}
+for check in check_preflight_socks check_preflight_http; do
+    ok=0
+    for _ in 1 2 3 4 5; do
+        if "$check" 2>/dev/null; then ok=1; break; fi
+        sleep 2
+    done
+    test "$ok" = 1 || { echo "::error title=M5 proxies::$check: the proxy could not reach $PREFLIGHT_URL"; exit 1; }
+done
+echo "::notice title=M5 proxies::Dante $(danted -v 2>&1 | head -1) on :1080 (SOCKS5, sign-in, out through $EXTERNAL_IF); $(squid -v | head -1) on :3128 (HTTP CONNECT, sign-in); silent proxy :1081; closed port :1082; destination proxyflow.test = 10.99.0.1:8080. Both proxies carried a line to the destination and reached $PREFLIGHT_URL from the runner."

@@ -33,11 +33,13 @@ import org.junit.runner.RunWith
  * and TCP from the shell — a user the VPN covers — to a destination that is only
  * reachable by name through a proxy. The runner's proxy and destination logs and a
  * packet capture of the emulator are checked afterwards (scripts/m5_evidence.py);
- * each exchange's line is logged under [TAG] so they can be matched.
+ * each line sent is logged under [TAG] ("exchange", or "held" for one that must not
+ * arrive) so they can be matched.
  *
  * Every test checks what Android and the process see, not only ProxyFlow's own
- * state: VPN networks (ConnectivityManager), interface descriptors (/proc/self/fd),
- * service instances and notifications.
+ * state: VPN networks and the interface they route into (ConnectivityManager),
+ * interface descriptors (/proc/self/fd), interfaces established, service instances
+ * and notifications.
  */
 @RunWith(AndroidJUnit4::class)
 class VpnEndToEndTest {
@@ -45,16 +47,18 @@ class VpnEndToEndTest {
     private lateinit var env: E2eConfig
     private lateinit var networks: VpnNetworks
     private lateinit var history: StateHistory
+    private var establishedBefore = 0
 
     @Before
     fun setUp() {
         env = E2eConfig.load()
         app.setVpnConsent(allowed = true)
         app.allowNotifications()
-        app.disconnectAndSettle()
+        app.disconnectAndSettle(timeoutMillis = SETTLE_BEFORE_TEST_MS)
         app.deleteAllProfiles()
         networks = VpnNetworks(app.context)
         history = StateHistory(app.controller)
+        establishedBefore = ProxyFlowVpnService.establishedInterfaces.get()
     }
 
     @After
@@ -74,7 +78,9 @@ class VpnEndToEndTest {
 
         assertEquals(profile.displayName, connected.profileName)
         assertConnectedAsAndroidSeesIt()
-        eventually("the notification says Connected") { app.notificationTitle(ProxyFlowVpnService.STATUS_NOTIFICATION_ID) == "Connected" }
+        eventually("the notification says Connected", diagnose = { Diagnostics.report(app) }) {
+            app.notificationTitle(ProxyFlowVpnService.STATUS_NOTIFICATION_ID) == "Connected"
+        }
         val status = checkNotNull(app.notification(ProxyFlowVpnService.STATUS_NOTIFICATION_ID))
         assertEquals(listOf("Disconnect"), status.actions?.map { it.title.toString() })
         // Threat model I-11: the lock screen gets a version without the profile name.
@@ -114,12 +120,27 @@ class VpnEndToEndTest {
         app.disconnectAndSettle()
     }
 
+    /**
+     * Traffic sent while a switch is under way, and after it failed, must not arrive anywhere:
+     * the switch goes to a proxy that never answers (its check runs until the handshake
+     * times out), then on to a working one.
+     */
     @Test
     fun switchingProfilesKeepsTrafficInTheTunnel() {
         val socks = socks()
         val http = http()
+        val silent = app.save("Silent", ProxyProtocol.SOCKS5, env.proxyHost, env.silentPort)
         app.connect(socks.id)
         assertReachesDestination("switch-socks5")
+
+        app.controller.connect(silent.id)
+        app.await(what = "Reconnecting to the silent proxy") { it.status == ConnectionStatus.Reconnecting && it.profileId == silent.id }
+        assertHeld("switch-reconnecting")
+        val blocked = app.await(what = "Blocked by the silent proxy") { it.status == ConnectionStatus.Blocked && it.profileId == silent.id }
+        assertEquals("HANDSHAKE_TIMEOUT", blocked.error?.code)
+        assertEquals("the interface stays, so traffic is held", 1, Descriptors.tun().size)
+        assertTrue("Android keeps the VPN network", networks.present())
+        assertHeld("switch-blocked")
 
         app.connect(http.id)
 
@@ -127,8 +148,8 @@ class VpnEndToEndTest {
             "switching shows Reconnecting with the new profile: ${history.states}",
             history.states.any { it.status == ConnectionStatus.Reconnecting && it.profileId == http.id },
         )
+        assertConnectedAsAndroidSeesIt()
         assertEquals("the old interface is closed once the new one runs", 1, Descriptors.tun().size)
-        assertEquals(1, ProxyFlowVpnService.liveInstances.get())
         assertReachesDestination("switch-http-connect")
         app.disconnectAndSettle()
         assertReleased()
@@ -173,7 +194,10 @@ class VpnEndToEndTest {
 
         assertNull("a cancel is not an error", ended.error)
         assertNeverConnected()
-        assertEquals(0, app.runtime.session.activeJobs())
+        // Its socket is shut down: the check returns at once, not after its 15 s timeout.
+        eventually("the cancelled check has returned", timeoutMillis = CHECK_CUT_SHORT_MS, diagnose = { Diagnostics.report(app) }) {
+            app.runtime.session.activeJobs() == 0
+        }
     }
 
     @Test
@@ -268,19 +292,14 @@ class VpnEndToEndTest {
         eventually("the notification says Traffic blocked") {
             app.notificationTitle(ProxyFlowVpnService.STATUS_NOTIFICATION_ID) == "Traffic blocked"
         }
-        val held = random()
-        Log.i(TAG, "held $held")
-        assertEquals(
-            "nothing reaches the destination while traffic is held",
-            "",
-            Shell.exchange(env.destinationAddress, env.destinationPort, held, timeoutSeconds = HELD_TIMEOUT_S),
-        )
+        assertHeld("engine-failure")
 
         app.controller.restart()
         app.awaitStatus(ConnectionStatus.Connected)
         keep.close()
 
         assertEquals(1, Descriptors.tun().size)
+        assertConnectedAsAndroidSeesIt()
         assertReachesDestination("after-restart")
         app.disconnectAndSettle()
         assertReleased()
@@ -298,10 +317,30 @@ class VpnEndToEndTest {
         assertEquals("PROXYFLOW-DEST $line", Shell.exchange(env.destinationName, env.destinationPort, line))
     }
 
+    /** One line to the destination's address while traffic is held: no answer, and it never arrives (m5_evidence.py). */
+    private fun assertHeld(label: String) {
+        val line = "PF-held-$label-${random()}"
+        Log.i(TAG, "held $line")
+        assertEquals(
+            "nothing reaches the destination while traffic is held",
+            "",
+            Shell.exchange(env.destinationAddress, env.destinationPort, line, timeoutSeconds = HELD_TIMEOUT_S),
+        )
+    }
+
+    /**
+     * Connected as Android sees it: one interface, and Android's VPN network ready and leading
+     * into that interface (so apps' traffic goes to it), seen by the sampler too — a sampler
+     * that saw nothing would make every "Android never had a VPN network" check meaningless.
+     */
     private fun assertConnectedAsAndroidSeesIt() {
-        assertEquals("one VPN interface", 1, Descriptors.tun().size)
+        val tun = Descriptors.tun()
+        assertEquals("one VPN interface", 1, tun.size)
+        val name = checkNotNull(ProxyFlowVpnService.interfaceName(tun.single())) { "the interface's name can't be read" }
+        val vpn = networks.current()
+        assertTrue("Android routes into $name and its network is ready: $vpn", vpn.any { it.interfaceName == name && it.validated })
+        assertTrue("the sampler saw the VPN network", networks.appearances >= 1)
         assertEquals("one VPN service", 1, ProxyFlowVpnService.liveInstances.get())
-        assertTrue("Android has a VPN network", networks.present())
         assertEquals(EngineState.Running, ProxyEngine().status().state)
     }
 
@@ -310,15 +349,16 @@ class VpnEndToEndTest {
         assertEquals("no VPN service", 0, ProxyFlowVpnService.liveInstances.get())
         assertEquals("the engine stopped", EngineState.Stopped, ProxyEngine().status().state)
         assertEquals("no session job", 0, app.runtime.session.activeJobs())
-        eventually("Android has no VPN network") { !networks.present() }
+        eventually("Android has no VPN network", diagnose = { Diagnostics.report(app) }) { !networks.present() }
         eventually("the status notification is removed") { app.notification(ProxyFlowVpnService.STATUS_NOTIFICATION_ID) == null }
     }
 
     private fun assertNeverConnected() {
         assertTrue("never Connected: ${history.states}", history.neverConnected())
+        assertEquals("no VPN interface was established", establishedBefore, ProxyFlowVpnService.establishedInterfaces.get())
         assertEquals("Android never had a VPN network", 0, networks.appearances)
         assertTrue("no VPN interface", Descriptors.tun().isEmpty())
-        eventually("the VPN service stops") { ProxyFlowVpnService.liveInstances.get() == 0 }
+        eventually("the VPN service stops", diagnose = { Diagnostics.report(app) }) { ProxyFlowVpnService.liveInstances.get() == 0 }
     }
 
     private fun random() = UUID.randomUUID().toString().replace("-", "").take(16)
@@ -328,6 +368,7 @@ class VpnEndToEndTest {
         const val CYCLES = 10
         const val THREAD_SLACK = 6
         const val CHECK_RUNNING_MS = 1_500L
+        const val CHECK_CUT_SHORT_MS = 3_000L
         const val SETTLE_MS = 1_000L
         const val HELD_TIMEOUT_S = 5
     }

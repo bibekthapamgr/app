@@ -1,5 +1,7 @@
 package app.proxyflow.core.vpn
 
+import app.proxyflow.core.data.CredentialsRead
+import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.engine.EngineException
 import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
@@ -12,8 +14,10 @@ import app.proxyflow.core.testing.TestProfiles
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
@@ -52,21 +56,28 @@ class VpnSessionTest {
 
     @Before
     fun setUp() {
-        session = VpnSession(
-            profiles = profiles.repository,
-            engine = engine,
-            services = {
-                serviceStarts.incrementAndGet()
-                if (serviceStartAllowed && serviceAttaches) session.attach(host, alwaysOn = false)
-                serviceStartAllowed
-            },
-            state = state,
-            scope = scope,
-            blocking = Dispatchers.IO,
-            clock = { NOW },
-            timing = VpnSession.Timing(preflightTimeoutMillis = 2_000, serviceStartTimeoutMillis = 1_000),
-        )
+        session = newSession()
     }
+
+    private fun newSession(
+        timing: VpnSession.Timing = TIMING,
+        blocking: CoroutineDispatcher = Dispatchers.IO,
+        repository: ProfileRepository = profiles.repository,
+    ) = VpnSession(
+        profiles = repository,
+        engine = engine,
+        services = {
+            serviceStarts.incrementAndGet()
+            if (serviceStartAllowed && serviceAttaches) session.attach(host, alwaysOn = false)
+            serviceStartAllowed
+        },
+        state = state,
+        // A scope of its own, as in VpnRuntime: activeJobs() counts this session's coroutines only.
+        scope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job])),
+        blocking = blocking,
+        clock = { NOW },
+        timing = timing,
+    )
 
     @After
     fun tearDown() {
@@ -97,6 +108,9 @@ class VpnSessionTest {
         )
         assertEquals("credentials go to the check and to the engine", listOf(true, true), engine.secrets)
         assertEquals("the check's socket is kept out of the VPN", listOf(FakeEngine.PROBE_SOCKET), host.protectedSockets)
+        assertEquals("and guarded, so a cancel can cut it short", listOf(FakeEngine.PROBE_SOCKET), host.trackedSockets)
+        assertEquals("the guard is let go after the check", 0, host.guardsOpen.get())
+        assertEquals(0, host.aborts.get())
         assertEquals(TunConfig("198.18.0.1", "fd00:66::1", "198.18.0.2", mtu = 9000), host.lastConfig)
         assertEquals(
             "status before Connected: checking, then starting protection",
@@ -122,16 +136,31 @@ class VpnSessionTest {
     }
 
     @Test
-    fun aTargetLevelAnswerProvesTheProxyIsReachable() {
+    fun aProxyThatTriedTheDestinationPassesTheCheck() {
         val profile = save()
-        for (code in PreflightAnswer.TARGET_LEVEL) {
+        for (code in PreflightAnswer.DESTINATION_UNREACHABLE) {
             engine.answer = PreflightAnswer(ok = false, code = code)
             session.connect(profile.id)
             awaitStatus(ConnectionStatus.Connected)
             session.disconnect()
             awaitStatus(ConnectionStatus.Disconnected)
         }
-        assertEquals(PreflightAnswer.TARGET_LEVEL.size, host.tuns.size)
+        assertEquals(PreflightAnswer.DESTINATION_UNREACHABLE.size, host.tuns.size)
+    }
+
+    /** Providers answer an expired plan or an address they don't allow with a refusal or a general failure. */
+    @Test
+    fun aRefusalOrAGeneralFailureFromTheProxyFailsTheCheck() {
+        val profile = save()
+        for (code in listOf("TARGET_NOT_ALLOWED", "PROXY_GENERAL_FAILURE", "TARGET_UNSUPPORTED")) {
+            engine.answer = PreflightAnswer(ok = false, code = code, detail = "proxy answered HTTP 402")
+            session.connect(profile.id)
+            val ended = awaitError()
+            assertEquals(ConnectionStatus.Disconnected, ended.status)
+            assertEquals(code, ended.error?.code)
+        }
+        assertTrue("no interface was created", host.tuns.isEmpty())
+        assertNeverConnected()
     }
 
     @Test
@@ -355,6 +384,39 @@ class VpnSessionTest {
     }
 
     @Test
+    fun anyKindOfEngineStartFailureTakesTheNewInterfaceDownAgain() {
+        val profile = save()
+        val failures = listOf(IllegalStateException("trust manager"), UnsatisfiedLinkError("libgojni.so"))
+        for (failure in failures) {
+            engine.startError = failure
+            session.connect(profile.id)
+            val ended = awaitError()
+            assertEquals(ConnectionStatus.Disconnected, ended.status)
+            assertEquals(ConnectionError.INTERNAL, ended.error?.code)
+        }
+        assertTrue("every new interface was closed again", host.tuns.all { it.closed })
+        assertNeverConnected()
+    }
+
+    @Test
+    fun anEngineThatCannotStartOnASwitchHoldsTrafficOnTheNewInterface() {
+        val first = save(name = "Tokyo")
+        val second = save(name = "Office")
+        session.connect(first.id)
+        awaitStatus(ConnectionStatus.Connected)
+        engine.startError = IllegalStateException("trust manager")
+
+        session.connect(second.id)
+        val blocked = awaitStatus(ConnectionStatus.Blocked)
+
+        assertEquals(ConnectionError.INTERNAL, blocked.error?.code)
+        // Android has moved to the new interface; closing it would make Android drop the VPN (fail open).
+        assertTrue("the old interface is closed", host.tuns[0].closed)
+        assertFalse("the new one holds traffic", host.tuns[1].closed)
+        assertFalse(engine.running)
+    }
+
+    @Test
     fun unreadableCredentialsStopBeforeTheProxyIsContacted() {
         val profile = save(signIn = true)
         profiles.cipher.deleteKey("k1")
@@ -448,7 +510,7 @@ class VpnSessionTest {
     }
 
     @Test
-    fun deletingTheConnectedProfileDisconnects() {
+    fun deletingTheConnectionsProfileStopsItsEngineAndHoldsTraffic() {
         val profile = save()
         val other = save(name = "Other")
         session.connect(profile.id)
@@ -458,10 +520,53 @@ class VpnSessionTest {
         runBlocking { session.awaitIdle() }
         assertEquals(ConnectionStatus.Connected, state.value.status)
 
+        delete(profile.id)
         session.profileDeleted(profile.id)
+        val blocked = awaitStatus(ConnectionStatus.Blocked)
+        assertEquals(ConnectionError.PROFILE_DELETED, blocked.error?.code)
+        assertFalse("its credentials are no longer used", engine.running)
+        assertFalse("leaving the protected state takes the user's Stop", host.tuns.single().closed)
+
+        session.restart()
+        runBlocking { session.awaitIdle() }
+        assertEquals("nothing to restart", ConnectionStatus.Blocked, state.value.status)
+        assertEquals(ConnectionError.PROFILE_DELETED, state.value.error?.code)
+        assertEquals(1, log.count("probe"))
+
+        session.disconnect()
         awaitStatus(ConnectionStatus.Disconnected)
         assertTrue(host.tuns.single().closed)
-        assertFalse(engine.running)
+    }
+
+    @Test
+    fun deletingTheProfileOfAConnectionBeingSetUpCancelsIt() {
+        val profile = save()
+        engine.gate = CountDownLatch(1)
+        session.connect(profile.id)
+        awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}")
+
+        delete(profile.id)
+        session.profileDeleted(profile.id)
+        val ended = awaitStatus(ConnectionStatus.Disconnected)
+
+        assertNull(ended.error)
+        assertTrue(host.tuns.isEmpty())
+        assertNeverConnected()
+    }
+
+    @Test
+    fun connectingAMissingProfileLeavesTheRunningConnectionAlone() {
+        val profile = save()
+        session.connect(profile.id)
+        awaitStatus(ConnectionStatus.Connected)
+
+        session.connect("missing")
+        runBlocking { session.awaitIdle() }
+
+        assertEquals(ConnectionStatus.Connected, state.value.status)
+        assertEquals(profile.id, state.value.profileId)
+        assertTrue(engine.running)
+        assertEquals(0, log.count("stop"))
     }
 
     @Test
@@ -518,9 +623,11 @@ class VpnSessionTest {
     }
 
     @Test
-    fun aCancelledCheckLeavesNoJobBehind() {
+    fun aCancelledCheckIsCutShortAndLeavesNoJobBehind() {
         val profile = save()
-        engine.gate = CountDownLatch(1)
+        val gate = CountDownLatch(1)
+        engine.gate = gate
+        host.onAbort = { gate.countDown() } // shutting the sockets down makes the engine's call return
         session.connect(profile.id)
         awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}")
         assertEquals("the check runs", 1, session.activeJobs())
@@ -528,24 +635,221 @@ class VpnSessionTest {
         session.disconnect()
         awaitStatus(ConnectionStatus.Disconnected)
 
+        eventually("the check has returned") { session.activeJobs() == 0 }
+        assertEquals("its sockets were shut down", 1, host.aborts.get())
+        assertEquals(0, host.guardsOpen.get())
+    }
+
+    /** activeJobs() counts a cancelled check whose engine call has not returned yet. */
+    @Test
+    fun aCheckThatHasNotReturnedStillCounts() {
+        val profile = save()
+        val gate = CountDownLatch(1)
+        engine.gate = gate
+        session.connect(profile.id)
+        awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}")
+
+        session.disconnect()
+        awaitStatus(ConnectionStatus.Disconnected)
+        Thread.sleep(100)
+        assertEquals("cancelled, but still in the engine", 1, session.activeJobs())
+
+        gate.countDown()
+        eventually("the check has returned") { session.activeJobs() == 0 }
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Disconnected, state.value.status)
+        assertTrue(host.tuns.isEmpty())
+    }
+
+    @Test
+    fun aCheckCancelledBeforeItRanNeverReadsTheCredentials() {
+        val counting = CountingProfiles(profiles.repository)
+        val held = CountDownLatch(1)
+        val queue = Executors.newSingleThreadExecutor()
+        queue.execute { held.await() } // the check's dispatcher is busy until released
+        session = newSession(blocking = queue.asCoroutineDispatcher(), repository = counting)
+        try {
+            val profile = save(signIn = true)
+            session.connect(profile.id)
+            awaitStatus(ConnectionStatus.Connecting)
+            session.disconnect()
+            awaitStatus(ConnectionStatus.Disconnected)
+            held.countDown()
+            eventually("the cancelled check is gone") { session.activeJobs() == 0 }
+
+            assertEquals("no credentials were decrypted", 0, counting.credentialReads.get())
+            assertEquals(0, log.count("probe"))
+            assertTrue(engine.secrets.isEmpty())
+        } finally {
+            held.countDown()
+            queue.shutdownNow()
+        }
+    }
+
+    @Test
+    fun editingTheProfileDuringTheCheckChecksTheNewServerBeforeUsingItsPassword() {
+        val profile = save(signIn = true)
+        val gate = CountDownLatch(1)
+        engine.gate = gate
+        session.connect(profile.id)
+        awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}")
+
+        // The user moves the profile to another server with another password while the check runs.
+        runBlocking { profiles.repository.save(profile.id, input(signIn = true, server = "new.example.com", password = "new-secret")) }
+        engine.gate = null
+        gate.countDown()
+        val connected = awaitStatus(ConnectionStatus.Connected)
+
+        assertEquals("new.example.com", connected.profile?.host)
+        assertEquals(
+            "the new server is checked before the engine gets its password; the old server never gets it",
+            listOf("probe proxy.example.com", "probe new.example.com", "start new.example.com"),
+            engine.servers,
+        )
+        assertEquals(1, host.tuns.size)
+    }
+
+    @Test
+    fun connectedWaitsUntilAndroidRoutesAppsIntoTheInterface() {
+        val profile = save()
+        host.routes = false
+
+        session.connect(profile.id)
+        awaitLog("start ${profile.id} fd=100 mtu=9000")
+        Thread.sleep(200)
+        assertEquals("the engine runs, but apps still use the normal network", ConnectionStatus.Connecting, state.value.status)
+        assertEquals(ConnectStep.StartingProtection, state.value.step)
+
+        host.routes = true
+        val connected = awaitStatus(ConnectionStatus.Connected)
+        assertEquals(profile.id, connected.profileId)
+    }
+
+    @Test
+    fun aFreshInterfaceAndroidNeverRoutesIsTakenDownAgain() {
+        val profile = save()
+        host.routes = false
+        session = newSession(timing = TIMING.copy(routingTimeoutMillis = 300))
+
+        session.connect(profile.id)
+        val ended = awaitError()
+
+        assertEquals(ConnectionStatus.Disconnected, ended.status)
+        assertEquals(ConnectionError("INTERNAL", "Android did not route apps into the VPN"), ended.error)
+        assertTrue(host.tuns.single().closed)
+        assertFalse(engine.running)
+        assertNeverConnected()
         assertEquals(0, session.activeJobs())
     }
 
-    private fun save(name: String = "Tokyo", signIn: Boolean = false, protocol: ProxyProtocol = ProxyProtocol.SOCKS5): ProxyProfile =
-        runBlocking {
-            profiles.repository.save(
-                null,
-                ProxyProfileInput(
-                    name = name,
-                    protocol = protocol,
-                    server = "proxy.example.com",
-                    port = "1080",
-                    requiresSignIn = signIn,
-                    username = if (signIn) "user" else "",
-                    password = if (signIn) "secret" else "",
-                ),
-            )
+    @Test
+    fun aSwitchAndroidNeverRoutesHoldsTraffic() {
+        val first = save(name = "Tokyo")
+        val second = save(name = "Office")
+        session = newSession(timing = TIMING.copy(routingTimeoutMillis = 300))
+        session.connect(first.id)
+        awaitStatus(ConnectionStatus.Connected)
+        host.routes = false
+
+        session.connect(second.id)
+        val blocked = awaitStatus(ConnectionStatus.Blocked)
+
+        assertEquals(ConnectionError.INTERNAL, blocked.error?.code)
+        assertFalse(engine.running)
+        assertTrue("the old interface is closed", host.tuns[0].closed)
+        assertFalse("the newest one holds traffic", host.tuns[1].closed)
+    }
+
+    @Test
+    fun anEngineFailureBeforeAndroidRoutesEndsAFreshAttempt() {
+        val profile = save()
+        host.routes = false
+        session.connect(profile.id)
+        awaitLog("start ${profile.id} fd=100 mtu=9000")
+
+        engine.failure!!(ConnectionError(ConnectionError.ENGINE_STOPPED))
+        val ended = awaitError()
+
+        assertEquals(ConnectionStatus.Disconnected, ended.status)
+        assertEquals(ConnectionError.ENGINE_STOPPED, ended.error?.code)
+        assertTrue(host.tuns.single().closed)
+        assertNeverConnected()
+    }
+
+    @Test
+    fun disconnectWhileAndroidMovesAppsOverReleasesBothInterfaces() {
+        val first = save(name = "Tokyo")
+        val second = save(name = "Office")
+        session.connect(first.id)
+        awaitStatus(ConnectionStatus.Connected)
+        host.routes = false
+        session.connect(second.id)
+        awaitLog("start ${second.id} fd=101 mtu=9000")
+
+        session.disconnect()
+        awaitStatus(ConnectionStatus.Disconnected)
+
+        assertTrue(host.tuns.all { it.closed })
+        assertFalse(engine.running)
+        assertEquals(0, session.activeJobs())
+    }
+
+    @Test
+    fun routingIsRecognisedOnlyOnTheNewInterfacesNetwork() {
+        val fresh = FakeTun(101, log)
+        val unnamed = object : TunInterface {
+            override val fd = 102
+            override val name: String? = null
+
+            override fun close() = Unit
         }
+        val old = VpnNetwork("netId 7", "tun0", ready = true)
+
+        assertTrue(
+            "a new network on the new interface",
+            VpnSession.routedInto(fresh, emptyList(), listOf(VpnNetwork("netId 8", "tun1", true))),
+        )
+        assertFalse("not ready yet", VpnSession.routedInto(fresh, emptyList(), listOf(VpnNetwork("netId 8", "tun1", false))))
+        assertFalse("another interface", VpnSession.routedInto(fresh, emptyList(), listOf(VpnNetwork("netId 8", "tun9", true))))
+        assertTrue("the existing network moved over", VpnSession.routedInto(fresh, listOf(old), listOf(old.copy(interfaceName = "tun1"))))
+        assertFalse("not moved yet", VpnSession.routedInto(fresh, listOf(old), listOf(old)))
+        val lingering = VpnNetwork("netId 7", "tun1", ready = true)
+        assertFalse("a network that was already there on that name", VpnSession.routedInto(fresh, listOf(lingering), listOf(lingering)))
+        assertTrue(
+            "name unknown: any network that changed",
+            VpnSession.routedInto(unnamed, listOf(old), listOf(old.copy(interfaceName = "tun2"))),
+        )
+        assertFalse("name unknown, nothing changed", VpnSession.routedInto(unnamed, listOf(old), listOf(old)))
+    }
+
+    private fun save(name: String = "Tokyo", signIn: Boolean = false, protocol: ProxyProtocol = ProxyProtocol.SOCKS5): ProxyProfile =
+        runBlocking { profiles.repository.save(null, input(name, signIn, protocol)) }
+
+    private fun input(
+        name: String = "Tokyo",
+        signIn: Boolean = false,
+        protocol: ProxyProtocol = ProxyProtocol.SOCKS5,
+        server: String = "proxy.example.com",
+        password: String = "secret",
+    ) = ProxyProfileInput(
+        name = name,
+        protocol = protocol,
+        server = server,
+        port = "1080",
+        requiresSignIn = signIn,
+        username = if (signIn) "user" else "",
+        password = if (signIn) password else "",
+    )
+
+    private fun delete(profileId: String) = runBlocking { profiles.repository.delete(profileId) }
+
+    private fun eventually(what: String, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + TIMEOUT_MS
+        while (!condition()) {
+            check(System.currentTimeMillis() < deadline) { "timed out waiting until $what" }
+            Thread.sleep(5)
+        }
+    }
 
     private fun awaitStatus(status: ConnectionStatus): ConnectionState = await { it.status == status }
 
@@ -570,9 +874,25 @@ class VpnSessionTest {
         assertTrue("Connected was never shown: ${state.history}", state.history.none { it.status == ConnectionStatus.Connected })
     }
 
+    /** The repository, counting how often credentials are decrypted for a connection. */
+    private class CountingProfiles(private val delegate: ProfileRepository) : ProfileRepository by delegate {
+        val credentialReads = AtomicInteger()
+
+        override suspend fun readCredentials(id: String, expected: ProxyProfile): CredentialsRead {
+            credentialReads.incrementAndGet()
+            return delegate.readCredentials(id, expected)
+        }
+    }
+
     private companion object {
         const val NOW = 1_800_000_000_000L
         const val TIMEOUT_MS = 5_000L
         const val CYCLES = 20
+        val TIMING = VpnSession.Timing(
+            preflightTimeoutMillis = 2_000,
+            serviceStartTimeoutMillis = 1_000,
+            routingTimeoutMillis = 2_000,
+            routingPollMillis = 10,
+        )
     }
 }

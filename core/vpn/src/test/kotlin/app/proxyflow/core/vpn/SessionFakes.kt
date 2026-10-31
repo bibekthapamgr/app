@@ -1,6 +1,5 @@
 package app.proxyflow.core.vpn
 
-import app.proxyflow.core.engine.EngineException
 import app.proxyflow.core.engine.EngineSecret
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
@@ -8,6 +7,7 @@ import app.proxyflow.core.model.ProxyProfile
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -32,7 +32,7 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
 
     @Volatile var gate: CountDownLatch? = null
 
-    @Volatile var startError: EngineException? = null
+    @Volatile var startError: Throwable? = null
 
     @Volatile var running = false
         private set
@@ -42,6 +42,9 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
 
     /** For each probe and start: whether credentials were handed over. */
     val secrets = CopyOnWriteArrayList<Boolean>()
+
+    /** For each probe and start: the server it was given ("probe proxy.example.com"). */
+    val servers = CopyOnWriteArrayList<String>()
 
     override fun tunConfig() = TunConfig(address4 = "198.18.0.1", address6 = "fd00:66::1", dnsServer = "198.18.0.2")
 
@@ -54,6 +57,7 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
     ): PreflightAnswer {
         log.add("probe ${profile.id} $target")
         secrets += secret != null
+        servers += "probe ${profile.host}"
         check(protect(PROBE_SOCKET)) { "the pre-flight socket was not protected" }
         gate?.await(10, TimeUnit.SECONDS)
         secret?.close()
@@ -70,6 +74,7 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
     ) {
         log.add("start ${profile.id} fd=${tun.fd} mtu=${config.mtu}")
         secrets += secret != null
+        servers += "start ${profile.host}"
         secret?.close()
         startError?.let { throw it }
         running = true
@@ -86,9 +91,20 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
     }
 }
 
-/** The service's side: consent, interfaces and the notification, all recorded. */
+/**
+ * The service's side: consent, interfaces and the notification, all recorded. Android's
+ * VPN network is simulated as one network that follows the newest open interface (as
+ * Android moves an existing VPN network over on a reconnect), or, with [routes] off,
+ * never moves to a new interface.
+ */
 class FakeHost(private val log: CallLog) : VpnHost {
     @Volatile var consent = true
+
+    /** Android routes apps into each new interface; off, it never does. */
+    @Volatile var routes = true
+
+    /** What a check's socket guard does when the session aborts it (the engine's call then returns). */
+    @Volatile var onAbort: () -> Unit = {}
 
     @Volatile var establishReturnsNull = false
 
@@ -100,6 +116,11 @@ class FakeHost(private val log: CallLog) : VpnHost {
     val statuses = CopyOnWriteArrayList<ConnectionState>()
     val problems = CopyOnWriteArrayList<ConnectionState>()
     val protectedSockets = CopyOnWriteArrayList<Int>()
+
+    /** Sockets the checks' guards were given, guards aborted, guards not yet closed. */
+    val trackedSockets = CopyOnWriteArrayList<Int>()
+    val aborts = AtomicInteger()
+    val guardsOpen = AtomicInteger()
 
     @Volatile var lastConfig: TunConfig? = null
         private set
@@ -121,6 +142,30 @@ class FakeHost(private val log: CallLog) : VpnHost {
         return true
     }
 
+    override fun vpnNetworks(): List<VpnNetwork> {
+        val open = tuns.filter { !it.closed }
+        val routed = if (routes) open.lastOrNull() else open.dropLast(1).lastOrNull()
+        return listOfNotNull(routed?.let { VpnNetwork(id = NETWORK_ID, interfaceName = it.name, ready = true) })
+    }
+
+    override fun socketGuard(): SocketGuard {
+        guardsOpen.incrementAndGet()
+        return object : SocketGuard {
+            override fun track(fd: Int) {
+                trackedSockets += fd
+            }
+
+            override fun abort() {
+                aborts.incrementAndGet()
+                onAbort()
+            }
+
+            override fun close() {
+                guardsOpen.decrementAndGet()
+            }
+        }
+    }
+
     override fun showStatus(state: ConnectionState): Boolean {
         statuses += state
         return foregroundAllowed
@@ -140,10 +185,13 @@ class FakeHost(private val log: CallLog) : VpnHost {
 
     companion object {
         const val FIRST_FD = 100
+        const val NETWORK_ID = "netId 100"
     }
 }
 
 class FakeTun(override val fd: Int, private val log: CallLog) : TunInterface {
+    override val name = "tun${fd - FakeHost.FIRST_FD}"
+
     @Volatile var closed = false
         private set
 

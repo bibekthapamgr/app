@@ -71,7 +71,7 @@ class AppContainer(context: Context, credentialKeys: SecretKeyStore = AndroidKey
     /** Creates every screen's ViewModel; navigation passes it to each destination. */
     val viewModelFactory: ViewModelProvider.Factory = viewModelFactory {
         initializer { HomeViewModel(profileRepository, connectionController) }
-        initializer { ProfilesViewModel(profileRepository) }
+        initializer { ProfilesViewModel(profileRepository, connectionController) }
         initializer { AddEditProxyViewModel(createSavedStateHandle(), profileRepository, connectionTester) }
         initializer { SettingsViewModel(settingsRepository) }
         initializer { LogsViewModel(logRepository) }

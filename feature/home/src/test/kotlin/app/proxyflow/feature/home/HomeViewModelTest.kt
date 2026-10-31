@@ -118,12 +118,45 @@ class HomeViewModelTest {
         val viewModel = HomeViewModel(profiles, controller)
         observe(viewModel)
 
-        controller.current.value = ConnectionState(ConnectionStatus.Connected, profileId = first.id, profileName = "Tokyo")
+        controller.current.value = ConnectionState(ConnectionStatus.Connected, profileId = first.id, profileName = "Tokyo", profile = first)
         profiles.setActive(second.id)
         assertEquals(first.id, ready(viewModel).profile.id)
 
-        controller.current.value = ConnectionState(ConnectionStatus.Disconnected, profileId = first.id)
+        controller.current.value = ConnectionState(ConnectionStatus.Disconnected, profileId = first.id, profile = first)
         assertEquals(second.id, ready(viewModel).profile.id)
+    }
+
+    /** Edits apply at the next connect; until then Home must not describe settings the engine doesn't run. */
+    @Test
+    fun aConnectionIsDescribedWithTheSettingsItRunsAfterTheProfileIsEdited() = runTest {
+        val controller = RecordingController()
+        val saved = profiles.save(null, ProxyProfileInput(name = "Tokyo", server = "tokyo.example.com", port = "1080"))
+        val viewModel = HomeViewModel(profiles, controller)
+        observe(viewModel)
+        controller.current.value = ConnectionState(ConnectionStatus.Connected, profileId = saved.id, profileName = "Tokyo", profile = saved)
+
+        profiles.save(saved.id, ProxyProfileInput(name = "Tokyo", server = "tls.example.com", port = "443", useTls = true))
+
+        val shown = ready(viewModel).profile
+        assertEquals("tokyo.example.com", shown.host)
+        assertFalse("the running connection has no TLS", shown.useTls)
+    }
+
+    @Test
+    fun aBlockedConnectionStaysOnHomeWhenItsProfileIsDeleted() = runTest {
+        val controller = RecordingController()
+        val saved = profiles.save(null, ProxyProfileInput(name = "Tokyo", server = "tokyo.example.com", port = "1080"))
+        val viewModel = HomeViewModel(profiles, controller)
+        observe(viewModel)
+        val deleted = ConnectionError(ConnectionError.PROFILE_DELETED)
+
+        profiles.delete(saved.id)
+        controller.current.value = ConnectionState(ConnectionStatus.Blocked, profileId = saved.id, profile = saved, error = deleted)
+
+        val ready = ready(viewModel)
+        assertEquals("Tokyo", ready.profile.displayName)
+        assertEquals(ConnectionStatus.Blocked, ready.status)
+        assertEquals(deleted, ready.error)
     }
 
     @Test
@@ -148,8 +181,12 @@ class HomeViewModelTest {
         val saved = profiles.save(null, ProxyProfileInput(server = "proxy.example.com", port = "1080"))
         val viewModel = HomeViewModel(profiles, controller)
         observe(viewModel)
-        controller.current.value =
-            ConnectionState(ConnectionStatus.Blocked, profileId = saved.id, error = ConnectionError(ConnectionError.ENGINE_STOPPED))
+        controller.current.value = ConnectionState(
+            ConnectionStatus.Blocked,
+            profileId = saved.id,
+            profile = saved,
+            error = ConnectionError(ConnectionError.ENGINE_STOPPED),
+        )
 
         viewModel.requestStop()
         assertEquals(HomeDialog.ConfirmStop, ready(viewModel).dialog)

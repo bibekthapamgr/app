@@ -5,9 +5,7 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
 import android.net.ConnectivityManager
-import android.net.Network
 import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.system.Os
@@ -16,6 +14,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.proxyflow.ProxyFlowApplication
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.engine.ProxyEngine
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfile
@@ -24,8 +23,9 @@ import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.vpn.ProxyFlowVpnService
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -101,19 +101,14 @@ object Shell {
     /**
      * Sends one line to [host]:[port] with toybox's nc and returns what came back. The
      * destination answers "PROXYFLOW-DEST <line>" and closes; nothing comes back when the
-     * connection never opens within [timeoutSeconds].
+     * connection never opens within [timeoutSeconds]. nc's input stays open for a moment
+     * after the line: at end of input nc half-closes the connection, and proxies (Squid,
+     * Dante) close a tunnel whose client half-closed, possibly before the answer is back.
      */
     fun exchange(host: String, port: Int, line: String, timeoutSeconds: Int = 10): String =
-        script("echo $line | toybox nc -w $timeoutSeconds $host $port").trim()
+        script("(echo $line;sleep $HOLD_INPUT_S)|toybox nc -w $timeoutSeconds $host $port").trim()
 
-    fun <T> withShellPermissions(block: () -> T): T {
-        automation.adoptShellPermissionIdentity()
-        try {
-            return block()
-        } finally {
-            automation.dropShellPermissionIdentity()
-        }
-    }
+    private const val HOLD_INPUT_S = 2
 }
 
 /** This process's open descriptors, by what they are (/proc/self/fd). */
@@ -132,9 +127,12 @@ object Descriptors {
     /**
      * Sockets of [uid] that accept connections (TCP in LISTEN) or datagrams (any UDP
      * socket), from /proc/net read as the shell (apps may not read it since Android 10).
+     * Fails when a table can't be read, so an empty answer means none.
      */
     fun listening(uid: Int): List<String> = listOf("tcp", "tcp6", "udp", "udp6").flatMap { proto ->
-        Shell.run("cat /proc/net/$proto").lines().drop(1).mapNotNull { line ->
+        val table = Shell.run("cat /proc/net/$proto").lines()
+        check(table.firstOrNull()?.trim()?.startsWith("sl") == true) { "/proc/net/$proto could not be read: ${table.take(2)}" }
+        table.drop(1).mapNotNull { line ->
             val fields = line.trim().split(Regex("\\s+"))
             val owned = fields.size > 7 && fields[7].toIntOrNull() == uid
             val accepting = proto.startsWith("udp") || fields.getOrNull(3) == TCP_LISTEN
@@ -146,37 +144,82 @@ object Descriptors {
 }
 
 /**
- * VPN networks as Android sees them, independently of ProxyFlow's own state. The
- * shell's permissions (NETWORK_SETTINGS) are needed to see a VPN that excludes this app.
+ * Android's VPN networks as ConnectivityManager reports them, independently of ProxyFlow's
+ * own state. Polled, as the app itself does: network callbacks are never told about a VPN
+ * that excludes the caller (since API 31 a request only matches networks that apply to its
+ * own UID), and ProxyFlow's VPN excludes ProxyFlow. A sampler records every VPN network
+ * that appears while this object exists.
  */
-class VpnNetworks(context: Context) : AutoCloseable {
-    private val connectivity = context.getSystemService(ConnectivityManager::class.java)
-    private val appeared = AtomicInteger()
-    private val callback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            appeared.incrementAndGet()
+class VpnNetworks(private val context: Context) : AutoCloseable {
+    private val seen = ConcurrentHashMap.newKeySet<String>()
+
+    @Volatile private var sampling = true
+    private val sampler = thread(name = "vpn-networks", isDaemon = true) {
+        while (sampling) {
+            runCatching { current().forEach { seen += it.id } }
+            Thread.sleep(SAMPLE_MS)
         }
     }
 
-    init {
-        val request = NetworkRequest.Builder()
-            .addTransportType(NetworkCapabilities.TRANSPORT_VPN)
-            .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-            .build()
-        Shell.withShellPermissions { connectivity.registerNetworkCallback(request, callback) }
-    }
+    data class Network(val id: String, val interfaceName: String?, val validated: Boolean)
 
-    /** How many times a VPN network appeared since this object was made. */
-    val appearances: Int get() = appeared.get()
+    fun current(): List<Network> = now(context)
 
-    @Suppress("DEPRECATION") // allNetworks: the simplest complete list for a test
-    fun present(): Boolean = Shell.withShellPermissions {
-        connectivity.allNetworks.any { connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }
-    }
+    /** How many VPN networks appeared since this object was made, each counted once. */
+    val appearances: Int get() = seen.size
+
+    fun present(): Boolean = current().isNotEmpty()
 
     override fun close() {
-        Shell.withShellPermissions { connectivity.unregisterNetworkCallback(callback) }
+        sampling = false
+        sampler.join(1_000)
     }
+
+    companion object {
+        private const val SAMPLE_MS = 20L
+
+        @Suppress("DEPRECATION") // allNetworks: see above
+        fun now(context: Context): List<Network> {
+            val connectivity = context.getSystemService(ConnectivityManager::class.java)
+            return connectivity.allNetworks.mapNotNull { network ->
+                val capabilities = connectivity.getNetworkCapabilities(network) ?: return@mapNotNull null
+                if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return@mapNotNull null
+                Network(
+                    id = network.toString(),
+                    interfaceName = connectivity.getLinkProperties(network)?.interfaceName,
+                    validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * What a failed wait reports: the state, the process's VPN interfaces and service,
+ * Android's VPN networks, the VPN layer's own lifecycle log and Android's record of the
+ * service (bindings, start requests). No credentials appear in any of them.
+ */
+object Diagnostics {
+    fun report(app: App): String = buildString {
+        val state = app.controller.state.value
+        appendLine("state: ${state.status} profile=${state.profileId} step=${state.step} error=${state.error}")
+        appendLine(
+            "service instances: ${ProxyFlowVpnService.liveInstances.get()}; interfaces established so far: " +
+                "${ProxyFlowVpnService.establishedInterfaces.get()}; session jobs: ${app.runtime.session.activeJobs()}",
+        )
+        appendLine("tun descriptors: ${Descriptors.tun().map { "$it (${ProxyFlowVpnService.interfaceName(it)})" }}")
+        appendLine("engine: ${runCatching { ProxyEngine().status().state }.getOrNull()}")
+        appendLine("Android's VPN networks: ${runCatching { VpnNetworks.now(app.context) }.getOrElse { "unreadable: $it" }}")
+        appendLine("VPN log, latest:")
+        app.runtime.log.recent().takeLast(LOG_LINES).forEach { appendLine("  $it") }
+        appendLine("dumpsys activity services:")
+        Shell.run("dumpsys activity services ${app.packageName}").lines().filter {
+            it.isNotBlank()
+        }.take(DUMP_LINES).forEach { appendLine("  $it") }
+    }
+
+    private const val LOG_LINES = 50
+    private const val DUMP_LINES = 60
 }
 
 /** Every state the controller published while it ran, so a test can prove one never appeared. */
@@ -273,20 +316,28 @@ class App {
 
     fun notificationTitle(id: Int): String? = notification(id)?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
 
-    /** Disconnects and waits until the interface, the service and its notification are gone. */
-    fun disconnectAndSettle() {
+    /**
+     * Disconnects and waits until the interface and the service are gone; a timeout reports what
+     * was left. A test's own check uses the default; before a test, a longer wait lets one test's
+     * failure stay its own instead of failing every test after it.
+     */
+    fun disconnectAndSettle(timeoutMillis: Long = 10_000) {
         controller.disconnect()
         awaitStatus(ConnectionStatus.Disconnected)
-        eventually("the VPN service stops") { ProxyFlowVpnService.liveInstances.get() == 0 }
-        eventually("the VPN interface closes") { Descriptors.tun().isEmpty() }
+        val diagnose = { Diagnostics.report(this) }
+        eventually("the VPN interface closes", timeoutMillis, diagnose) { Descriptors.tun().isEmpty() }
+        eventually("the VPN service stops", timeoutMillis, diagnose) { ProxyFlowVpnService.liveInstances.get() == 0 }
     }
 }
 
-/** Polls [condition] until it holds or [timeoutMillis] passes. */
-fun eventually(what: String, timeoutMillis: Long = 10_000, condition: () -> Boolean) {
+/** How long a test's setup waits for an earlier test's VPN service and interface to go. */
+const val SETTLE_BEFORE_TEST_MS = 90_000L
+
+/** Polls [condition] until it holds or [timeoutMillis] passes; the failure carries [diagnose]'s report. */
+fun eventually(what: String, timeoutMillis: Long = 10_000, diagnose: () -> String = { "" }, condition: () -> Boolean) {
     val deadline = System.currentTimeMillis() + timeoutMillis
     while (!condition()) {
-        if (System.currentTimeMillis() > deadline) throw AssertionError("timed out waiting until $what")
+        if (System.currentTimeMillis() > deadline) throw AssertionError("timed out waiting until $what\n${diagnose()}")
         Thread.sleep(50)
     }
 }

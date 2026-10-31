@@ -24,8 +24,9 @@ sealed interface HomeUiState {
     /**
      * Boards B2–B4, B6b, B6d and the blocked layout (B6a's), from [connection].
      *
-     * @param profile the connection's profile while one exists (connecting, connected or blocked),
-     *   otherwise the active profile, so Home never shows one proxy and connects another.
+     * @param profile while a connection exists (connecting, connected, reconnecting or blocked), the
+     *   settings it runs with — its own copy, unchanged by later edits and still there when the saved
+     *   profile was deleted; otherwise the active profile, so Home never shows one proxy and connects another.
      */
     data class Ready(val profile: ProxyProfile, val connection: ConnectionState, val canConnect: Boolean, val dialog: HomeDialog? = null) :
         HomeUiState {
@@ -54,8 +55,8 @@ class HomeViewModel(profiles: ProfileRepository, private val connection: Connect
     val uiState: StateFlow<HomeUiState> =
         combine(profiles.profiles, profiles.activeProfileId, connection.state, dialog) { list, activeId, current, dialog ->
             val active = list.firstOrNull { it.id == activeId } ?: list.firstOrNull()
-            val connecting = list.firstOrNull { it.id == current.profileId }?.takeIf { current.active }
-            val shown = connecting ?: active
+            val running = current.profile?.takeIf { current.active }
+            val shown = running ?: active
             if (shown == null) HomeUiState.NoProfile else HomeUiState.Ready(shown, current, connection.canConnect, dialog)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), HomeUiState.Loading)
 

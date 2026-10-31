@@ -26,6 +26,8 @@ import xml.etree.ElementTree as ET
 MAX_CHUNK = 3500  # characters per annotation
 LEVELS = ("error", "warning", "notice")  # GitHub keeps 10 of each per step
 MAX_TESTS = 40
+FULL_REPORTS = 2  # failures whose message is kept up to REPORT_LINES lines
+REPORT_LINES = 150
 SCREEN_DUMP = 12000  # characters of a failing UI test's screen description
 ROOT = os.getcwd().rstrip("/") + "/"
 
@@ -76,13 +78,28 @@ ORIGIN = re.compile(r"(Caused by|Suppressed:|app\.proxyflow|kotlinx\.coroutines|
 NOISE = re.compile(r"(jdk\.internal\.reflect|java\.lang\.reflect|org\.robolectric\.shadows|\$\$Reflector|org\.junit\.|sun\.reflect)")
 
 
-def condensed_stack(lines: list[str], head: int = 12, origin: int = 30) -> list[str]:
-    """The first lines of a stack trace, then the frames that show its origin
-    (the app's own code, coroutines, Compose, Lifecycle, DataStore, Room and
-    every "Caused by"), skipping reflection and Robolectric shadow frames."""
+FRAME = re.compile(r"^\s*at ")
+
+
+def condensed_stack(lines: list[str], head: int = 12, origin: int = 30, message_lines: int = 20) -> list[str]:
+    """The exception's message (up to message_lines lines: a device test's failure
+    can carry a diagnostic report), the first frames of the stack trace, then the
+    frames that show its origin (the app's own code, coroutines, Compose,
+    Lifecycle, DataStore, Room and every "Caused by"), skipping reflection and
+    Robolectric shadow frames. Only frames are skipped: an exception's own line
+    ("org.junit.ComparisonFailure: expected ...") always stays."""
+    first_frame = next((i for i, line in enumerate(lines) if FRAME.search(line)), len(lines))
+    message = lines[:first_frame]
+    if len(message) > message_lines:
+        message = message[:message_lines] + [f"    ... ({len(lines[:first_frame]) - message_lines} more lines of the message)"]
+    return message + condensed_frames(lines[first_frame:], head, origin)
+
+
+def condensed_frames(lines: list[str], head: int, origin: int) -> list[str]:
     clean: list[str] = []
     for line in lines:
-        if not NOISE.search(line) and (not clean or clean[-1] != line):
+        noise = FRAME.search(line) and NOISE.search(line)
+        if not noise and (not clean or clean[-1] != line):
             clean.append(line)  # consecutive repeats (recursive frames) collapse to one
     out = clean[:head]
     picked = [line for line in clean[head:] if ORIGIN.search(line)]
@@ -119,7 +136,8 @@ def test_failures() -> list[str]:
                     found.append(f"TEST {case.get('classname')}.{case.get('name')}: same failure as above")
                     continue
                 seen_messages.add(key)
-                detail = "\n".join(condensed_stack(body))
+                # The first failures' diagnostic reports in full; later ones are usually the same story.
+                detail = "\n".join(condensed_stack(body, message_lines=REPORT_LINES if len(found) < FULL_REPORTS else 20))
                 found.append(f"TEST {case.get('classname')}.{case.get('name')}: {message}\n{detail}")
     if len(found) > MAX_TESTS:
         found = found[:MAX_TESTS] + [f"... {len(found) - MAX_TESTS} more test failures"]

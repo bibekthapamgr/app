@@ -27,7 +27,8 @@ interface TunnelEngine {
      * called once, from any thread, if the packet loop ends without [stop]
      * (catalogue code `ENGINE_STOPPED`).
      *
-     * @throws app.proxyflow.core.engine.EngineException when the engine cannot start.
+     * @throws app.proxyflow.core.engine.EngineException when the engine cannot start; other
+     *   exceptions and a library that fails to load are possible too.
      */
     fun start(
         tun: TunInterface,
@@ -43,25 +44,23 @@ interface TunnelEngine {
 }
 
 /**
- * The pre-flight check's answer. It passes when the tunnel opened, and also when
- * the proxy answered for the destination itself ([TARGET_LEVEL]): the proxy is
- * reachable and speaks its protocol, and for SOCKS5 (and HTTP answers other than
- * 403) it accepted the sign-in, which comes first (ADR-0010 §4).
+ * The pre-flight check's answer (ADR-0010 §4). It passes when the tunnel opened, and
+ * when the proxy accepted the sign-in and tried the destination but could not reach it
+ * ([DESTINATION_UNREACHABLE]: HTTP 502, 503 or 504, SOCKS5 0x03 to 0x06): the proxy
+ * itself works, the check's destination is what failed. Everything else fails the check
+ * with its code, among them a refusal by the proxy (HTTP 403, SOCKS5 0x02), which
+ * providers also send for an expired plan or an address that isn't allowed, a general
+ * failure (SOCKS5 0x01, or another HTTP status such as 401, 402, 404, 429 or 500) and a
+ * request the proxy doesn't support.
  */
 data class PreflightAnswer(val ok: Boolean, val code: String? = null, val detail: String? = null) {
-    val passes: Boolean get() = ok || code in TARGET_LEVEL
+    val passes: Boolean get() = ok || code in DESTINATION_UNREACHABLE
 
     /** Why the check failed, for the screens: the engine's code, or INTERNAL when it gave none. */
     val error: ConnectionError get() = ConnectionError(code ?: ConnectionError.INTERNAL, detail)
 
     companion object {
-        val TARGET_LEVEL = setOf(
-            "TARGET_NOT_ALLOWED",
-            "TARGET_UNREACHABLE",
-            "TARGET_REFUSED",
-            "TARGET_UNSUPPORTED",
-            "PROXY_GENERAL_FAILURE",
-        )
+        val DESTINATION_UNREACHABLE = setOf("TARGET_UNREACHABLE", "TARGET_REFUSED")
     }
 }
 

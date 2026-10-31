@@ -18,9 +18,10 @@ no held line did; every connection that reached the destination came through a
 proxy (the count matches the proxies' tunnels to it); Squid was asked for the
 destination by name (the phone never resolved it); no capture shows a packet to
 or from the destination's address or a DNS query for its name; at least one
-capture saw the app's connections to both proxies (so the captures cover the
-uplink); and no test password is in logcat. Results are printed and emitted as
-annotations (readable through the API, like the other build facts).
+capture that ran through all the tests saw the app's connections to both proxies
+(so the captures cover the uplink); and no test password is in logcat. Results
+are printed and emitted as annotations (readable through the API, like the other
+build facts), with the end of the VPN layer's lifecycle log (tag ProxyFlowVpn).
 
 Usage: m5_evidence.py --api N --pf DIR --out DIR [--host-pcap FILE]
 """
@@ -41,6 +42,8 @@ DESTINATION_PORT = 8080
 PROXY_GATEWAY = "10.0.2.2"  # the runner's loopback as the emulator sees it
 SOCKS_PORT = 1080
 HTTP_PORT = 3128
+LIFECYCLE_LINES = 80
+LIFECYCLE_CHARS = 3400
 
 
 def escape(text: str) -> str:
@@ -252,9 +255,11 @@ def main(argv: list[str]) -> int:
     squid_denied = [line for line in squid if "TCP_DENIED/407" in line]
     squid_preflight = [line for line in squid if "CONNECT connectivitycheck.gstatic.com:443" in line]
     dante = read_lines(os.path.join(args.pf, "danted.log"), required=True)
-    dante_tunnels = [line for line in dante if re.search(r"tcp/connect \[: .*" + re.escape(f"{DESTINATION_ADDRESS}.{DESTINATION_PORT}"), line)]
+    # A session's first line ("[:"); Dante names the endpoint it connected to, by address or by the name it was given.
+    dante_endpoint = "(?:" + "|".join(re.escape(f"{host}.{DESTINATION_PORT}") for host in (DESTINATION_ADDRESS, DESTINATION_NAME)) + ")"
+    dante_tunnels = [line for line in dante if re.search(r"tcp/connect \[: .*" + dante_endpoint, line) and "block(" not in line]
     dante_named = any(DESTINATION_NAME in line for line in dante)
-    dante_auth_failed = [line for line in dante if "pass" not in line and ("authentication failed" in line or "username" in line and "block" in line)]
+    dante_auth_failed = [line for line in dante if "authentication failed" in line.lower()]
     facts.append(
         f"Squid: {len(squid_tunnels)} tunnels to {DESTINATION_NAME}:{DESTINATION_PORT} (asked by name), "
         f"{len(squid_by_address)} by address, {len(squid_preflight)} pre-flight CONNECTs to connectivitycheck.gstatic.com:443, "
@@ -286,6 +291,8 @@ def main(argv: list[str]) -> int:
     guest = read_lines(os.path.join(args.out, "guest-capture.txt"))
     if guest:
         facts.append("in-phone capture: " + " | ".join(guest))
+    # tcpdump inside the phone counts as coverage only if it was still running after the tests.
+    guest_spans_tests = any(line.startswith("tcpdump at the end: ") and "none" not in line for line in guest)
     if UNREADABLE:
         problems.append(f"unreadable evidence: {UNREADABLE}")
 
@@ -305,7 +312,10 @@ def main(argv: list[str]) -> int:
             f"SYNs to the proxies {capture.syns_to_proxy}, DNS queries {capture.dns_queries}, "
             f"to/from {DESTINATION_ADDRESS}: {capture.to_destination}, DNS queries for {DESTINATION_NAME}: {len(capture.dns_for_destination)}"
         )
-        if capture.covers_uplink:
+        partial = os.path.basename(capture.path).startswith("guest-") and not guest_spans_tests
+        if partial:
+            facts.append(f"capture {name}: tcpdump was not running after the tests, so it does not count as coverage")
+        elif capture.covers_uplink:
             covering += 1
         if capture.to_destination:
             problems.append(f"capture {name}: {capture.to_destination} packets to or from the destination {DESTINATION_ADDRESS} on the uplink")
@@ -316,11 +326,17 @@ def main(argv: list[str]) -> int:
     else:
         facts.append(f"{covering} of {len(captures)} captures saw the app's connections to both proxies (they cover the uplink)")
 
+    # The VPN layer's own account of what happened (connection steps, service starts and stops).
+    lifecycle = [m.group(1) for line in logcat if (m := re.search(r"ProxyFlowVpn\s*:\s*(.*)$", line))]
+    lifecycle_tail = "\n".join(lifecycle[-LIFECYCLE_LINES:])[-LIFECYCLE_CHARS:]
+
     token = os.urandom(16).hex()
     print(f"::stop-commands::{token}")  # the logs come from the code under test
     print("\n".join(facts))
     print("\n".join(f"PROBLEM {p}" for p in problems) or "OK")
+    print(f"VPN lifecycle: {len(lifecycle)} lines\n{lifecycle_tail}")
     print(f"::{token}::")
+    print(f"::notice title=M5 VPN lifecycle (API {args.api}), last of {len(lifecycle)} lines::{escape(lifecycle_tail or '(none)')}")
     if problems:
         print(f"::error title=M5 end-to-end evidence (API {args.api})::{escape(chr(10).join(problems + facts))}")
         return 1

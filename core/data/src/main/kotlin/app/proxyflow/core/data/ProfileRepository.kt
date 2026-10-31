@@ -82,6 +82,15 @@ interface ProfileRepository {
 
     /** The username and password for connecting (from M4). The caller wipes them as soon as they are sent. */
     suspend fun readCredentials(id: String): CredentialsRead
+
+    /**
+     * Like [readCredentials], for a connection that started with [expected]:
+     * [CredentialsRead.ProfileChanged] when the stored profile no longer reaches the same
+     * proxy the same way ([ProxyProfile.sameServerAs]), so credentials saved for another
+     * server are never sent to this one. The profile and its credentials are read from the
+     * same stored record, so a save in between can't mix one with the other.
+     */
+    suspend fun readCredentials(id: String, expected: ProxyProfile): CredentialsRead
 }
 
 data class ProfileForEditing(val profile: ProxyProfile, val input: ProxyProfileInput, val credentials: CredentialState)
@@ -97,6 +106,9 @@ sealed interface CredentialsRead {
 
     /** The Keystore failed twice in a row; the credentials may well be fine. Try again later. */
     data object TemporarilyUnavailable : CredentialsRead
+
+    /** The profile's server, port, protocol, TLS or sign-in setting changed since the connection read it; nothing was decrypted. */
+    data object ProfileChanged : CredentialsRead
 
     class Available(val username: CharArray, val password: CharArray) : CredentialsRead {
         fun wipe() {
@@ -227,6 +239,16 @@ class DefaultProfileRepository(
 
     override suspend fun readCredentials(id: String): CredentialsRead {
         val record = store.get(id) ?: return CredentialsRead.NoSuchProfile
+        return credentialsOf(record)
+    }
+
+    override suspend fun readCredentials(id: String, expected: ProxyProfile): CredentialsRead {
+        val record = store.get(id) ?: return CredentialsRead.NoSuchProfile
+        if (!record.toProfile().sameServerAs(expected)) return CredentialsRead.ProfileChanged
+        return credentialsOf(record)
+    }
+
+    private suspend fun credentialsOf(record: ProfileRecord): CredentialsRead {
         if (!record.requiresSignIn) return CredentialsRead.NotRequired
         return when (val opened = open(record)) {
             is Opened.Available -> CredentialsRead.Available(opened.username, opened.password)

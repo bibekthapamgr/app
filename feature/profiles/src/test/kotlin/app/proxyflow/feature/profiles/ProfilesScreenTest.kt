@@ -68,6 +68,32 @@ class ProfilesScreenTest {
         assertEquals(listOf("p2"), deleted)
     }
 
+    /** J11: the profile a connection uses can only be deleted together with ending the connection, and the dialog says so. */
+    @Test
+    fun deletingTheProfileInUseSaysItDisconnects() {
+        val deleted = mutableListOf<String>()
+        compose.setContent {
+            ProxyFlowTheme {
+                ProfilesScreen(
+                    ProfilesUiState(loading = false, profiles = listOf(office, backup), activeProfileId = "p1", connectedProfileId = "p1"),
+                    onAddProxy = {},
+                    onEditProxy = {},
+                    onUseProxy = {},
+                    onDeleteProxy = { deleted += it },
+                )
+            }
+        }
+        compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
+        compose.onNodeWithText("Delete").performClick()
+        compose.onNodeWithText("Disconnect and delete \"Office HTTP\"?").assertIsDisplayed()
+        compose.onNodeWithText(
+            "ProxyFlow is using this proxy. Deleting it ends the connection first, and your apps go back to your normal network.",
+            substring = true,
+        ).assertIsDisplayed()
+        compose.onNodeWithText("Disconnect and delete").performClick()
+        assertEquals(listOf("p1"), deleted)
+    }
+
     @Test
     fun tappingAProfileOpensItAndTheMenuCanActivateIt() {
         val edited = mutableListOf<String>()

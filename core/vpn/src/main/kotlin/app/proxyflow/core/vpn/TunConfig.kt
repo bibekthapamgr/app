@@ -23,6 +23,9 @@ data class TunConfig(val address4: String, val address6: String, val dnsServer: 
 interface TunInterface {
     val fd: Int
 
+    /** The interface's name (`tun0`…), read from the descriptor; null when it can't be read. */
+    val name: String?
+
     /** Closes the descriptor; Android then removes the interface. Safe to call more than once. */
     fun close()
 }

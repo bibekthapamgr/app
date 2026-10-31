@@ -39,18 +39,22 @@ class VpnRuntime(
     /** What the screens and the notification show. Written only by the session. */
     val state: StateFlow<ConnectionState> = mutableState.asStateFlow()
 
+    /** The session's and the service's lifecycle, for diagnosis (no credentials, server names or payloads). */
+    val log = VpnLog()
+
     val session = VpnSession(
         profiles = profiles,
         engine = engine,
         services = { startService() },
         state = mutableState,
         scope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]) + SERIAL),
+        log = log::add,
     )
 
     val controller: ConnectionController = VpnConnectionController(this)
 
     init {
-        // A deleted profile's credentials must not stay in use: the connection using it ends (J11).
+        // A deleted profile's credentials must not stay in use: the connection using it stops its engine (J11).
         // Room is watched only while a connection exists.
         scope.launch {
             mutableState.map { s -> s.profileId?.takeIf { s.active } }.distinctUntilChanged().collectLatest { id ->

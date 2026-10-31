@@ -15,6 +15,9 @@
     <string name="profiles_delete">Delete</string>
     <string name="profiles_delete_title">Delete \"%1$s\"?</string>
     <string name="profiles_delete_body">The profile, its encrypted username and password, and the key that protects them are deleted from this phone. This can\'t be undone.</string>
+    <string name="profiles_disconnect_delete">Disconnect and delete</string>
+    <string name="profiles_disconnect_delete_title">Disconnect and delete \"%1$s\"?</string>
+    <string name="profiles_disconnect_delete_body">ProxyFlow is using this proxy. Deleting it ends the connection first, and your apps go back to your normal network.</string>
     <string name="profiles_cancel">Cancel</string>
     <string name="profiles_duplicate">Duplicate</string>
     <string name="profiles_use_failed">Couldn\'t switch to this proxy. Try again.</string>

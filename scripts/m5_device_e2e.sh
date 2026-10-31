@@ -30,8 +30,10 @@ adb shell svc wifi disable >/dev/null 2>&1 || true
 sleep 8
 adb shell ip route > "$OUT/guest-routes.txt" 2>&1 || true
 
-# tcpdump on each uplink interface (not the VPN's tun0), as root, detached so it outlives
-# adbd going back to the shell user: the tests must run as shell, which the VPN covers.
+# tcpdump on each uplink interface (not the VPN's tun0), as root, moved out of adbd's process
+# group (init kills that group's cgroup when adbd restarts as the shell user, which the tests
+# need: the VPN covers the shell, not root). The evidence counts these captures only if
+# tcpdump is still running after the tests.
 GUEST_CAPTURE=0
 {
     echo "adb root: $(adb root 2>&1 | tr -d '\r')"
@@ -49,6 +51,9 @@ if grep -q 'uid=0' "$OUT/guest-capture.txt" && ! grep -q 'tcpdump: none' "$OUT/g
     echo "$IFACES" > "$OUT/guest-interfaces.txt"
     GUEST_CAPTURE=1
     sleep 2
+    # The root cgroup: /sys/fs/cgroup (cgroup v2, API 30+) or /acct (v1, API 29).
+    adb shell 'for p in $(pidof tcpdump); do for c in /sys/fs/cgroup/cgroup.procs /acct/cgroup.procs; do [ -w "$c" ] && echo "$p" > "$c"; done; done' >/dev/null 2>&1 || true
+    echo "tcpdump at the start: $(adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
 else
     echo "no root or no tcpdump in this image: the emulator's own capture (-tcpdump) is the only one" >> "$OUT/guest-capture.txt"
 fi
@@ -64,6 +69,7 @@ STATUS=${PIPESTATUS[0]}
 adb logcat -d > "$OUT/logcat.txt" 2>&1 || true
 if [ "$GUEST_CAPTURE" = 1 ]; then
     restart_adbd root || true
+    echo "tcpdump at the end: $(adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
     adb shell 'pkill -INT tcpdump || killall -INT tcpdump' >/dev/null 2>&1 || true
     sleep 3
     for iface in $(cat "$OUT/guest-interfaces.txt"); do

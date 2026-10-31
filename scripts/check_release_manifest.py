@@ -36,6 +36,9 @@ ALLOWED_PERMISSIONS = {
     ),
     # M5 (ADR-0010): the VPN service and the engine's connections to the user's proxy.
     "android.permission.INTERNET": "the engine's and the pre-flight check's connections to the user's proxy",
+    "android.permission.ACCESS_NETWORK_STATE": (
+        "Android's view of the VPN network: Connected waits until Android routes apps into the new interface"
+    ),
     "android.permission.FOREGROUND_SERVICE": "the VPN runs as a foreground service with its status notification",
     "android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED": (
         "the VPN service's foreground type on Android 14+, allowed for VPN apps the user has consented to (ADR-0007)"

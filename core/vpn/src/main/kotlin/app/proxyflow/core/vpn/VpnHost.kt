@@ -17,7 +17,20 @@ interface VpnHost {
     /** `VpnService.protect()`: keeps the socket out of the VPN. */
     fun protectSocket(fd: Int): Boolean
 
-    /** Puts the service in the foreground, or updates its notification, for [state]; false when Android refused. */
+    /**
+     * Android's VPN networks right now (ConnectivityManager), so the session can tell when
+     * Android routes apps into an interface it just established. Empty when unavailable.
+     */
+    fun vpnNetworks(): List<VpnNetwork>
+
+    /** A fresh [SocketGuard] for one pre-flight check. */
+    fun socketGuard(): SocketGuard
+
+    /**
+     * Puts the service in the foreground, or updates its notification, for [state]; false
+     * when Android refused. Updates may reach the notification a moment later; the last
+     * state always does.
+     */
     fun showStatus(state: ConnectionState): Boolean
 
     /** Alerts on the "Connection problems" channel (revocation, ADR-0010 §7). */
@@ -31,4 +44,28 @@ interface VpnHost {
      * service, unless a newer start reached it meanwhile (`stopSelfResult`).
      */
     fun stop()
+}
+
+/**
+ * One VPN network as ConnectivityManager reports it.
+ *
+ * @param id the network's handle (its netId), stable while it exists.
+ * @param interfaceName the interface its routes lead into (`tun0`…).
+ * @param ready Android has finished setting it up: it reports a VPN network VALIDATED only
+ *   after the network was created with its routes, DNS servers and app rules in place.
+ */
+data class VpnNetwork(val id: String, val interfaceName: String?, val ready: Boolean)
+
+/**
+ * Lets a cancelled pre-flight check end at once instead of after its timeout: the
+ * sockets the check protects are recorded ([track]), and [abort] shuts them down, so
+ * the engine's blocking call returns; a socket tracked after [abort] is shut down at
+ * once. [close] lets go of them after the check returned. Thread-safe.
+ */
+interface SocketGuard {
+    fun track(fd: Int)
+
+    fun abort()
+
+    fun close()
 }

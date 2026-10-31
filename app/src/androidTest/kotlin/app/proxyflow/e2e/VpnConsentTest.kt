@@ -1,5 +1,6 @@
 package app.proxyflow.e2e
 
+import android.util.Log
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -45,15 +46,17 @@ class VpnConsentTest {
     private lateinit var env: E2eConfig
     private lateinit var networks: VpnNetworks
     private lateinit var history: StateHistory
+    private var establishedBefore = 0
 
     @Before
     fun setUp() {
         env = E2eConfig.load()
         app.allowNotifications()
-        app.disconnectAndSettle()
+        app.disconnectAndSettle(timeoutMillis = SETTLE_BEFORE_TEST_MS)
         app.deleteAllProfiles()
         networks = VpnNetworks(app.context)
         history = StateHistory(app.controller)
+        establishedBefore = ProxyFlowVpnService.establishedInterfaces.get()
     }
 
     @After
@@ -93,16 +96,20 @@ class VpnConsentTest {
 
         waitForText("Connected", CONNECT_TIMEOUT_MS)
         waitForText("Traffic is going through your proxy")
-        eventually("the notification says Connected") { app.notificationTitle(ProxyFlowVpnService.STATUS_NOTIFICATION_ID) == "Connected" }
-        assertEquals(1, Descriptors.tun().size)
-        assertTrue(networks.present())
+        eventually("the notification says Connected", diagnose = { Diagnostics.report(app) }) {
+            app.notificationTitle(ProxyFlowVpnService.STATUS_NOTIFICATION_ID) == "Connected"
+        }
+        val tun = Descriptors.tun().single()
+        val name = ProxyFlowVpnService.interfaceName(tun)
+        assertTrue("Android routes into $name: ${networks.current()}", networks.current().any { it.interfaceName == name && it.validated })
         val line = "PF-consent-${System.nanoTime()}"
+        Log.i(TAG, "exchange $line")
         assertEquals("PROXYFLOW-DEST $line", Shell.exchange(env.destinationName, env.destinationPort, line))
 
         waitForText("Disconnect").performScrollTo().performClick()
         waitForText("Not connected")
-        eventually("the VPN service stops") { ProxyFlowVpnService.liveInstances.get() == 0 }
-        eventually("the interface closes") { Descriptors.tun().isEmpty() }
+        eventually("the interface closes", diagnose = { Diagnostics.report(app) }) { Descriptors.tun().isEmpty() }
+        eventually("the VPN service stops", diagnose = { Diagnostics.report(app) }) { ProxyFlowVpnService.liveInstances.get() == 0 }
     }
 
     @Test
@@ -145,8 +152,9 @@ class VpnConsentTest {
     private fun assertNothingStarted() {
         assertFalse("no VPN network", networks.present())
         assertEquals("Android never had a VPN network", 0, networks.appearances)
+        assertEquals("no VPN interface was established", establishedBefore, ProxyFlowVpnService.establishedInterfaces.get())
         assertTrue("no VPN interface", Descriptors.tun().isEmpty())
-        eventually("no VPN service") { ProxyFlowVpnService.liveInstances.get() == 0 }
+        eventually("no VPN service", diagnose = { Diagnostics.report(app) }) { ProxyFlowVpnService.liveInstances.get() == 0 }
     }
 
     private fun waitForText(text: String, timeoutMillis: Long = UI_TIMEOUT_MS, substring: Boolean = false): SemanticsNodeInteraction {
@@ -157,6 +165,7 @@ class VpnConsentTest {
     }
 
     private companion object {
+        const val TAG = "ProxyFlowE2E"
         const val VPN_DIALOGS = "com.android.vpndialogs"
         const val UI_TIMEOUT_MS = 10_000L
         const val CONNECT_TIMEOUT_MS = 45_000L

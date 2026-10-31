@@ -103,6 +103,15 @@
     <string name="home_error_credentials_message">The saved password can\'t be read on this phone any more, so it isn\'t used. Enter it again.</string>
     <string name="home_error_engine_stopped_title">Protection stopped unexpectedly</string>
     <string name="home_error_engine_stopped_message">The packet engine stopped while connected. Traffic stays blocked until you restart it or disconnect.</string>
+    <!-- The pre-flight check's destination-level failures (ADR-0010 §4): the proxy works, but refused or failed the test connection. -->
+    <string name="home_error_refused_title">Your proxy refused the connection</string>
+    <string name="home_error_refused_message">%1$s refused to open a test connection. Providers answer this way when a plan has ended or your network\'s address isn\'t allowed. Check your account with your proxy provider.</string>
+    <string name="home_error_proxy_failure_title">Proxy error</string>
+    <string name="home_error_proxy_failure_message">%1$s answered the test connection with an error. Check your account with your proxy provider.</string>
+    <string name="home_error_unsupported_title">Not supported by your proxy</string>
+    <string name="home_error_unsupported_message">The proxy doesn\'t support the connections ProxyFlow needs: tunnels to a site by its name.</string>
+    <string name="home_error_profile_deleted_title">Profile deleted</string>
+    <string name="home_error_profile_deleted_message">The profile this connection used was deleted, so its proxy isn\'t used any more. Traffic stays blocked until you stop the connection.</string>
     <string name="home_error_internal_title">Couldn\'t connect</string>
     <string name="home_error_internal_message">Something on this phone stopped the connection from starting. Try again.</string>
 </resources>

@@ -113,6 +113,37 @@ class HomeScreenTest {
     }
 
     @Test
+    fun aDeletedProfileLeavesOnlyStop() {
+        show(ready(ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.PROFILE_DELETED))))
+        compose.onNodeWithText("Traffic blocked").assertIsDisplayed()
+        scrolledTo("Profile deleted").assertIsDisplayed()
+        scrolledTo("Code: PROFILE_DELETED").assertIsDisplayed()
+        compose.onNodeWithText("Try again").assertDoesNotExist()
+        compose.onNodeWithText("Edit profile").assertDoesNotExist()
+        scrolledTo("Stop and use normal network").performClick()
+        assertEquals(listOf("stop"), calls)
+    }
+
+    /** What providers send for an expired plan or an address they don't allow fails the check, and says what to check. */
+    @Test
+    fun aProxyRefusingTheCheckSaysWhatToCheck() {
+        show(
+            ready(
+                ConnectionState(
+                    profileId = "p1",
+                    error = ConnectionError("TARGET_NOT_ALLOWED", "proxy refused this destination (HTTP 403)"),
+                ),
+            ),
+        )
+        compose.onNodeWithText("Your proxy refused the connection").assertIsDisplayed()
+        scrolledTo(
+            "203.0.113.10:3128 refused to open a test connection. Providers answer this way when a plan has ended or " +
+                "your network's address isn't allowed. Check your account with your proxy provider.",
+        ).assertIsDisplayed()
+        scrolledTo("You're not connected — apps are still using your normal network.").assertIsDisplayed()
+    }
+
+    @Test
     fun stoppingWhileBlockedAsksFirst() {
         val blocked = ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.ENGINE_STOPPED))
         show(ready(blocked, dialog = HomeDialog.ConfirmStop))
