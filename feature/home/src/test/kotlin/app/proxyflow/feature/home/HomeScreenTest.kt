@@ -49,7 +49,9 @@ class HomeScreenTest {
         compose.onNodeWithText("HTTP · Not encrypted").assertIsDisplayed()
         compose.onNodeWithText("203.0.113.10:3128").assertIsDisplayed()
         compose.onNodeWithText("Connect").assertIsNotEnabled()
-        compose.onNodeWithText("Connecting arrives with the VPN service in a later milestone. This build sets up the app only.")
+        compose.onNodeWithText(
+            "Connecting arrives with the VPN service in a later version. This build saves your proxies but doesn't connect yet.",
+        )
             .assertIsDisplayed()
     }
 }

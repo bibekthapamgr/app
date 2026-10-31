@@ -1,11 +1,11 @@
 package app.proxyflow.feature.home
 
 import app.proxyflow.core.data.ConnectionController
-import app.proxyflow.core.data.InMemoryProfileRepository
 import app.proxyflow.core.data.UnavailableConnectionController
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.testing.MainDispatcherRule
+import app.proxyflow.core.testing.TestProfiles
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
@@ -21,8 +21,7 @@ class HomeViewModelTest {
     @get:Rule
     val main = MainDispatcherRule()
 
-    private var nextId = 0
-    private val profiles = InMemoryProfileRepository(newId = { "p${++nextId}" })
+    private val profiles = TestProfiles().repository
 
     @Test
     fun showsTheEmptyStateUntilAProfileIsSaved() = runTest {

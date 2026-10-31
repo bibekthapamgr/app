@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -35,13 +37,16 @@ import app.proxyflow.core.designsystem.component.BannerTone
 import app.proxyflow.core.designsystem.component.PfBanner
 import app.proxyflow.core.designsystem.component.PfChoiceChips
 import app.proxyflow.core.designsystem.component.PfConfirmDialog
+import app.proxyflow.core.designsystem.component.PfLoadingIndicator
 import app.proxyflow.core.designsystem.component.PfPasswordField
 import app.proxyflow.core.designsystem.component.PfPrimaryButton
+import app.proxyflow.core.designsystem.component.PfSecondaryButton
 import app.proxyflow.core.designsystem.component.PfSwitchRow
 import app.proxyflow.core.designsystem.component.PfTextButton
 import app.proxyflow.core.designsystem.component.PfTextField
 import app.proxyflow.core.designsystem.component.PfTopAppBar
 import app.proxyflow.core.designsystem.theme.Spacing
+import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
 import app.proxyflow.core.model.ProxyProtocol
@@ -64,6 +69,7 @@ internal fun AddEditProxyRoute(viewModel: AddEditProxyViewModel, onDone: () -> U
             onUseTlsChange = viewModel::onUseTlsChange,
             onTlsServerNameChange = viewModel::onTlsServerNameChange,
             onSave = viewModel::save,
+            onTest = viewModel::testConnection,
             onBack = onDone,
         ),
     )
@@ -81,6 +87,7 @@ data class AddEditActions(
     val onUseTlsChange: (Boolean) -> Unit = {},
     val onTlsServerNameChange: (String) -> Unit = {},
     val onSave: () -> Unit = {},
+    val onTest: () -> Unit = {},
     val onBack: () -> Unit = {},
 )
 
@@ -122,12 +129,25 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
                 .padding(horizontal = Spacing.screenGutter, vertical = Spacing.md),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
+            if (state.saveFailed) {
+                PfBanner(text = stringResource(R.string.edit_save_failed), tone = BannerTone.Error)
+            }
             if (state.errors.isNotEmpty()) {
                 val count = state.errors.size
                 PfBanner(text = pluralStringResource(R.plurals.edit_fix_fields, count, count), tone = BannerTone.Error)
             }
+            if (state.credentialsUnreadable) {
+                // Board H3 / CREDENTIAL_UNREADABLE (docs/m1/04 §4), shown where the fix is made.
+                PfBanner(
+                    title = stringResource(R.string.edit_credentials_unreadable_title),
+                    text = stringResource(R.string.edit_credentials_unreadable_body),
+                    tone = BannerTone.Warning,
+                )
+            }
             FormFields(state, actions)
-            Spacer(Modifier.height(Spacing.md))
+            Spacer(Modifier.height(Spacing.sm))
+            TestConnection(state.test, onTest = actions.onTest)
+            Spacer(Modifier.height(Spacing.sm))
             PfPrimaryButton(
                 text = stringResource(R.string.edit_save),
                 onClick = actions.onSave,
@@ -203,6 +223,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
             label = stringResource(R.string.edit_username),
             errorText = errors[ProfileField.Username]?.let { errorText(it) },
             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+            secret = true,
         )
         PfPasswordField(
             value = input.password,
@@ -252,6 +273,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
 private fun errorText(error: ProfileError): String = stringResource(
     when (error) {
         ProfileError.NameTooLong -> R.string.error_name_too_long
+        ProfileError.ControlCharacters -> R.string.error_control_characters
         ProfileError.ServerInvalid -> R.string.error_server_invalid
         ProfileError.PortOutOfRange -> R.string.error_port_range
         ProfileError.UsernameRequired -> R.string.error_username_required
@@ -263,6 +285,50 @@ private fun errorText(error: ProfileError): String = stringResource(
         ProfileError.TlsServerNameInvalid -> R.string.error_tls_server_name
     },
 )
+
+/**
+ * "Test connection" and what it found (boards D5–D7). The text only ever reports
+ * the tester's own answer; with no engine in this build that answer is
+ * [ConnectionTestResult.Unavailable], never a pass.
+ */
+@Composable
+private fun TestConnection(test: ConnectionTestState, onTest: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        PfSecondaryButton(
+            text = stringResource(R.string.edit_test),
+            onClick = onTest,
+            enabled = test != ConnectionTestState.Testing,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        when (test) {
+            ConnectionTestState.Idle -> Unit
+            ConnectionTestState.Testing -> Row(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PfLoadingIndicator(Modifier.size(Spacing.lg))
+                Text(stringResource(R.string.edit_test_running), style = MaterialTheme.typography.bodyMedium)
+            }
+            is ConnectionTestState.Done -> when (val result = test.result) {
+                ConnectionTestResult.Unavailable -> PfBanner(
+                    title = stringResource(R.string.edit_test_unavailable_title),
+                    text = stringResource(R.string.edit_test_unavailable_body),
+                    tone = BannerTone.Info,
+                )
+                is ConnectionTestResult.Passed -> PfBanner(
+                    title = stringResource(R.string.edit_test_passed_title),
+                    text = stringResource(R.string.edit_test_passed_body, result.latencyMillis),
+                    tone = BannerTone.Success,
+                )
+                is ConnectionTestResult.Failed -> PfBanner(
+                    title = stringResource(R.string.edit_test_failed_title),
+                    text = stringResource(R.string.edit_test_failed_body, result.code),
+                    tone = BannerTone.Error,
+                )
+            }
+        }
+    }
+}
 
 /**
  * Keeps credentials out of screenshots, screen recordings and the recents

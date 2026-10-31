@@ -43,11 +43,11 @@ class NavigationTest {
     @Test
     fun everyScreenOpensAndClosesWithoutCrashing() {
         // Home (B1), then each bottom-navigation tab.
-        compose.onNodeWithText("Add a proxy to get started").assertIsDisplayed()
+        compose.waitForText("Add a proxy to get started").assertIsDisplayed()
         compose.tab("Home").assertIsSelected()
 
         compose.tab("Profiles").performClick()
-        compose.onNodeWithText("No proxies yet").assertIsDisplayed()
+        compose.waitForText("No proxies yet").assertIsDisplayed()
         compose.tab("Profiles").assertIsSelected()
 
         compose.tab("Logs").performClick()
@@ -72,18 +72,18 @@ class NavigationTest {
         compose.onNodeWithText("Port").performTextInput("1080")
         compose.topBarSave().performClick()
 
+        compose.waitForText("proxy.example.com:1080").assertIsDisplayed()
         compose.onNodeWithText("proxy.example.com").assertIsDisplayed()
-        compose.onNodeWithText("proxy.example.com:1080").assertIsDisplayed()
         compose.onNodeWithText("Connect").assertIsNotEnabled()
 
         // Home → Profiles (Change) → Edit proxy → Back.
         compose.onNodeWithText("Change").performClick()
         compose.tab("Profiles").assertIsSelected()
-        compose.onNodeWithText("ACTIVE").assertIsDisplayed()
+        compose.waitForText("ACTIVE").assertIsDisplayed()
         compose.onNodeWithText("proxy.example.com:1080").performClick()
         compose.onNodeWithText("Edit proxy").assertIsDisplayed()
         compose.onNodeWithContentDescription("Back").performClick()
-        compose.onNodeWithText("ACTIVE").assertIsDisplayed()
+        compose.waitForText("ACTIVE").assertIsDisplayed()
     }
 
     @Test
@@ -98,7 +98,7 @@ class NavigationTest {
 
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Discard").performClick()
-        compose.onNodeWithText("Add a proxy to get started").assertIsDisplayed()
+        compose.waitForText("Add a proxy to get started").assertIsDisplayed()
     }
 
     @Test
@@ -106,7 +106,7 @@ class NavigationTest {
         compose.onNodeWithText("Add proxy").performClick()
         compose.pressBack()
         compose.onNodeWithText("Discard changes?").assertDoesNotExist()
-        compose.onNodeWithText("Add a proxy to get started").assertIsDisplayed()
+        compose.waitForText("Add a proxy to get started").assertIsDisplayed()
     }
 
     @Test
@@ -123,7 +123,7 @@ class NavigationTest {
         assertEquals(1, forms)
 
         compose.pressBack()
-        compose.onNodeWithText("Add a proxy to get started").assertIsDisplayed()
+        compose.waitForText("Add a proxy to get started").assertIsDisplayed()
     }
 
     @Test

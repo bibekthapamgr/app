@@ -16,5 +16,5 @@
     <string name="home_not_encrypted">Not encrypted</string>
     <string name="home_change_profile">Change</string>
     <string name="home_connect">Connect</string>
-    <string name="home_connect_unavailable">Connecting arrives with the VPN service in a later milestone. This build sets up the app only.</string>
+    <string name="home_connect_unavailable">Connecting arrives with the VPN service in a later version. This build saves your proxies but doesn\'t connect yet.</string>
 </resources>

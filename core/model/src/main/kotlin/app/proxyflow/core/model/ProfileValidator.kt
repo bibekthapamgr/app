@@ -6,6 +6,9 @@ enum class ProfileField { Name, Server, Port, Username, Password, TlsServerName 
 /** Validation outcomes; the UI maps each to a string resource (docs/m1/04 §5). */
 enum class ProfileError {
     NameTooLong,
+
+    /** Line breaks, tabs or other control characters, usually pasted by accident. */
+    ControlCharacters,
     ServerInvalid,
     PortOutOfRange,
     UsernameRequired,
@@ -36,7 +39,11 @@ object ProfileValidator {
     fun validate(input: ProxyProfileInput, savedPasswordKept: Boolean = false): Map<ProfileField, ProfileError> {
         val errors = linkedMapOf<ProfileField, ProfileError>()
 
-        if (input.name.trim().length > MAX_NAME_LENGTH) errors[ProfileField.Name] = ProfileError.NameTooLong
+        if (input.name.trim().length > MAX_NAME_LENGTH) {
+            errors[ProfileField.Name] = ProfileError.NameTooLong
+        } else if (input.name.hasControlCharacters()) {
+            errors[ProfileField.Name] = ProfileError.ControlCharacters
+        }
 
         if (!isValidHost(normalizeHost(input.server))) errors[ProfileField.Server] = ProfileError.ServerInvalid
 
@@ -50,13 +57,17 @@ object ProfileValidator {
                     errors[ProfileField.Password] = ProfileError.PasswordWithoutUsername
                 input.username.isEmpty() ->
                     errors[ProfileField.Username] = ProfileError.UsernameRequired
+                input.username.hasControlCharacters() ->
+                    errors[ProfileField.Username] = ProfileError.ControlCharacters
                 input.protocol == ProxyProtocol.HTTP && ':' in input.username ->
                     errors[ProfileField.Username] = ProfileError.UsernameHasColon
                 socks && input.username.utf8Length() > MAX_SOCKS5_CREDENTIAL_BYTES ->
                     errors[ProfileField.Username] = ProfileError.UsernameTooLong
             }
-            if (socks && input.password.utf8Length() > MAX_SOCKS5_CREDENTIAL_BYTES) {
-                errors[ProfileField.Password] = ProfileError.PasswordTooLong
+            if (input.password.hasControlCharacters()) {
+                errors.getOrPut(ProfileField.Password) { ProfileError.ControlCharacters }
+            } else if (socks && input.password.utf8Length() > MAX_SOCKS5_CREDENTIAL_BYTES) {
+                errors.getOrPut(ProfileField.Password) { ProfileError.PasswordTooLong }
             }
             // A sign-in without a password would fail at the proxy; RFC 1929 also needs at least one byte.
             if (input.username.isNotEmpty() && input.password.isEmpty() && !savedPasswordKept) {
@@ -130,4 +141,7 @@ object ProfileValidator {
     }
 
     private fun String.utf8Length(): Int = encodeToByteArray().size
+
+    /** Characters a phone keyboard cannot type: control characters and the Unicode line and paragraph separators. */
+    private fun String.hasControlCharacters(): Boolean = any { it.isISOControl() || it == '\u2028' || it == '\u2029' }
 }

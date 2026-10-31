@@ -12,22 +12,23 @@ data class ProxyProfileInput(
     val useTls: Boolean = false,
     val tlsServerName: String = "",
 ) {
-    /** Builds the profile to save. Call only when [ProfileValidator.validate] returned no errors. */
-    fun toProfile(id: String, hasPassword: Boolean): ProxyProfile {
-        val host = ProfileValidator.normalizeHost(server)
-        return ProxyProfile(
-            id = id,
-            // Stored as typed. An empty name stays empty; the UI shows the server instead (ProxyProfile.displayName).
-            name = name.trim(),
-            protocol = protocol,
-            host = host,
-            port = port.trim().toInt(),
-            username = username.takeIf { requiresSignIn && it.isNotEmpty() },
-            hasPassword = requiresSignIn && hasPassword,
-            useTls = useTls,
-            tlsServerName = tlsServerName.trim().takeIf { useTls && it.isNotEmpty() },
-        )
-    }
+    /**
+     * The profile to save, without the username and password (they are stored
+     * encrypted, ADR-0006). Call only when [ProfileValidator.validate] returned no errors.
+     */
+    fun toProfile(id: String, createdAtMillis: Long, updatedAtMillis: Long): ProxyProfile = ProxyProfile(
+        id = id,
+        // Stored as typed. An empty name stays empty; the UI shows the server instead (ProxyProfile.displayName).
+        name = name.trim(),
+        protocol = protocol,
+        host = ProfileValidator.normalizeHost(server),
+        port = port.trim().toInt(),
+        tlsMode = if (useTls) TlsMode.Tls else TlsMode.None,
+        tlsServerName = tlsServerName.trim().takeIf { useTls && it.isNotEmpty() },
+        requiresSignIn = requiresSignIn,
+        createdAtMillis = createdAtMillis,
+        updatedAtMillis = updatedAtMillis,
+    )
 
     /**
      * Whether a password saved for [saved] may be reused with this form: the same
@@ -50,14 +51,17 @@ data class ProxyProfileInput(
         "useTls=$useTls, tlsServerName=$tlsServerName)"
 
     companion object {
-        /** The form pre-filled from a saved profile. The password is never read back. */
-        fun from(profile: ProxyProfile) = ProxyProfileInput(
+        /**
+         * The form pre-filled from a saved profile and its decrypted [username]
+         * (empty when there is none or it could not be read). The password is never read back.
+         */
+        fun from(profile: ProxyProfile, username: String = "") = ProxyProfileInput(
             name = profile.name,
             protocol = profile.protocol,
             server = profile.host,
             port = profile.port.toString(),
             requiresSignIn = profile.requiresSignIn,
-            username = profile.username.orEmpty(),
+            username = if (profile.requiresSignIn) username else "",
             password = "",
             useTls = profile.useTls,
             tlsServerName = profile.tlsServerName.orEmpty(),

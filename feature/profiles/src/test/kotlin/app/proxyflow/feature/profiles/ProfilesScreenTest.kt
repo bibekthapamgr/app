@@ -90,4 +90,25 @@ class ProfilesScreenTest {
         compose.onNodeWithText("Use this proxy").performClick()
         assertEquals(listOf("p2"), used)
     }
+
+    @Test
+    fun theMenuDuplicatesAProfile() {
+        val duplicated = mutableListOf<String>()
+        compose.setContent {
+            ProxyFlowTheme {
+                ProfilesScreen(
+                    ProfilesUiState(loading = false, profiles = listOf(office, backup), activeProfileId = "p1"),
+                    onAddProxy = {},
+                    onEditProxy = {},
+                    onUseProxy = {},
+                    onDeleteProxy = {},
+                    onDuplicateProxy = { duplicated += it },
+                )
+            }
+        }
+        compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
+        compose.onNodeWithText("Use this proxy").assertDoesNotExist() // already the active one
+        compose.onNodeWithText("Duplicate").performClick()
+        assertEquals(listOf("p1"), duplicated)
+    }
 }

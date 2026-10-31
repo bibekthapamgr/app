@@ -7,7 +7,9 @@ where Actions logs and artifacts cannot be downloaded: test counts per
 module, APK sizes, the permissions of the merged manifests and every library
 on the release runtime classpath.
 
-Usage: ci_build_facts.py <output of ./gradlew :app:dependencies --configuration releaseRuntimeClasspath>
+Usage:
+  ci_build_facts.py <output of ./gradlew :app:dependencies --configuration releaseRuntimeClasspath>
+  ci_build_facts.py --device-tests <label>   (each instrumented test and its result, per emulator)
 """
 
 import glob
@@ -63,12 +65,35 @@ def dependencies(path: str) -> list[str]:
     return [f"RELEASE RUNTIME CLASSPATH {len(modules)} libraries"] + [f"  {m}" for m in sorted(modules)]
 
 
+def device_tests(label: str) -> list[str]:
+    lines: list[str] = []
+    for report in sorted(glob.glob("**/build/outputs/androidTest-results/connected/**/*.xml", recursive=True)):
+        try:
+            root = ET.parse(report).getroot()
+        except ET.ParseError:
+            continue
+        for suite in [root] if root.tag == "testsuite" else list(root.iter("testsuite")):
+            device = {p.get("name"): p.get("value") for p in suite.iter("property")}.get("device", "unknown device")
+            lines.append(
+                f"DEVICE TESTS {label} on {device}: {suite.get('tests')} run, {suite.get('failures')} failed, "
+                f"{suite.get('errors')} errors, {suite.get('skipped')} skipped"
+            )
+            for case in suite.iter("testcase"):
+                if case.find("failure") is not None or case.find("error") is not None:
+                    status = "FAILED"
+                elif case.find("skipped") is not None:
+                    status = "skipped"
+                else:
+                    status = "passed"
+                lines.append(f"  {case.get('classname')}.{case.get('name')}: {status} ({case.get('time')} s)")
+    return lines or [f"DEVICE TESTS {label}: no results found"]
+
+
 def escape(text: str) -> str:
     return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
-def main(dependency_report: str) -> None:
-    lines = tests() + apks() + manifests() + dependencies(dependency_report)
+def emit(lines: list[str]) -> None:
     # Names in these lines come from the build under test: print them with workflow commands off.
     token = secrets.token_hex(16)
     print(f"::stop-commands::{token}")
@@ -89,4 +114,7 @@ def main(dependency_report: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    if sys.argv[1] == "--device-tests":
+        emit(device_tests(sys.argv[2]))
+    else:
+        emit(tests() + apks() + manifests() + dependencies(sys.argv[1]))

@@ -26,11 +26,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.proxyflow.core.designsystem.component.BannerTone
-import app.proxyflow.core.designsystem.component.PfBanner
 import app.proxyflow.core.designsystem.component.PfCard
 import app.proxyflow.core.designsystem.component.PfConfirmDialog
 import app.proxyflow.core.designsystem.component.PfEmptyState
@@ -44,12 +43,21 @@ import app.proxyflow.core.model.ProxyProfile
 @Composable
 internal fun ProfilesRoute(viewModel: ProfilesViewModel, onAddProxy: () -> Unit, onEditProxy: (String) -> Unit) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // Copy names follow the phone's language ("Office (copy)", "Office (copy 2)").
+    val copyPattern = stringResource(R.string.profiles_copy_name)
+    val numberedCopyPattern = stringResource(R.string.profiles_copy_name_numbered)
+    val locale = LocalConfiguration.current.locales[0]
     ProfilesScreen(
         state = state,
         onAddProxy = onAddProxy,
         onEditProxy = onEditProxy,
         onUseProxy = viewModel::setActive,
         onDeleteProxy = viewModel::delete,
+        onDuplicateProxy = { id ->
+            viewModel.duplicate(id) { base, number ->
+                if (number == 1) copyPattern.format(locale, base) else numberedCopyPattern.format(locale, base, number)
+            }
+        },
     )
 }
 
@@ -61,6 +69,7 @@ fun ProfilesScreen(
     onUseProxy: (String) -> Unit,
     onDeleteProxy: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onDuplicateProxy: (String) -> Unit = {},
 ) {
     // Saved by id so the confirmation survives rotation; it closes by itself if the profile disappears.
     var pendingDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -93,14 +102,13 @@ fun ProfilesScreen(
                 contentPadding = PaddingValues(start = Spacing.md, end = Spacing.md, top = Spacing.sm, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
-                // M2 only: ADR-0008. Removed when M3 stores profiles with Room and the Keystore.
-                item(key = "memory-only") { PfBanner(text = stringResource(R.string.profiles_memory_only), tone = BannerTone.Info) }
                 items(state.profiles, key = { it.id }) { profile ->
                     ProfileItem(
                         profile = profile,
                         active = profile.id == state.activeProfileId,
                         onClick = { onEditProxy(profile.id) },
                         onUse = { onUseProxy(profile.id) },
+                        onDuplicate = { onDuplicateProxy(profile.id) },
                         onDelete = { pendingDeleteId = profile.id },
                     )
                 }
@@ -124,7 +132,14 @@ fun ProfilesScreen(
 }
 
 @Composable
-private fun ProfileItem(profile: ProxyProfile, active: Boolean, onClick: () -> Unit, onUse: () -> Unit, onDelete: () -> Unit) {
+private fun ProfileItem(
+    profile: ProxyProfile,
+    active: Boolean,
+    onClick: () -> Unit,
+    onUse: () -> Unit,
+    onDuplicate: () -> Unit,
+    onDelete: () -> Unit,
+) {
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     PfCard(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(verticalAlignment = Alignment.Top) {
@@ -171,6 +186,14 @@ private fun ProfileItem(profile: ProxyProfile, active: Boolean, onClick: () -> U
                         onClick = {
                             menuOpen = false
                             onClick()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.profiles_duplicate)) },
+                        leadingIcon = { Icon(PfIcons.Copy, contentDescription = null) },
+                        onClick = {
+                            menuOpen = false
+                            onDuplicate()
                         },
                     )
                     DropdownMenuItem(

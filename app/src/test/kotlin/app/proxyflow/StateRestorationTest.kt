@@ -56,12 +56,12 @@ class StateRestorationTest {
         compose.onNodeWithText("Server").performTextInput("203.0.113.10")
         compose.onNodeWithText("Port").performTextInput("1080")
         compose.topBarSave().performClick()
-        compose.onNodeWithText("203.0.113.10:1080").assertIsDisplayed()
+        compose.waitForText("203.0.113.10:1080").assertIsDisplayed()
 
         compose.activityRule.scenario.recreate()
         compose.waitForApp()
 
-        compose.onNodeWithText("203.0.113.10:1080").assertIsDisplayed()
+        compose.waitForText("203.0.113.10:1080").assertIsDisplayed()
     }
 
     @Test

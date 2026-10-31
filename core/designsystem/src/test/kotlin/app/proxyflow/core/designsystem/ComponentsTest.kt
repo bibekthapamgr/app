@@ -1,15 +1,25 @@
 package app.proxyflow.core.designsystem
 
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInputSelection
+import androidx.compose.ui.text.TextRange
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.component.PfChoiceDialog
 import app.proxyflow.core.designsystem.component.PfConfirmDialog
@@ -40,6 +50,38 @@ class ComponentsTest {
         compose.onNodeWithContentDescription("Show password").performClick()
         compose.onNodeWithContentDescription("Hide password").performClick()
         compose.onNodeWithContentDescription("Show password").assertExists()
+    }
+
+    @Test
+    fun credentialFieldsNeverPutTheirTextOnTheClipboard() {
+        val clipboard = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
+        clipboard.clearPrimaryClip()
+        compose.setContent {
+            ProxyFlowTheme {
+                Column {
+                    PfPasswordField(value = "s3cret-pw", onValueChange = {}, label = "Password")
+                    PfTextField(value = "office-user", onValueChange = {}, label = "Username", secret = true)
+                    PfTextField(value = "Office", onValueChange = {}, label = "Name")
+                }
+            }
+        }
+        // Shown, selected and copied, as someone would from the text toolbar.
+        compose.onNodeWithContentDescription("Show password").performClick()
+        copyAll("Password", "s3cret-pw")
+        copyAll("Username", "office-user")
+        compose.waitForIdle()
+        assertFalse("nothing copied", clipboard.hasPrimaryClip() && clipboard.primaryClip?.getItemAt(0)?.text?.isNotEmpty() == true)
+
+        // Control: an ordinary field does copy, so a leak would have shown up above.
+        copyAll("Name", "Office")
+        compose.waitForIdle()
+        assertEquals("Office", clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+    }
+
+    private fun copyAll(label: String, text: String) {
+        val field = compose.onNode(hasText(label) and hasSetTextAction())
+        field.performTextInputSelection(TextRange(0, text.length))
+        field.performSemanticsAction(SemanticsActions.CopyText)
     }
 
     @Test

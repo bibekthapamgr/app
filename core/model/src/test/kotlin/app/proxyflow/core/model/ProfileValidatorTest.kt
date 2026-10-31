@@ -131,27 +131,55 @@ class ProfileValidatorTest {
             useTls = false,
             tlsServerName = "ignored.example",
         )
-        val profile = input.toProfile(id = "p1", hasPassword = true)
+        val profile = input.toProfile(id = "p1", createdAtMillis = 1, updatedAtMillis = 2)
         assertEquals("2001:db8::1", profile.host)
         assertEquals("an empty name is stored empty, not as the server", "", profile.name)
         assertEquals("2001:db8::1", profile.displayName)
         assertEquals("[2001:db8::1]:3128", profile.endpoint)
         assertEquals(3128, profile.port)
-        assertEquals("user", profile.username)
-        assertTrue(profile.hasPassword)
-        assertEquals(null, profile.tlsServerName)
+        assertTrue(profile.requiresSignIn)
+        assertEquals(TlsMode.None, profile.tlsMode)
+        assertEquals("a server name only matters with TLS", null, profile.tlsServerName)
+        assertEquals(1L, profile.createdAtMillis)
+        assertEquals(2L, profile.updatedAtMillis)
     }
 
     @Test
-    fun formRoundTripNeverCarriesThePassword() {
+    fun formRoundTripCarriesTheUsernameButNeverThePassword() {
         val profile = ProxyProfile(
             id = "p1", name = "Office", protocol = ProxyProtocol.SOCKS5, host = "203.0.113.10", port = 1080,
-            username = "user", hasPassword = true, useTls = true, tlsServerName = "proxy.example.com",
+            tlsMode = TlsMode.Tls, tlsServerName = "proxy.example.com", requiresSignIn = true,
+            createdAtMillis = 10, updatedAtMillis = 20,
         )
-        val input = ProxyProfileInput.from(profile)
+        val input = ProxyProfileInput.from(profile, username = "user")
+        assertEquals("user", input.username)
         assertEquals("", input.password)
         assertTrue(input.requiresSignIn)
-        assertEquals(profile, input.toProfile(id = "p1", hasPassword = true))
+        assertTrue(input.useTls)
+        assertEquals(profile, input.toProfile(id = "p1", createdAtMillis = 10, updatedAtMillis = 20))
+        assertEquals("no username without sign-in", "", ProxyProfileInput.from(profile.copy(requiresSignIn = false), "user").username)
+    }
+
+    @Test
+    fun controlCharactersAreRefusedInTheNameAndTheCredentials() {
+        val signIn = valid.copy(requiresSignIn = true, username = "user", password = "secret")
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.validate(valid.copy(name = "Office\n"))[ProfileField.Name])
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.validate(signIn.copy(username = "us\ter"))[ProfileField.Username])
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.validate(signIn.copy(password = "secret\r\n"))[ProfileField.Password])
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.validate(signIn.copy(password = "a\u2028b"))[ProfileField.Password])
+        assertTrue("spaces and symbols are fine", ProfileValidator.validate(signIn.copy(password = "p a$\$ wörd!")).isEmpty())
+    }
+
+    @Test
+    fun copyNamesStayUniqueAndShortEnough() {
+        assertEquals("Office (copy)", ProfileNames.copyOf("Office", taken = listOf("Office")))
+        assertEquals("Office (copy 2)", ProfileNames.copyOf("Office", taken = listOf("Office", "Office (copy)")))
+        val long = "x".repeat(ProfileValidator.MAX_NAME_LENGTH)
+        val copy = ProfileNames.copyOf(long, taken = listOf(long))
+        assertTrue(copy, copy.length <= ProfileValidator.MAX_NAME_LENGTH)
+        assertTrue(copy, copy.endsWith(" (copy)"))
+        val custom = ProfileNames.copyOf("Office", taken = emptyList()) { base, n -> "$base – kopi $n" }
+        assertEquals("Office – kopi 1", custom)
     }
 
     @Test
@@ -181,7 +209,7 @@ class ProfileValidatorTest {
     @Test
     fun credentialsNeverAppearInToString() {
         val input = valid.copy(requiresSignIn = true, username = "alice", password = "s3cret-pw")
-        val text = input.toString() + " " + input.toProfile(id = "p1", hasPassword = true).toString()
+        val text = input.toString() + " " + input.toProfile(id = "p1", createdAtMillis = 0, updatedAtMillis = 0).toString()
         assertFalse(text, "alice" in text)
         assertFalse(text, "s3cret-pw" in text)
         assertTrue(text, "<redacted>" in text)

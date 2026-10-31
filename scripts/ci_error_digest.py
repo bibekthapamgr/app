@@ -11,8 +11,9 @@ be read with:
 
 Inputs: the Gradle console logs passed as arguments, plus the JUnit XML and
 Android Lint XML reports found under the current directory. Payloads and
-credentials never reach these files: the app has no network code in M2 and
-the tests use fake data only.
+credentials never reach these files: the app has no network code yet and
+the tests use generated test data only (random usernames and passwords that
+exist only for the run).
 """
 
 import glob
@@ -73,7 +74,10 @@ def gradle_errors(path: str) -> list[str]:
 def test_failures() -> list[str]:
     found: list[str] = []
     seen_messages: set[str] = set()
-    for report in sorted(glob.glob("**/build/test-results/**/*.xml", recursive=True)):
+    # JVM and Robolectric tests, then instrumented tests run on an emulator (connected*AndroidTest).
+    reports = sorted(glob.glob("**/build/test-results/**/*.xml", recursive=True))
+    reports += sorted(glob.glob("**/build/outputs/androidTest-results/**/*.xml", recursive=True))
+    for report in reports:
         try:
             tree = ET.parse(report)
         except ET.ParseError:

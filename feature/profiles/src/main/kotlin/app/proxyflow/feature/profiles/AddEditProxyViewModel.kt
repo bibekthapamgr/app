@@ -3,22 +3,38 @@ package app.proxyflow.feature.profiles
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.proxyflow.core.data.ConnectionTester
+import app.proxyflow.core.data.InvalidProfileException
 import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.model.ConnectionTestResult
+import app.proxyflow.core.model.CredentialState
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
 import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** Where "Test connection" stands (boards D5–D7). */
+sealed interface ConnectionTestState {
+    data object Idle : ConnectionTestState
+
+    data object Testing : ConnectionTestState
+
+    /** What the tester found for the form exactly as it is now; any edit clears it. */
+    data class Done(val result: ConnectionTestResult) : ConnectionTestState
+}
+
 data class AddEditUiState(
     val isEdit: Boolean = false,
     val input: ProxyProfileInput = ProxyProfileInput(),
-    /** Shown only after the first Save attempt, then kept live while the user fixes them. */
+    /** Shown only after the first Save or Test attempt, then kept live while the user fixes them. */
     val errors: Map<ProfileField, ProfileError> = emptyMap(),
     val hasSavedPassword: Boolean = false,
     /**
@@ -26,13 +42,18 @@ data class AddEditUiState(
      * username and TLS settings are unchanged, so a password never follows a profile to another proxy.
      */
     val keepsSavedPassword: Boolean = false,
+    /** The saved username and password can't be read on this phone any more and must be entered again (H3). */
+    val credentialsUnreadable: Boolean = false,
     /** Display name of the profile being edited, for the discard dialog (board D8). */
     val originalName: String? = null,
     val dirty: Boolean = false,
     val saving: Boolean = false,
     val saved: Boolean = false,
-    /** Save attempts that found errors; each one scrolls the form back to the error summary. */
+    /** The last Save failed for a reason the form can't show next to a field (storage or Keystore). */
+    val saveFailed: Boolean = false,
+    /** Save or Test attempts that found errors; each one scrolls the form back to the error summary. */
     val rejectedSaves: Int = 0,
+    val test: ConnectionTestState = ConnectionTestState.Idle,
 )
 
 /**
@@ -41,9 +62,13 @@ data class AddEditUiState(
  * The credentials (ADR-0006) stay in this ViewModel's memory only, so they are
  * never written into saved instance state, which Android may persist; after
  * process death the user enters them again (an edited profile's username comes
- * back from the profile itself).
+ * back from its encrypted store).
  */
-class AddEditProxyViewModel(private val savedState: SavedStateHandle, private val repository: ProfileRepository) : ViewModel() {
+class AddEditProxyViewModel(
+    private val savedState: SavedStateHandle,
+    private val repository: ProfileRepository,
+    private val tester: ConnectionTester,
+) : ViewModel() {
     /** Navigation argument (AddEditProxyDestination.profileId); null when adding. */
     private val profileId: String? = savedState[ARG_PROFILE_ID]
 
@@ -52,24 +77,29 @@ class AddEditProxyViewModel(private val savedState: SavedStateHandle, private va
 
     private var initial: ProxyProfileInput = ProxyProfileInput()
     private var showErrors: Boolean = savedState[KEY_SHOW_ERRORS] ?: false
+    private var testJob: Job? = null
 
     init {
         if (profileId != null) {
             viewModelScope.launch {
-                val profile = repository.get(profileId)
-                if (profile == null) {
-                    // Deleted, or (in M2) lost with the app process: offer what was restored as a new profile,
-                    // and let Back ask before discarding it.
+                val editing = repository.loadForEditing(profileId)
+                if (editing == null) {
+                    // Deleted meanwhile: offer what was restored as a new profile, and let Back ask before discarding it.
                     state.update { it.copy(isEdit = false) }
                     refresh()
                     return@launch
                 }
-                initial = ProxyProfileInput.from(profile)
+                initial = editing.input
                 state.update { s ->
                     // After rotation or process death the restored fields win over the stored profile,
                     // except the username, which is not kept in saved state.
                     val input = if (savedState.contains(KEY_SERVER)) s.input.copy(username = initial.username) else initial
-                    s.copy(input = input, hasSavedPassword = profile.hasPassword, originalName = profile.displayName)
+                    s.copy(
+                        input = input,
+                        hasSavedPassword = editing.credentials == CredentialState.Saved,
+                        credentialsUnreadable = editing.credentials == CredentialState.Unreadable,
+                        originalName = editing.profile.displayName,
+                    )
                 }
                 refresh()
             }
@@ -98,25 +128,51 @@ class AddEditProxyViewModel(private val savedState: SavedStateHandle, private va
 
     fun save() {
         val current = state.value
-        if (current.saving || current.saved) return
-        showErrors = true
-        savedState[KEY_SHOW_ERRORS] = true
-        refresh()
-        if (state.value.errors.isNotEmpty()) {
-            state.update { it.copy(rejectedSaves = it.rejectedSaves + 1) }
-            return
-        }
-        state.update { it.copy(saving = true) }
+        if (current.saving || current.saved || !passesValidation()) return
+        state.update { it.copy(saving = true, saveFailed = false) }
         // A profile that no longer exists is saved as a new one, under a new id.
         val id = profileId.takeIf { current.isEdit }
         viewModelScope.launch {
-            repository.save(id, current.input)
-            state.update { it.copy(saving = false, saved = true, dirty = false) }
+            try {
+                repository.save(id, current.input)
+                state.update { it.copy(saving = false, saved = true, dirty = false) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: InvalidProfileException) {
+                // The repository checks again; it can only disagree if the saved profile changed meanwhile.
+                state.update { it.copy(saving = false, errors = e.errors, rejectedSaves = it.rejectedSaves + 1) }
+            } catch (e: Exception) {
+                state.update { it.copy(saving = false, saveFailed = true) }
+            }
         }
     }
 
+    /** Tests the form as it is now. Only the tester's own answer is shown; nothing else ever reports success. */
+    fun testConnection() {
+        if (state.value.test == ConnectionTestState.Testing || !passesValidation()) return
+        val input = state.value.input
+        val id = profileId.takeIf { state.value.isEdit }
+        state.update { it.copy(test = ConnectionTestState.Testing) }
+        testJob = viewModelScope.launch {
+            val result = tester.test(id, input)
+            // A result is only shown for the form it was made with.
+            if (state.value.input == input) state.update { it.copy(test = ConnectionTestState.Done(result)) }
+        }
+    }
+
+    /** Shows the errors from now on; false (and the form scrolls to them) when there are any. */
+    private fun passesValidation(): Boolean {
+        showErrors = true
+        savedState[KEY_SHOW_ERRORS] = true
+        refresh()
+        if (state.value.errors.isEmpty()) return true
+        state.update { it.copy(rejectedSaves = it.rejectedSaves + 1) }
+        return false
+    }
+
     private fun edit(transform: (ProxyProfileInput) -> ProxyProfileInput) {
-        state.update { it.copy(input = transform(it.input)) }
+        testJob?.cancel()
+        state.update { it.copy(input = transform(it.input), test = ConnectionTestState.Idle, saveFailed = false) }
         persist(state.value.input)
         refresh()
     }

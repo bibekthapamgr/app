@@ -19,12 +19,17 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
@@ -37,6 +42,9 @@ import app.proxyflow.core.designsystem.theme.Spacing
 /**
  * Single-line text field with a label, optional hint, and an error message
  * that replaces the hint and is announced by TalkBack.
+ *
+ * @param secret for credentials: Copy and Cut put nothing on the clipboard, so
+ *   what is typed here never reaches other apps through it. Paste still works.
  */
 @Composable
 fun PfTextField(
@@ -50,24 +58,39 @@ fun PfTextField(
     visualTransformation: VisualTransformation = VisualTransformation.None,
     trailingIcon: @Composable (() -> Unit)? = null,
     enabled: Boolean = true,
+    secret: Boolean = false,
 ) {
     val message = errorText ?: supportingText
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label) },
-        supportingText = message?.let { { Text(it) } },
-        isError = errorText != null,
-        singleLine = true,
-        enabled = enabled,
-        keyboardOptions = keyboardOptions,
-        visualTransformation = visualTransformation,
-        trailingIcon = trailingIcon,
-        modifier = modifier.fillMaxWidth(),
-    )
+    val field: @Composable () -> Unit = {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text(label) },
+            supportingText = message?.let { { Text(it) } },
+            isError = errorText != null,
+            singleLine = true,
+            enabled = enabled,
+            keyboardOptions = keyboardOptions,
+            visualTransformation = visualTransformation,
+            trailingIcon = trailingIcon,
+            modifier = modifier.fillMaxWidth(),
+        )
+    }
+    if (secret) {
+        val clipboard = LocalClipboard.current
+        val readOnly = remember(clipboard) { PasteOnlyClipboard(clipboard) }
+        CompositionLocalProvider(LocalClipboard provides readOnly, content = field)
+    } else {
+        field()
+    }
 }
 
-/** Password field: masked by default, with a show/hide toggle. */
+/** A clipboard that can be pasted from but never written to (credential fields, ADR-0006). */
+private class PasteOnlyClipboard(private val delegate: Clipboard) : Clipboard by delegate {
+    override suspend fun setClipEntry(clipEntry: ClipEntry?) = Unit
+}
+
+/** Password field: masked by default, with a show/hide toggle; never copied to the clipboard, even when shown. */
 @Composable
 fun PfPasswordField(
     value: String,
@@ -85,6 +108,7 @@ fun PfPasswordField(
         modifier = modifier,
         supportingText = supportingText,
         errorText = errorText,
+        secret = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
         visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {

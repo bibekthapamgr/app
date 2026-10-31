@@ -13,6 +13,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import org.junit.rules.TestRule
@@ -22,6 +23,15 @@ import org.junit.rules.TestRule
 /** The first frame waits for the saved theme, which DataStore reads off the main thread. */
 internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.waitForApp() {
     waitUntil(timeoutMillis = 10_000) { onAllNodesWithText("Home").fetchSemanticsNodes().isNotEmpty() }
+}
+
+/**
+ * [text] once it is on screen. Profiles come from Room and the active profile from
+ * DataStore, both on background threads, so a screen shows them a moment after it opens.
+ */
+internal fun <A : ComponentActivity> AndroidComposeTestRule<out TestRule, A>.waitForText(text: String): SemanticsNodeInteraction {
+    waitUntil(timeoutMillis = 10_000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    return onNodeWithText(text)
 }
 
 /** A bottom-navigation item (Role.Tab), so it never matches a screen title with the same text. */
