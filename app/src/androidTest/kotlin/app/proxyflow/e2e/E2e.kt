@@ -128,6 +128,21 @@ object Descriptors {
     fun sockets(): Int = links().count { it.second.startsWith("socket:") }
 
     fun threads(): Int = File("/proc/self/task").list()?.size ?: 0
+
+    /**
+     * Sockets of [uid] that accept connections (TCP in LISTEN) or datagrams (any UDP
+     * socket), from /proc/net read as the shell (apps may not read it since Android 10).
+     */
+    fun listening(uid: Int): List<String> = listOf("tcp", "tcp6", "udp", "udp6").flatMap { proto ->
+        Shell.run("cat /proc/net/$proto").lines().drop(1).mapNotNull { line ->
+            val fields = line.trim().split(Regex("\\s+"))
+            val owned = fields.size > 7 && fields[7].toIntOrNull() == uid
+            val accepting = proto.startsWith("udp") || fields.getOrNull(3) == TCP_LISTEN
+            if (owned && accepting) "$proto ${fields[1]}" else null
+        }
+    }
+
+    private const val TCP_LISTEN = "0A"
 }
 
 /**

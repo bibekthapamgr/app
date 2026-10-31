@@ -1,8 +1,10 @@
 package app.proxyflow.e2e
 
+import android.app.Notification
 import android.content.Intent
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import android.system.Os
 import android.system.OsConstants
 import android.util.Log
@@ -73,8 +75,15 @@ class VpnEndToEndTest {
         assertEquals(profile.displayName, connected.profileName)
         assertConnectedAsAndroidSeesIt()
         eventually("the notification says Connected") { app.notificationTitle(ProxyFlowVpnService.STATUS_NOTIFICATION_ID) == "Connected" }
-        val disconnect = app.notification(ProxyFlowVpnService.STATUS_NOTIFICATION_ID)?.actions?.map { it.title.toString() }
-        assertEquals(listOf("Disconnect"), disconnect)
+        val status = checkNotNull(app.notification(ProxyFlowVpnService.STATUS_NOTIFICATION_ID))
+        assertEquals(listOf("Disconnect"), status.actions?.map { it.title.toString() })
+        // Threat model I-11: the lock screen gets a version without the profile name.
+        assertEquals(profile.displayName, status.extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString())
+        assertEquals(Notification.VISIBILITY_PRIVATE, status.visibility)
+        val public = checkNotNull(status.publicVersion) { "no public version" }
+        val publicText = listOf(Notification.EXTRA_TITLE, Notification.EXTRA_TEXT, Notification.EXTRA_SUB_TEXT)
+            .mapNotNull { public.extras.getCharSequence(it)?.toString() }
+        assertTrue("the public version names no profile: $publicText", publicText.none { profile.displayName in it })
         assertReachesDestination("socks5")
 
         app.disconnectAndSettle()
@@ -91,6 +100,18 @@ class VpnEndToEndTest {
         assertReachesDestination("http-connect")
         app.disconnectAndSettle()
         assertReleased()
+    }
+
+    /** Threat model S3: other apps find no port to talk to (the adapters run in-process, ADR-0002). */
+    @Test
+    fun nothingListensWhileConnected() {
+        app.connect(socks().id)
+        assertReachesDestination("listeners")
+
+        val listening = Descriptors.listening(Process.myUid())
+
+        assertEquals("sockets of ProxyFlow that accept connections or datagrams", emptyList<String>(), listening)
+        app.disconnectAndSettle()
     }
 
     @Test

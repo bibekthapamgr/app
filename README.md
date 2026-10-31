@@ -13,26 +13,28 @@ What it promises, and where that ends (the single source for these claims is `do
 - **M1 — requirements, feasibility, UI/UX:** delivered (`docs/m1/M1-acceptance-report.md`). The owner chose minSdk 29 (D3).
 - **M2 — Android foundation:** delivered and merged (`docs/m2/M2-acceptance-report.md`).
 - **M3 — proxy profiles and secure storage:** delivered and merged (`docs/m3/M3-acceptance-report.md`). Profiles are stored in Room; usernames and passwords are encrypted under an Android Keystore key made for each set of credentials (ADR-0006, ADR-0009).
-- **M4 — HTTP CONNECT, SOCKS5 and the engine:** in review (`docs/m4/M4-acceptance-report.md`). The Go packet engine (`engine/`) carries TCP through SOCKS5 and HTTP CONNECT proxies, optionally over TLS checked by Android's trust manager, and runs on Android emulators through `:core:engine`. The app does not use it yet: the VPN service arrives in M5, so "Test connection" still says that testing isn't available yet.
+- **M4 — HTTP CONNECT, SOCKS5 and the engine:** delivered and merged (`docs/m4/M4-acceptance-report.md`). The Go packet engine (`engine/`) carries TCP through SOCKS5 and HTTP CONNECT proxies, optionally over TLS checked by Android's trust manager.
+- **M5 — Android VpnService integration:** in review (`docs/m5/M5-acceptance-report.md`, `docs/m5/vpn-service-integration.md`, ADR-0010). Connect asks for Android's VPN consent behind an explainer, checks the proxy before anything changes on the phone, then runs the engine on the VPN interface; apps' TCP goes through the proxy, and once connected a failure holds traffic instead of sending it around the proxy. Proven on emulators against real proxies with packet captures. "Test connection" in the profile form still says testing isn't available (decision D6).
 
 ## Repository
 
 | Path | Contents |
 |---|---|
-| `app/` | Application shell: `MainActivity`, navigation graph, bottom bar, manual DI (`AppContainer`), app-level tests and reference screenshots (`app/screenshots/`) |
+| `app/` | Application shell: `MainActivity`, navigation graph, bottom bar, manual DI (`AppContainer`), app-level tests and reference screenshots (`app/screenshots/`); `src/androidTest/` holds the VPN's end-to-end tests (real service, engine and proxies on emulators) |
 | `core/model/` | Pure Kotlin: proxy profile model and form validation (no Android dependency) |
 | `core/designsystem/` | Theme generated from the design tokens, icons, and the reusable components (buttons, cards, fields, dialogs, loading, empty and error states, banners, status pill) |
-| `core/data/` | Repositories: profiles in Room (`db/`) with credentials sealed by per-profile Android Keystore keys (`crypto/`), settings and the active profile in DataStore, in-memory logs, a connection controller and tester that cannot connect yet. `src/androidTest/` runs on emulators (Android Keystore) |
+| `core/data/` | Repositories: profiles in Room (`db/`) with credentials sealed by per-profile Android Keystore keys (`crypto/`), settings and the active profile in DataStore, in-memory logs, the `ConnectionController` interface the screens use, and a connection tester that cannot test yet. `src/androidTest/` runs on emulators (Android Keystore) |
 | `core/data/schemas/` | Exported Room schema for every database version (checked in CI, used by the migration tests) |
 | `core/engine/` | The packet engine for Android: unpacks `engine/build/pfengine.aar` and wraps it (`ProxyEngine`, `EngineSecret`, `AndroidEnginePlatform` with the platform trust manager). `src/androidTest/` runs the real engine on emulators against mock proxies |
+| `core/vpn/` | The VPN layer (ADR-0010): `ProxyFlowVpnService`, `VpnSession` (the connection state machine), `VpnRuntime` and the app's `ConnectionController`, the connection notifications. JVM tests drive the session with fakes |
 | `engine/` | The packet engine in Go (gVisor netstack, SOCKS5 / HTTP CONNECT / TLS adapters, fake-IP DNS, the gomobile API) and `build-aar.sh`; see `engine/README.md` |
 | `core/testing/` | Test fakes (in-memory profile store, software keys standing in for the Keystore on the JVM, a fake connection tester) and the main-dispatcher rule |
 | `feature/{home,profiles,settings,logs,about}/` | One module per area: stateless screens, ViewModels, navigation entry points, tests |
 | `config/lint/` | Android Lint configuration |
 | `gradle/libs.versions.toml` | Every dependency and plugin version |
-| `scripts/` | `check-secrets.sh` (keys, signing files and credentials in the files or anywhere in the history; rules in `check_secrets.py`), `check_release_manifest.py` (permissions, backups and exported components of the release build), `ci_error_digest.py` and `ci_build_facts.py` (CI summaries) |
-| `docs/m1/` … `docs/m4/` | Milestone deliverables and acceptance reports |
-| `docs/adr/` | Architecture decision records 0001–0009 |
+| `scripts/` | `check-secrets.sh` (keys, signing files and credentials in the files or anywhere in the history; rules in `check_secrets.py`), `check_release_manifest.py` (permissions, backups, the VPN service and exported components of the release build), `ci_error_digest.py` and `ci_build_facts.py` (CI summaries), and the M5 end-to-end setup: `m5_device_env.sh` (proxies and destination on the CI runner), `m5_e2e_servers.py`, `m5_device_e2e.sh` (inside the emulator job), `m5_evidence.py` (logs and packet captures checked) |
+| `docs/m1/` … `docs/m5/` | Milestone deliverables and acceptance reports |
+| `docs/adr/` | Architecture decision records 0001–0010 |
 | `design/` | Screen boards, design tokens, contrast checker, Compose colour generator |
 | `spike/` | M1 feasibility spike (Go engine prototype, lab harness, evidence runs) |
 | `.github/workflows/` | `android.yml` (app checks and builds), `secrets.yml` (secrets scan on every push and pull request), `spike.yml` (M1 spike) |
@@ -59,6 +61,7 @@ engine/build-aar.sh                     # engine/build/pfengine.aar, needed by :
 ./gradlew testDebugUnitTest :core:model:test  # all JVM, ViewModel and Robolectric UI tests
 ./gradlew :core:data:connectedDebugAndroidTest  # Keystore and storage tests on a connected phone or emulator
 ./gradlew :core:engine:connectedDebugAndroidTest  # the engine on a phone or emulator (needs the AAR)
+./gradlew :app:connectedDebugAndroidTest   # the VPN end to end; needs the proxies (docs/m5/vpn-service-integration.md §5)
 ./gradlew spotlessCheck                 # Kotlin formatting (ktlint); spotlessApply fixes it
 ./gradlew :app:lintDebug                # Android Lint for the app and every module it uses
 ./gradlew :app:assembleRelease          # R8-shrunk release APK (unsigned without signing config)
@@ -70,7 +73,7 @@ scripts/check-secrets.sh                # files you would commit; --history scan
 
 `scripts/check-secrets.sh` also works as a pre-commit hook: `ln -s ../../scripts/check-secrets.sh .git/hooks/pre-commit`.
 
-The same checks run in CI (`.github/workflows/android.yml`). Most tests run on the JVM with Robolectric. The Android Keystore exists only on Android, so the credential-storage tests in `core/data/src/androidTest` run on emulators in CI; routing tests on real devices start in M5.
+The same checks run in CI (`.github/workflows/android.yml`). Most tests run on the JVM with Robolectric. What needs Android itself runs on emulators in CI (API 29, 34, 35 and 36): the Android Keystore (`core/data`), the engine (`core/engine`), and since M5 the VPN end to end (`app/src/androidTest`), against real proxies on the runner, with the emulator's uplink captured and checked afterwards (`scripts/m5_evidence.py`).
 
 After changing a Room entity, build `core/data` (any of the commands above) and commit the regenerated file in `core/data/schemas/` together with a migration and its test (ADR-0009).
 
