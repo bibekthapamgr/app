@@ -101,9 +101,16 @@ func connectRequest(hostPort string, creds *Credentials, signIn bool) ([]byte, e
 // accept them even unasked) are skipped, except 101, which makes no sense for
 // CONNECT and is reported. All of them share one size and line budget, so a
 // hostile proxy cannot make us buffer more than 16 KiB or read more than 100
-// header lines in total.
+// lines in total, besides the first status line and the blank lines that end
+// each header block (one response may thus carry exactly 100 headers).
 func readConnectResponse(br *bufio.Reader) (connectResponse, error) {
 	total, lines := 0, 0
+	countLine := func() error {
+		if lines++; lines > maxConnectHeaderLines {
+			return newErr(CodeProtocol, "too many proxy response headers", nil)
+		}
+		return nil
+	}
 	readLine := func() (string, error) {
 		var line []byte
 		for {
@@ -121,11 +128,16 @@ func readConnectResponse(br *bufio.Reader) (connectResponse, error) {
 			}
 		}
 	}
-	for {
+	for first := true; ; first = false {
 		var resp connectResponse
 		status, err := readLine()
 		if err != nil {
 			return resp, err
+		}
+		if !first {
+			if err := countLine(); err != nil { // the status line after an interim response
+				return resp, err
+			}
 		}
 		// "HTTP/1.1 200 Connection established"
 		if !strings.HasPrefix(status, "HTTP/1.") || len(status) < 12 || status[8] != ' ' {
@@ -137,15 +149,15 @@ func readConnectResponse(br *bufio.Reader) (connectResponse, error) {
 		}
 		resp.Status = code
 		for {
-			if lines++; lines > maxConnectHeaderLines {
-				return resp, newErr(CodeProtocol, "too many proxy response headers", nil)
-			}
 			h, err := readLine()
 			if err != nil {
 				return resp, err
 			}
 			if h == "" {
 				break
+			}
+			if err := countLine(); err != nil {
+				return resp, err
 			}
 			name, value, ok := strings.Cut(h, ":")
 			if !ok {

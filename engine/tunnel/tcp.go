@@ -51,12 +51,15 @@ func (e *Engine) handleTCP(r *tcp.ForwarderRequest) {
 	f := &flow{kind: FlowTCP, port: id.LocalPort, dstKind: "ip"}
 	if e.cfg.FakeDNS.Pool.Contains(dst) {
 		f.dstKind = "hostname"
-		name, ok := e.cfg.FakeDNS.Pool.Reverse(dst)
+		// Pinned for the whole flow: the address cannot go to another name
+		// while the app may still use it (fakedns.Pool).
+		name, release, ok := e.cfg.FakeDNS.Pool.Acquire(dst)
 		if !ok {
 			completed = true
 			e.refuse(r, f, adapters.CodeStaleMapping, "")
 			return
 		}
+		defer release()
 		target.Host = name
 	}
 	if e.cfg.LogDestinations {

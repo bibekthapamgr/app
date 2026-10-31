@@ -19,18 +19,45 @@ object SecretText {
      * @throws IllegalArgumentException for broken text (half of a surrogate pair).
      */
     fun utf8(chars: CharArray): ByteArray {
-        val out = ByteArray(utf8Length(chars))
-        val encoder = Charsets.UTF_8.newEncoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT)
-        val dst = ByteBuffer.wrap(out)
-        var result = encoder.encode(CharBuffer.wrap(chars), dst, true)
-        if (result.isUnderflow) result = encoder.flush(dst)
-        if (!result.isUnderflow || dst.hasRemaining()) {
-            out.fill(0)
-            throw IllegalArgumentException("not valid text")
+        val out = ByteArray(strictUtf8Length(chars))
+        var done = false
+        try {
+            val encoder = Charsets.UTF_8.newEncoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+            val dst = ByteBuffer.wrap(out)
+            var result = encoder.encode(CharBuffer.wrap(chars), dst, true)
+            if (result.isUnderflow) result = encoder.flush(dst)
+            require(result.isUnderflow && !dst.hasRemaining()) { "not valid text" }
+            done = true
+            return out
+        } finally {
+            if (!done) out.fill(0)
         }
-        return out
+    }
+
+    /**
+     * The UTF-8 length of [text], counted without encoding it, so without
+     * making a copy of a secret. An unpaired surrogate counts as the three
+     * bytes of U+FFFD; validate the text first where that matters.
+     */
+    fun utf8Length(text: CharSequence): Int {
+        var n = 0
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            n += when {
+                c.code < 0x80 -> 1
+                c.code < 0x800 -> 2
+                Character.isHighSurrogate(c) && i + 1 < text.length && Character.isLowSurrogate(text[i + 1]) -> {
+                    i++
+                    4
+                }
+                else -> 3
+            }
+            i++
+        }
+        return n
     }
 
     /**
@@ -56,7 +83,7 @@ object SecretText {
     }
 
     /** The UTF-8 length of [chars]; rejects unpaired surrogates. */
-    private fun utf8Length(chars: CharArray): Int {
+    private fun strictUtf8Length(chars: CharArray): Int {
         var n = 0
         var i = 0
         while (i < chars.size) {

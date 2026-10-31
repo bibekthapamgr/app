@@ -167,6 +167,105 @@ func TestPoolFreedAddressesWaitForAFullCycle(t *testing.T) {
 	}
 }
 
+// peek reports the name mapped to ip without counting as use (tests).
+func peek(p *Pool, ip netip.Addr) (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if e := p.find(ip); e != nil {
+		return e.name, true
+	}
+	return "", false
+}
+
+// Freed addresses are handed out oldest first, after every address never
+// used — also an address whose mapping stayed in use while the others
+// cycled: when it is finally freed, it waits behind the rest.
+func TestPoolFreedAddressesQueueOldestFirst(t *testing.T) {
+	c := &clock{t: time.Unix(1_000_000, 0)}
+	start := netip.MustParseAddr("10.0.0.2")
+	// 13 usable addresses (.2-.14), at most 4 mappings, reuse after 1 min.
+	p := mustPool(t, "10.0.0.0/28", 2, 4, withClock(c.now), withStart(start), WithReuseAfter(time.Minute))
+	keep := mustLookup(t, p, "keep.test") // .2
+	mapped := map[string]netip.Addr{"keep.test": keep}
+	var freed []netip.Addr // in the order their mappings were dropped
+	noteFreed := func() {
+		for name, a := range mapped {
+			if got, ok := peek(p, a); !ok || got != name {
+				freed = append(freed, a)
+				delete(mapped, name)
+			}
+		}
+	}
+	for i := 0; i < 12; i++ {
+		c.advance(2 * time.Minute)
+		if i < 9 {
+			mustLookup(t, p, "keep.test") // in use while the others cycle
+		}
+		n := fmt.Sprintf("n%d.test", i)
+		mapped[n] = mustLookup(t, p, n)
+		noteFreed()
+	}
+	at := -1
+	for i, a := range freed {
+		if a == keep {
+			at = i
+		}
+	}
+	if at < 1 {
+		t.Fatalf("keep.test should have been dropped after others (freed %v)", freed)
+	}
+	// Every address has now been handed out once. keep's comes back only
+	// after the addresses freed before it, oldest first.
+	for i := 0; i < at; i++ {
+		c.advance(2 * time.Minute)
+		if a := mustLookup(t, p, fmt.Sprintf("later%d.test", i)); a != freed[i] {
+			t.Fatalf("allocation %d after the cycle got %s, want the address freed longest ago (%s)", i, a, freed[i])
+		}
+	}
+	c.advance(2 * time.Minute)
+	if a := mustLookup(t, p, "last.test"); a != keep {
+		t.Fatalf("after the %d addresses queued ahead of it, keep's address is next; got %s", at, a)
+	}
+}
+
+// A connection pins its mapping: the address is not reused while the
+// connection is open, however long, and the delay restarts when it closes.
+func TestPoolNeverReassignsAnAddressWithAConnectionOpen(t *testing.T) {
+	c := &clock{t: time.Unix(1_000_000, 0)}
+	p := mustPool(t, "10.0.0.0/28", 2, 2, withClock(c.now), WithReuseAfter(time.Minute))
+	a := mustLookup(t, p, "a.test")
+	mustLookup(t, p, "b.test")
+	name, release, ok := p.Acquire(a)
+	if !ok || name != "a.test" {
+		t.Fatalf("Acquire(%s) = %q %v", a, name, ok)
+	}
+	if _, _, ok := p.Acquire(netip.MustParseAddr("10.0.0.1")); ok {
+		t.Fatal("an unmapped address cannot be acquired")
+	}
+	c.advance(time.Hour) // a long-lived connection; no lookups for a.test meanwhile
+	if got := mustLookup(t, p, "c.test"); got == a {
+		t.Fatal("the address of an open connection went to another name")
+	}
+	if n, ok := p.Reverse(a); !ok || n != "a.test" {
+		t.Fatalf("a.test must still be mapped, got %q %v", n, ok)
+	}
+	c.advance(time.Hour)
+	if got := mustLookup(t, p, "d.test"); got == a {
+		t.Fatal("still open: the address must stay with a.test")
+	}
+	release()
+	release() // a second call does nothing
+	c.advance(30 * time.Second)
+	if _, ok := p.Lookup("e.test"); ok {
+		t.Fatal("a.test was in use 30 s ago and d.test answered 30 s ago: nothing is free yet")
+	}
+	c.advance(31 * time.Second)
+	mustLookup(t, p, "e.test") // takes d.test's mapping, the least recently used
+	if n, ok := p.Reverse(a); !ok || n != "a.test" {
+		t.Fatalf("a.test was released after d.test was answered, so it stays: %q %v", n, ok)
+	}
+}
+
 func TestResponderAnswersServfailWhenExhausted(t *testing.T) {
 	c := &clock{t: time.Unix(1_000_000, 0)}
 	r := &Responder{Pool: mustPool(t, "10.0.0.0/28", 2, 2, withClock(c.now)), TTL: 5}

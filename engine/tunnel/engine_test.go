@@ -345,6 +345,64 @@ func TestProxyFailureRefusesConnection(t *testing.T) {
 	waitFor(t, func() bool { return e.events.count(EvConnFail) >= 1 }, "a conn_fail event")
 }
 
+// queryA asks the engine's DNS for name and returns the response code and,
+// when there is one, the address.
+func queryA(t *testing.T, cs *stack.Stack, name string) (dnsmessage.RCode, netip.Addr) {
+	t.Helper()
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 43, RecursionDesired: true})
+	_ = b.StartQuestions()
+	_ = b.Question(dnsmessage.Question{Name: dnsmessage.MustNewName(name + "."), Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET})
+	q, _ := b.Finish()
+	c, err := gonet.DialUDP(cs, nil, &tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFrom4([4]byte{198, 18, 0, 2}), Port: 53}, ipv4.ProtocolNumber)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+	_, _ = c.Write(q)
+	buf := make([]byte, 512)
+	n, err := c.Read(buf)
+	if err != nil {
+		t.Fatalf("no DNS answer for %s: %v", name, err)
+	}
+	var m dnsmessage.Message
+	if err := m.Unpack(buf[:n]); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Answers) == 1 {
+		return m.Header.RCode, netip.AddrFrom4(m.Answers[0].Body.(*dnsmessage.AResource).A)
+	}
+	return m.Header.RCode, netip.Addr{}
+}
+
+// An open connection pins its fake address: even with no reuse delay at all,
+// the address is not given to another name until the connection has closed.
+func TestOpenConnectionPinsItsFakeAddress(t *testing.T) {
+	pool, err := fakedns.NewPool(netip.MustParsePrefix("198.18.0.0/15"), 256, 1, fakedns.WithReuseAfter(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _ := startEngine(t, nil, func(c *Config) { c.FakeDNS = &fakedns.Responder{Pool: pool, TTL: 5} })
+	ip := resolve(t, e.cs, "ok.test")
+	c := dialOK(t, e, ip, 80)
+	roundTrip(t, c, "pinned")
+	if rcode, _ := queryA(t, e.cs, "other.test"); rcode != dnsmessage.RCodeServerFailure {
+		t.Fatalf("with the only mapping in use by a connection, a new name must get SERVFAIL, got %v", rcode)
+	}
+	if name, ok := pool.Reverse(ip); !ok || name != "ok.test" {
+		t.Fatalf("the open connection's mapping must survive, got %q %v", name, ok)
+	}
+	c.Close()
+	waitFor(t, func() bool { return len(e.Flows()) == 0 }, "the flow to end")
+	rcode, other := queryA(t, e.cs, "other.test")
+	if rcode != dnsmessage.RCodeSuccess || other == ip {
+		t.Fatalf("after the connection closed the mapping may go: rcode %v, address %s (was %s)", rcode, other, ip)
+	}
+	if e.Stats().DNS["exhausted"] != 1 {
+		t.Fatalf("the refused name must be counted: %v", e.Stats().DNS)
+	}
+}
+
 func TestIPLiteralAndStaleMapping(t *testing.T) {
 	e, d := startEngine(t, nil)
 	c := dialOK(t, e, netip.MustParseAddr("203.0.113.5"), 443)
@@ -638,7 +696,7 @@ func TestSlowEventReceiverNeverStallsTraffic(t *testing.T) {
 	}
 	t0 := time.Now()
 	e.Stop()
-	if el := time.Since(t0); el > eventDrainTimeout+time.Second {
+	if el := time.Since(t0); el > eventDrainTimeout+eventAbandonGrace+time.Second {
 		t.Fatalf("Stop waited %v for a stuck event receiver", el)
 	}
 	atStop := delivered.Load()
@@ -646,6 +704,43 @@ func TestSlowEventReceiverNeverStallsTraffic(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if got := delivered.Load(); got != atStop {
 		t.Fatalf("%d events were delivered after Stop returned", got-atStop)
+	}
+}
+
+// A receiver that is slow but not stuck: Stop drops what is still queued after
+// the drain timeout, lets the call in progress finish, and returns with no
+// call running, so none can begin or still be running afterwards.
+func TestSlowEventReceiverGetsNothingAfterStop(t *testing.T) {
+	proxytest.CheckLeaks(t)
+	var inCall, after atomic.Int64
+	var stopped atomic.Bool
+	e, _ := startEngine(t, nil, func(c *Config) {
+		c.EventQueue = 1024
+		c.Events = func(Event) {
+			if stopped.Load() {
+				after.Add(1)
+			}
+			inCall.Add(1)
+			time.Sleep(150 * time.Millisecond)
+			inCall.Add(-1)
+		}
+	})
+	ip := resolve(t, e.cs, "ok.test")
+	for i := 0; i < 30; i++ { // far more events than 2 s of 150 ms calls can deliver
+		c := dialOK(t, e, ip, uint16(80+i))
+		c.Close()
+	}
+	e.Stop()
+	stopped.Store(true)
+	if n := inCall.Load(); n != 0 {
+		t.Fatalf("%d receiver calls still running after Stop returned", n)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := after.Load(); n != 0 {
+		t.Fatalf("%d events reached the receiver after Stop returned", n)
+	}
+	if e.Stats().EventsDropped == 0 {
+		t.Fatal("the events still queued at the drain timeout must be dropped and counted")
 	}
 }
 

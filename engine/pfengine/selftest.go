@@ -1,6 +1,7 @@
 package pfengine
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -8,7 +9,10 @@ import (
 	"net"
 	"net/netip"
 	"runtime"
+	"runtime/pprof"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -43,18 +47,25 @@ type selfTestResult struct {
 	EngineBytesDown int64  `json:"engine_bytes_down"`
 	StopMs          int64  `json:"stop_ms"`
 	// Goroutines in the whole process before and after (informational: the
-	// Go runtime and gomobile run some of their own, e.g. finalizers that
-	// release Java references).
+	// Go runtime, gomobile and a VPN engine running at the same time start
+	// and end goroutines of their own).
 	GoroutinesBefore int `json:"goroutines_before"`
 	GoroutinesAfter  int `json:"goroutines_after"`
-	// EngineGoroutinesLeft counts goroutines running engine or netstack code
-	// after everything was released, beyond those alive before the test (an
-	// engine may be running in the same process): it must be 0.
-	EngineGoroutinesLeft int `json:"engine_goroutines_left"`
-	// GoroutinesNew names, by the function that started each, goroutines
-	// alive after the test that were not before (function names only).
-	GoroutinesNew []string `json:"goroutines_new,omitempty"`
+	// GoroutinesLeft counts the goroutines this self-test started, directly
+	// or through the engine, the netstack or the dialer, that are still alive
+	// after it released everything (waiting up to 2 s): it must be 0. They
+	// are told apart from every other goroutine by a profiler label that
+	// goroutines inherit from the one that starts them.
+	GoroutinesLeft int `json:"goroutines_left"`
+	// GoroutinesLeftIn names the function each of those is in (its innermost
+	// frame that is not just waiting); function names only.
+	GoroutinesLeftIn []string `json:"goroutines_left_in,omitempty"`
 }
+
+// selfTestLabel marks, with a run number, every goroutine a self-test starts.
+const selfTestLabel = "pfengine-selftest"
+
+var selfTestRuns atomic.Int64
 
 // SelfTest runs the whole packet engine without a VPN. The engine reads one
 // end of a socketpair instead of a TUN; an in-process client network stack on
@@ -67,10 +78,22 @@ type selfTestResult struct {
 // zeroed before SelfTest returns.
 func SelfTest(configJSON string, secret []byte, target string, payload []byte, expect int64, timeoutMs int64, p Platform) string {
 	defer wipe(secret)
-	originsBefore, engineBefore := goroutineOrigins()
-	res := selfTestResult{GoroutinesBefore: runtime.NumGoroutine()}
-	// Everything SelfTest creates is released, newest first, before the
-	// report counts goroutines.
+	before := runtime.NumGoroutine()
+	run := strconv.FormatInt(selfTestRuns.Add(1), 10)
+	var res selfTestResult
+	pprof.Do(context.Background(), pprof.Labels(selfTestLabel, run), func(context.Context) {
+		res = selfTest(configJSON, secret, target, payload, expect, timeoutMs, p)
+	})
+	res.GoroutinesBefore = before
+	res.GoroutinesLeft, res.GoroutinesLeftIn = settledLabelledGoroutines(run)
+	res.GoroutinesAfter = runtime.NumGoroutine()
+	return toJSON(res)
+}
+
+func selfTest(configJSON string, secret []byte, target string, payload []byte, expect int64, timeoutMs int64, p Platform) selfTestResult {
+	var res selfTestResult
+	// Everything the self-test creates is released, newest first, before
+	// SelfTest counts the goroutines left.
 	var cleanups []func()
 	release := func() {
 		for i := len(cleanups) - 1; i >= 0; i-- {
@@ -79,13 +102,9 @@ func SelfTest(configJSON string, secret []byte, target string, payload []byte, e
 		cleanups = nil
 	}
 	defer release()
-	report := func() string {
+	report := func() selfTestResult {
 		release()
-		res.EngineGoroutinesLeft = settledEngineGoroutines(engineBefore)
-		res.GoroutinesAfter = runtime.NumGoroutine()
-		originsAfter, _ := goroutineOrigins()
-		res.GoroutinesNew = newOrigins(originsBefore, originsAfter)
-		return toJSON(res)
+		return res
 	}
 	if p == nil {
 		res.probeResult = failed(errors.New("no platform callbacks"))
@@ -328,79 +347,72 @@ func readReply(c net.Conn, expect int) []byte {
 	return buf[:got]
 }
 
-// settledGoroutines waits up to 2 s for the goroutine count to fall back to
-// before, and returns the count it settled at.
-// settledEngineGoroutines waits up to 2 s for the goroutines running engine
-// or netstack code to fall back to the count before the test, and returns
-// how many more are left.
-func settledEngineGoroutines(before int) int {
-	_, n := goroutineOrigins()
-	for i := 0; i < 100 && n > before; i++ {
+// settledLabelledGoroutines waits up to 2 s for the goroutines carrying a
+// self-test run's label to end, and returns how many did not and where each
+// of those is.
+func settledLabelledGoroutines(run string) (int, []string) {
+	n, where := labelledGoroutines(run)
+	for i := 0; i < 100 && n > 0; i++ {
 		time.Sleep(20 * time.Millisecond)
-		_, n = goroutineOrigins()
+		n, where = labelledGoroutines(run)
 	}
-	return max(n-before, 0)
+	return n, where
 }
 
-// enginePackages are the code a leftover goroutine of the engine would run.
-var enginePackages = []string{
-	"gvisor.dev/gvisor/",
-	"github.com/bibekthapamgr/app/engine/adapters.",
-	"github.com/bibekthapamgr/app/engine/fakedns.",
-	"github.com/bibekthapamgr/app/engine/pfengine.",
-	"github.com/bibekthapamgr/app/engine/tunnel.",
+// waitFrame reports frames that only say a goroutine is waiting (the Go
+// runtime, system calls, gVisor's park helper), not which code it runs.
+func waitFrame(fn string) bool {
+	for _, p := range []string{"runtime.", "internal/poll.", "syscall.", "golang.org/x/sys/unix.", "gvisor.dev/gvisor/pkg/sync."} {
+		if strings.HasPrefix(fn, p) {
+			return true
+		}
+	}
+	return false
 }
 
-// goroutineOrigins lists, for every goroutine but the caller, the function
-// that started it (the "created by" line of a stack dump), and counts those
-// running engine or netstack code. Only function names are read.
-func goroutineOrigins() (origins []string, engine int) {
-	buf := make([]byte, 64<<10)
-	for {
-		n := runtime.Stack(buf, true)
-		if n < len(buf) {
-			buf = buf[:n]
-			break
-		}
-		buf = make([]byte, 2*len(buf))
+// labelledGoroutines reads the goroutine profile and returns how many
+// goroutines carry this run's label and, for each, the innermost function
+// that is not just waiting. Only function names are read.
+func labelledGoroutines(run string) (int, []string) {
+	var b bytes.Buffer
+	if err := pprof.Lookup("goroutine").WriteTo(&b, 1); err != nil {
+		return 0, nil
 	}
-	for i, g := range strings.Split(string(buf), "\n\n") {
-		if i == 0 {
-			continue // runtime.Stack puts the caller first
+	text := b.String()
+	if i := strings.IndexByte(text, '\n'); i >= 0 && strings.HasPrefix(text, "goroutine profile:") {
+		text = text[i+1:]
+	}
+	want := fmt.Sprintf("%q:%q", selfTestLabel, run)
+	n := 0
+	var where []string
+	// Records: "<count> @ <pcs>", then "# labels: {...}" when there are any,
+	// then one "#\t<pc>\t<function>+<offset>\t<file>:<line>" line per frame.
+	for _, rec := range strings.Split(text, "\n\n") {
+		lines := strings.Split(rec, "\n")
+		if len(lines) < 2 || !strings.HasPrefix(lines[1], "# labels: ") || !strings.Contains(lines[1], want) {
+			continue
 		}
-		origin := "unknown"
-		if j := strings.LastIndex(g, "\ncreated by "); j >= 0 {
-			origin = strings.TrimPrefix(g[j+1:], "created by ")
-			if k := strings.IndexAny(origin, " \n"); k >= 0 {
-				origin = origin[:k]
-			}
+		fields := strings.Fields(lines[0])
+		if len(fields) == 0 {
+			continue
 		}
-		origins = append(origins, origin)
-		for _, p := range enginePackages {
-			if strings.Contains(g, p) {
-				engine++
+		count, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		fn := "unknown"
+		for _, l := range lines[2:] {
+			if f := strings.Fields(l); len(f) >= 3 && !waitFrame(f[2]) {
+				fn, _, _ = strings.Cut(f[2], "+")
 				break
 			}
 		}
-	}
-	return origins, engine
-}
-
-// newOrigins returns the origins in after that are not matched in before.
-func newOrigins(before, after []string) []string {
-	seen := map[string]int{}
-	for _, o := range before {
-		seen[o]++
-	}
-	var out []string
-	for _, o := range after {
-		if seen[o] > 0 {
-			seen[o]--
-			continue
+		n += count
+		for range count {
+			where = append(where, fn)
 		}
-		out = append(out, o)
 	}
-	return out
+	return n, where
 }
 
 func minTime(a, b time.Time) time.Time {

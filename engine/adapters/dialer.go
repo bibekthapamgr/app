@@ -418,13 +418,16 @@ func (d *Dialer) lead(ctx context.Context, call *addrCall, gen uint64) (addrs []
 }
 
 // ForgetProxyAddrs drops the cached proxy addresses, for a change of the
-// underlying network: the next dial looks the proxy host up again.
+// underlying network: the next dial looks the proxy host up again, also if a
+// lookup started on the old network is still running (the dials already
+// waiting for that one get its answer, which is not cached).
 func (d *Dialer) ForgetProxyAddrs() {
 	c := &d.addrs
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.gen++
 	c.addrs, c.err, c.expires = nil, nil, time.Time{}
+	c.call = nil
 }
 
 // preferAddr moves a reachable address to the front of the cached list, so

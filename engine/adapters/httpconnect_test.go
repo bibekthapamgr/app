@@ -134,6 +134,14 @@ func TestHTTPConnectOversizedHeaders(t *testing.T) {
 	if CodeOf(err) != CodeProtocol {
 		t.Fatalf("more than 100 header lines must be rejected, got %v", err)
 	}
+	exactly := "HTTP/1.1 200 OK\r\n" + strings.Repeat("A: b\r\n", 100) + "\r\n"
+	if resp, err := readConnectResponse(bufio.NewReader(strings.NewReader(exactly))); err != nil || resp.Status != 200 {
+		t.Fatalf("exactly 100 header lines are allowed: %+v %v", resp, err)
+	}
+	oneMore := "HTTP/1.1 200 OK\r\n" + strings.Repeat("A: b\r\n", 101) + "\r\n"
+	if _, err := readConnectResponse(bufio.NewReader(strings.NewReader(oneMore))); CodeOf(err) != CodeProtocol {
+		t.Fatalf("101 header lines must be rejected, got %v", err)
+	}
 }
 
 // Interim 1xx responses before the 200 are skipped; the tunnel starts after
@@ -165,6 +173,10 @@ func TestHTTPConnectInterimResponsesShareTheBudget(t *testing.T) {
 	big := strings.Repeat("HTTP/1.1 103 Early Hints\r\nLink: "+strings.Repeat("a", 1000)+"\r\n\r\n", 20) + "HTTP/1.1 200 OK\r\n\r\n"
 	if _, err := readConnectResponse(bufio.NewReader(strings.NewReader(big))); CodeOf(err) != CodeProtocol {
 		t.Fatalf("20 KiB of interim responses must exceed the size budget, got %v", err)
+	}
+	limit := strings.Repeat("HTTP/1.1 100 Continue\r\n\r\n", 100) + "HTTP/1.1 200 OK\r\n\r\n"
+	if resp, err := readConnectResponse(bufio.NewReader(strings.NewReader(limit))); err != nil || resp.Status != 200 {
+		t.Fatalf("100 interim responses use exactly the budget: %+v %v", resp, err)
 	}
 	few := strings.Repeat("HTTP/1.1 100 Continue\r\n\r\n", 3) + "HTTP/1.1 200 OK\r\n\r\n"
 	if resp, err := readConnectResponse(bufio.NewReader(strings.NewReader(few))); err != nil || resp.Status != 200 {

@@ -225,13 +225,13 @@ class EngineOnDeviceTest {
             )
             assertTrue("UDP must be refused, not forwarded", result.udpRejected)
             assertEquals(1, result.tcpOpened)
-            // The engine's own goroutines must all be gone. The whole-process count is not
-            // compared: the Go runtime and gomobile run goroutines of their own (finalizers
-            // releasing Java references, for one) whenever the collector decides.
+            // Every goroutine the self-test started (engine, netstack, dialer) must be gone. The
+            // whole-process count is not compared: the Go runtime and gomobile run goroutines
+            // of their own (finalizers releasing Java references, for one) whenever they like.
             assertEquals(
-                "engine goroutines left; process ${result.goroutinesBefore} -> ${result.goroutinesAfter}, new: ${result.goroutinesNew}",
+                "goroutines left in ${result.goroutinesLeftIn}; process ${result.goroutinesBefore} -> ${result.goroutinesAfter}",
                 0,
-                result.engineGoroutinesLeft,
+                result.goroutinesLeft,
             )
             assertEquals("echo.test:7", proxy.records.last().target)
         }

@@ -32,7 +32,16 @@ class SecretTextTest {
             val bytes = SecretText.utf8(text.toCharArray())
             assertArrayEquals(text.toByteArray(Charsets.UTF_8), bytes)
             assertEquals(text, String(SecretText.chars(bytes, 0, bytes.size)))
+            assertEquals(bytes.size, SecretText.utf8Length(text))
         }
+    }
+
+    @Test
+    fun lengthIsCountedLikeTheEncoder() {
+        for (text in listOf("", "user", "pässwörd", "密码", "🔑 key 🗝")) {
+            assertEquals(text, text.toByteArray(Charsets.UTF_8).size, SecretText.utf8Length(text))
+        }
+        assertEquals("an unpaired surrogate counts as U+FFFD", 3, SecretText.utf8Length("\uD83D"))
     }
 
     @Test

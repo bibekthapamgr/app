@@ -14,14 +14,11 @@ object CredentialCodec {
     private const val MAX_FIELD_BYTES = 0xFFFF
 
     fun encode(username: CharArray, password: CharArray): ByteArray {
-        val user = SecretText.utf8(username)
-        val pass = try {
-            SecretText.utf8(password)
-        } catch (e: IllegalArgumentException) {
-            user.fill(0)
-            throw e
-        }
+        var user: ByteArray? = null
+        var pass: ByteArray? = null
         try {
+            user = SecretText.utf8(username)
+            pass = SecretText.utf8(password)
             require(user.size <= MAX_FIELD_BYTES && pass.size <= MAX_FIELD_BYTES) { "credential too long" }
             val out = ByteArray(1 + 2 + user.size + 2 + pass.size)
             out[0] = VERSION
@@ -30,8 +27,8 @@ object CredentialCodec {
             check(at == out.size)
             return out
         } finally {
-            user.fill(0)
-            pass.fill(0)
+            user?.fill(0)
+            pass?.fill(0)
         }
     }
 
@@ -42,13 +39,12 @@ object CredentialCodec {
         val (passStart, passLength) = field(bytes, userStart + userLength)
         require(passStart + passLength == bytes.size) { "trailing bytes" }
         val user = SecretText.chars(bytes, userStart, userLength)
-        val pass = try {
-            SecretText.chars(bytes, passStart, passLength)
-        } catch (e: IllegalArgumentException) {
+        try {
+            return user to SecretText.chars(bytes, passStart, passLength)
+        } catch (e: Throwable) {
             user.fill('\u0000')
             throw e
         }
-        return user to pass
     }
 
     private fun putField(out: ByteArray, at: Int, value: ByteArray): Int {

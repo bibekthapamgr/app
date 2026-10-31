@@ -77,6 +77,7 @@ const (
 	DefaultTCPBufferBytes   = 64 << 10 // netstack send and receive buffer per flow; the maximum is twice this
 	DefaultEventQueue       = 1024
 	eventDrainTimeout       = 2 * time.Second
+	eventAbandonGrace       = 500 * time.Millisecond
 )
 
 // Config configures an Engine.
@@ -167,12 +168,12 @@ type Engine struct {
 	lastErr   *ErrorInfo
 	stopped   chan struct{} // closed when Stop has finished
 
-	events      chan Event
-	evMu        sync.RWMutex
-	evClosed    bool
-	evDone      chan struct{}
-	evDropped   atomic.Int64
-	evAbandoned atomic.Bool // Stop gave up waiting: deliver nothing more
+	events    chan Event
+	evMu      sync.RWMutex
+	evClosed  bool
+	evDone    chan struct{}
+	evDropped atomic.Int64
+	evState   atomic.Int32 // evIdle, evDelivering or evAbandoned (Stop gave up waiting)
 }
 
 const nicID tcpip.NICID = 1
@@ -452,13 +453,22 @@ func (e *Engine) startEvents() {
 	}()
 }
 
+// Event delivery states. A call to the receiver begins only by moving from
+// evIdle to evDelivering, so once Stop has set evAbandoned no call can begin.
+const (
+	evIdle int32 = iota
+	evDelivering
+	evAbandoned
+)
+
 // deliver calls the receiver, isolating the engine from its panics. Once Stop
-// has given up waiting for a stuck receiver, the rest of the queue is dropped.
+// has given up waiting for a slow receiver, the rest of the queue is dropped.
 func (e *Engine) deliver(ev Event) {
-	if e.evAbandoned.Load() {
+	if !e.evState.CompareAndSwap(evIdle, evDelivering) {
 		e.evDropped.Add(1)
 		return
 	}
+	defer e.evState.CompareAndSwap(evDelivering, evIdle) // stays evAbandoned if Stop gave up meanwhile
 	defer func() { _ = recover() }()
 	e.cfg.Events(ev)
 }
@@ -481,9 +491,10 @@ func (e *Engine) emit(ev Event) {
 }
 
 // closeEvents stops the event goroutine after it delivered what is queued,
-// waiting at most eventDrainTimeout for a slow receiver. After that, the call
-// the receiver is stuck in is the only one still running: the queued events
-// behind it are dropped, never delivered after Stop returned.
+// waiting at most eventDrainTimeout for a slow receiver. After that the queued
+// events are dropped and the call in progress gets eventAbandonGrace to
+// return. No call begins after closeEvents returns; only a receiver stuck in a
+// call for longer can still be inside it.
 func (e *Engine) closeEvents() {
 	e.evMu.Lock()
 	if e.evClosed || e.events == nil {
@@ -499,7 +510,13 @@ func (e *Engine) closeEvents() {
 	select {
 	case <-e.evDone:
 	case <-t.C:
-		e.evAbandoned.Store(true)
+		e.evState.Store(evAbandoned)
+		grace := time.NewTimer(eventAbandonGrace)
+		defer grace.Stop()
+		select {
+		case <-e.evDone:
+		case <-grace.C:
+		}
 	}
 }
 

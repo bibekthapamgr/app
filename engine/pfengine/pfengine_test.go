@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -310,8 +311,8 @@ func TestSelfTestThroughMockProxy(t *testing.T) {
 	if !strings.HasPrefix(r.DNSAnswer, "198.1") || !r.UDPRejected || r.TCPOpened != 1 || r.EngineBytesUp != int64(len(payload)) {
 		t.Fatalf("self-test details: %+v", r)
 	}
-	if r.EngineGoroutinesLeft != 0 || r.GoroutinesAfter > r.GoroutinesBefore {
-		t.Fatalf("goroutines %d → %d, %d engine ones left, new: %v", r.GoroutinesBefore, r.GoroutinesAfter, r.EngineGoroutinesLeft, r.GoroutinesNew)
+	if r.GoroutinesLeft != 0 {
+		t.Fatalf("%d of the self-test's goroutines left, in %v (process %d → %d)", r.GoroutinesLeft, r.GoroutinesLeftIn, r.GoroutinesBefore, r.GoroutinesAfter)
 	}
 	if recs := proxy.Records(); recs[len(recs)-1].Target != "web.test:443" || recs[len(recs)-1].AddrType != "domain" {
 		t.Fatalf("the proxy must receive the hostname: %+v", recs[len(recs)-1])
@@ -476,31 +477,61 @@ func TestResetFlowsForgetsProxyAddresses(t *testing.T) {
 	}
 }
 
-// The self-test's leak check sees a goroutine running engine code, names who
-// started it, and ignores goroutines that were there before.
-func TestGoroutineAccountingSeesEngineGoroutines(t *testing.T) {
-	originsBefore, before := goroutineOrigins()
-	stop, done := make(chan struct{}), make(chan struct{})
-	go func() {
-		<-stop
-		close(done)
-	}()
-	originsAfter, after := goroutineOrigins()
-	if after != before+1 {
-		t.Fatalf("engine goroutines %d → %d, want one more", before, after)
+// The self-test's leak check counts the goroutines carrying its run's label,
+// including ones they started, says where each is, and ignores every other
+// goroutine — a VPN engine's flows, another self-test's.
+func TestSelfTestCountsOnlyItsOwnGoroutines(t *testing.T) {
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	start := func(labels ...string) {
+		wg.Add(1)
+		run := func(context.Context) {
+			go func() {
+				defer wg.Done()
+				parkHere(stop)
+			}()
+		}
+		if len(labels) == 0 {
+			run(context.Background())
+			return
+		}
+		pprof.Do(context.Background(), pprof.Labels(labels...), run)
 	}
-	if n := newOrigins(originsBefore, originsAfter); len(n) != 1 || !strings.HasSuffix(n[0], "pfengine.TestGoroutineAccountingSeesEngineGoroutines") {
-		t.Fatalf("new goroutines %v", n)
+	start(selfTestLabel, "test-a")
+	start(selfTestLabel, "test-a")
+	start(selfTestLabel, "test-b") // another run
+	start()                        // unlabelled, like a VPN engine's flow
+	pprof.Do(context.Background(), pprof.Labels(selfTestLabel, "test-a"), func(context.Context) {
+		wg.Add(1)
+		go func() { // a grandchild inherits the label too
+			go func() {
+				defer wg.Done()
+				parkHere(stop)
+			}()
+		}()
+	})
+	time.Sleep(50 * time.Millisecond)
+	n, where := labelledGoroutines("test-a")
+	if n != 3 || len(where) != 3 {
+		t.Fatalf("run test-a has %d goroutines (%v), want 3", n, where)
 	}
-	if left := settledEngineGoroutines(before - 1); left != 2 {
-		t.Fatalf("with one engine goroutine too many before and one now, %d left, want 2", left)
+	for _, w := range where {
+		if !strings.HasSuffix(w, "pfengine.parkHere") {
+			t.Fatalf("where %v, want pfengine.parkHere", where)
+		}
+	}
+	if n, _ := labelledGoroutines("test"); n != 0 {
+		t.Fatalf("a run number must match exactly, got %d", n)
 	}
 	close(stop)
-	<-done
-	if left := settledEngineGoroutines(before); left != 0 {
-		t.Fatalf("%d engine goroutines left after it ended", left)
+	wg.Wait()
+	if n, where := settledLabelledGoroutines("test-a"); n != 0 {
+		t.Fatalf("%d left in %v after they ended", n, where)
 	}
 }
+
+//go:noinline
+func parkHere(stop chan struct{}) { <-stop }
 
 func TestSelfTestRejectsBadInput(t *testing.T) {
 	p := &fakePlatform{}

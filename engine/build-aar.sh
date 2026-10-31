@@ -9,9 +9,12 @@
 # building :core:engine. Also writes build/pfengine-facts.txt (sizes, hashes,
 # ELF alignment, the exact modules inside) for the acceptance evidence.
 #
-# PF_GOVULNCHECK=1 (CI) also runs govulncheck over everything the library
-# links, gomobile's bind runtime included, which is in go.mod only during this
-# build; a known vulnerability then fails the build. It needs the network.
+# PF_GOVULNCHECK=1 (CI) also runs govulncheck over the engine and gomobile's
+# runtime package (bind/seq, in go.mod only during this build); a known
+# vulnerability in code it finds reachable then fails the build. It needs the
+# network. It scans for the build host's platform, so the Android-only glue
+# gomobile compiles in (bind/java, internal/mobileinit and two support files
+# copied into the generated package) is not covered.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -76,8 +79,8 @@ fi
 
 vuln_fact="GOVULNCHECK not run (PF_GOVULNCHECK unset)"
 if [ "${PF_GOVULNCHECK:-0}" = 1 ]; then
-  step "govulncheck $GOVULNCHECK_VERSION: the engine, its dependencies and the bind runtime"
-  vuln_scope="./... golang.org/x/mobile/bind golang.org/x/mobile/bind/seq"
+  step "govulncheck $GOVULNCHECK_VERSION: the engine, its dependencies and gomobile's runtime package"
+  vuln_scope="./... golang.org/x/mobile/bind/seq"
   # shellcheck disable=SC2086 # the scope is a list of package patterns
   go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" $vuln_scope | tee "$work/govulncheck.txt"
   vuln_fact="GOVULNCHECK $GOVULNCHECK_VERSION over $vuln_scope: $(grep -m1 -E 'No vulnerabilities found|Your code is affected by' "$work/govulncheck.txt" || echo 'passed')"

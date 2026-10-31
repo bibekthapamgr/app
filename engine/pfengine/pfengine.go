@@ -72,9 +72,9 @@ const (
 	FakeIPPrefix = "198.18.0.0/15"
 	fakeReserved = 256 // 198.18.0.0-198.18.0.255: TUN, DNS and spare addresses
 	fakeDNSTTL   = 5   // seconds (ADR-0003)
-	// fakeMaxEntries bounds the fake-DNS mappings (a few MiB at most) and
-	// leaves most of the 130 815 addresses free, so a freed address waits for
-	// a full allocation cycle before another name gets it.
+	// fakeMaxEntries bounds the fake-DNS mappings (about 7 MiB when full of
+	// maximum-length names) and leaves most of the 130 815 addresses free, so
+	// freed addresses wait in a long queue before another name gets one.
 	fakeMaxEntries = 16384
 	// verdictTrusted is the only VerifyChain answer that means "trusted".
 	verdictTrusted = "OK"
@@ -82,8 +82,8 @@ const (
 
 // fakePool is shared by every engine this process runs (the VPN's and the
 // self-test's), so a mapping outlives a reconnect: an app that kept an
-// address from an earlier answer reaches the same name, never another one.
-// Mappings are dropped only after fakedns.DefaultReuseAfter without use.
+// address from an earlier answer still reaches the same name. A mapping is
+// dropped only after fakedns.DefaultReuseAfter without use (see fakedns.Pool).
 var fakePool = sync.OnceValues(func() (*fakedns.Pool, error) {
 	return fakedns.NewPool(netip.MustParsePrefix(FakeIPPrefix), fakeReserved, fakeMaxEntries)
 })

@@ -23,31 +23,38 @@ const DefaultReuseAfter = 10 * time.Minute
 
 // Pool maps hostnames to IPv4 addresses in a reserved prefix.
 //
-// An address is never handed to another name while an app may still hold it
-// from an earlier answer: a mapping is dropped only after ReuseAfter without
-// use (DNS answers and connections both count as use), and a freed address
-// goes to the back of the allocation cycle instead of straight to the next
-// name. When every mapping is in use, new names are refused until one ages
-// out (Lookup reports false). Allocation starts at a random address, so an
-// address an app cached before the process restarted rarely maps to any name.
+// An address goes to another name only after its mapping was unused for
+// ReuseAfter: no DNS answer for the name, no new connection to the address,
+// and no connection to it still open (Acquire pins a mapping until the
+// connection ends). Freed addresses then queue behind every address never
+// handed out and every address freed before them, so a freed address returns
+// only after a full cycle of the pool. When every mapping is in use, new
+// names are refused (Lookup reports false) until one ages out. Allocation
+// starts at a random address, so an address an app cached before the process
+// restarted rarely maps to any name.
 type Pool struct {
 	mu         sync.Mutex
 	prefix     netip.Prefix
 	first      uint32 // first allocatable address
 	last       uint32 // last allocatable address
-	next       uint32 // allocation cursor
+	next       uint32 // next address never handed out
+	virgin     int    // how many addresses were never handed out
+	free       []uint32
+	freeHead   int // free[freeHead:] is the queue of freed addresses, oldest first
 	max        int
 	reuseAfter time.Duration
 	now        func() time.Time
-	byIP       map[uint32]*list.Element
-	byName     map[string]*list.Element
-	lru        *list.List // front = most recently used
+	byIP       map[uint32]*entry
+	byName     map[string]*entry
+	idle       *list.List // mappings without open connections; front = most recently used
 }
 
 type entry struct {
 	ip       uint32
 	name     string
 	lastUsed time.Time
+	refs     int           // open connections (Acquire without Release)
+	el       *list.Element // in idle while refs == 0
 }
 
 // PoolOption adjusts a Pool.
@@ -64,11 +71,11 @@ func withClock(now func() time.Time) PoolOption { return func(p *Pool) { p.now =
 // withStart fixes the first address handed out (tests).
 func withStart(a netip.Addr) PoolOption { return func(p *Pool) { p.next = u32(a) } }
 
-// NewPool creates a pool over prefix (IPv4 only), skipping the first
+// NewPool creates a pool over prefix (IPv4, /8 or longer), skipping the first
 // `reserved` addresses (used for the TUN and DNS server addresses).
 // maxEntries bounds the number of mappings (and so the memory, a few hundred
 // bytes each); <= 0 means "the whole prefix". Keep it well below the prefix
-// size so that a freed address waits for a full allocation cycle.
+// size, so that freed addresses wait for a long cycle.
 func NewPool(prefix netip.Prefix, reserved int, maxEntries int, opts ...PoolOption) (*Pool, error) {
 	if !prefix.Addr().Is4() {
 		return nil, errors.New("fake-IP pool must be IPv4")
@@ -93,9 +100,9 @@ func NewPool(prefix netip.Prefix, reserved int, maxEntries int, opts ...PoolOpti
 		return nil, err
 	}
 	p := &Pool{
-		prefix: prefix, first: first, last: last, next: first + uint32(start.Int64()), max: maxEntries,
-		reuseAfter: DefaultReuseAfter, now: time.Now,
-		byIP: map[uint32]*list.Element{}, byName: map[string]*list.Element{}, lru: list.New(),
+		prefix: prefix, first: first, last: last, next: first + uint32(start.Int64()), virgin: capacity,
+		max: maxEntries, reuseAfter: DefaultReuseAfter, now: time.Now,
+		byIP: map[uint32]*entry{}, byName: map[string]*entry{}, idle: list.New(),
 	}
 	for _, o := range opts {
 		o(p)
@@ -110,71 +117,136 @@ func NewPool(prefix netip.Prefix, reserved int, maxEntries int, opts ...PoolOpti
 func (p *Pool) Contains(ip netip.Addr) bool { return p.prefix.Contains(ip.Unmap()) }
 
 // Lookup returns the address for name, allocating one if needed. It reports
-// false when the pool is full of mappings used within ReuseAfter. name must
-// already be validated and normalised by the caller.
+// false when every mapping was used within ReuseAfter or has a connection
+// open. name must already be validated and normalised by the caller.
 func (p *Pool) Lookup(name string) (netip.Addr, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
-	if el, ok := p.byName[name]; ok {
-		e := el.Value.(*entry)
-		e.lastUsed = now
-		p.lru.MoveToFront(el)
+	if e, ok := p.byName[name]; ok {
+		p.touch(e, now)
 		return addr(e.ip), true
 	}
-	if p.lru.Len() >= p.max {
-		el := p.lru.Back()
-		old := el.Value.(*entry)
-		if now.Sub(old.lastUsed) < p.reuseAfter {
-			return netip.Addr{}, false
-		}
-		delete(p.byName, old.name)
-		delete(p.byIP, old.ip)
-		p.lru.Remove(el)
+	if len(p.byName) >= p.max && !p.evict(now) {
+		return netip.Addr{}, false
 	}
-	// The cursor walks the whole prefix, so a freed address comes back only
-	// after every other free address was handed out once.
-	var ip uint32
-	for {
-		ip = p.next
-		if p.next == p.last {
-			p.next = p.first
-		} else {
-			p.next++
-		}
-		if _, used := p.byIP[ip]; !used {
-			break
-		}
+	ip, ok := p.allocate()
+	if !ok {
+		return netip.Addr{}, false // cannot happen: an eviction frees an address
 	}
-	el := p.lru.PushFront(&entry{ip: ip, name: name, lastUsed: now})
-	p.byIP[ip] = el
-	p.byName[name] = el
+	e := &entry{ip: ip, name: name, lastUsed: now}
+	e.el = p.idle.PushFront(e)
+	p.byIP[ip] = e
+	p.byName[name] = e
 	return addr(ip), true
 }
 
-// Reverse returns the hostname mapped to ip; a connection counts as use.
+// Reverse returns the hostname mapped to ip, counting as use of the mapping.
 func (p *Pool) Reverse(ip netip.Addr) (string, bool) {
-	ip = ip.Unmap()
-	if !ip.Is4() || !p.prefix.Contains(ip) {
-		return "", false
-	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	el, ok := p.byIP[u32(ip)]
-	if !ok {
+	e := p.find(ip)
+	if e == nil {
 		return "", false
 	}
-	e := el.Value.(*entry)
-	e.lastUsed = p.now()
-	p.lru.MoveToFront(el)
+	p.touch(e, p.now())
 	return e.name, true
+}
+
+// Acquire returns the hostname mapped to ip and pins the mapping until
+// release is called, so the address cannot go to another name while a
+// connection to it is open; the reuse delay starts when the last one closes.
+// release may be called more than once.
+func (p *Pool) Acquire(ip netip.Addr) (name string, release func(), ok bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e := p.find(ip)
+	if e == nil {
+		return "", nil, false
+	}
+	if e.refs == 0 {
+		p.idle.Remove(e.el)
+		e.el = nil
+	}
+	e.refs++
+	e.lastUsed = p.now()
+	var once sync.Once
+	return e.name, func() { once.Do(func() { p.release(e) }) }, true
+}
+
+func (p *Pool) release(e *entry) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e.refs--
+	if e.refs == 0 {
+		e.lastUsed = p.now()
+		e.el = p.idle.PushFront(e)
+	}
 }
 
 // Len is the number of live mappings.
 func (p *Pool) Len() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.lru.Len()
+	return len(p.byName)
+}
+
+func (p *Pool) find(ip netip.Addr) *entry {
+	ip = ip.Unmap()
+	if !ip.Is4() || !p.prefix.Contains(ip) {
+		return nil
+	}
+	return p.byIP[u32(ip)]
+}
+
+func (p *Pool) touch(e *entry, now time.Time) {
+	e.lastUsed = now
+	if e.el != nil {
+		p.idle.MoveToFront(e.el)
+	}
+}
+
+// evict drops the least recently used mapping without open connections if it
+// has been unused for ReuseAfter, and queues its address behind the others.
+func (p *Pool) evict(now time.Time) bool {
+	el := p.idle.Back()
+	if el == nil {
+		return false // every mapping has a connection open
+	}
+	e := el.Value.(*entry)
+	if now.Sub(e.lastUsed) < p.reuseAfter {
+		return false
+	}
+	p.idle.Remove(el)
+	delete(p.byName, e.name)
+	delete(p.byIP, e.ip)
+	p.free = append(p.free, e.ip)
+	return true
+}
+
+// allocate hands out an address never handed out before, else the address
+// freed longest ago.
+func (p *Pool) allocate() (uint32, bool) {
+	if p.virgin > 0 {
+		ip := p.next
+		if p.next == p.last {
+			p.next = p.first
+		} else {
+			p.next++
+		}
+		p.virgin--
+		return ip, true
+	}
+	if p.freeHead == len(p.free) {
+		return 0, false
+	}
+	ip := p.free[p.freeHead]
+	p.freeHead++
+	if p.freeHead >= 1024 && p.freeHead*2 >= len(p.free) {
+		p.free = append(p.free[:0], p.free[p.freeHead:]...) // reclaim the consumed front
+		p.freeHead = 0
+	}
+	return ip, true
 }
 
 func u32(a netip.Addr) uint32 { b := a.As4(); return binary.BigEndian.Uint32(b[:]) }

@@ -41,14 +41,11 @@ class EngineSecret private constructor(bytes: ByteArray) : Closeable {
          * @throws IllegalArgumentException for broken text (half of a surrogate pair) or over-long fields.
          */
         fun of(username: CharArray, password: CharArray): EngineSecret {
-            val user = SecretText.utf8(username)
-            val pass = try {
-                SecretText.utf8(password)
-            } catch (e: IllegalArgumentException) {
-                user.fill(0)
-                throw e
-            }
+            var user: ByteArray? = null
+            var pass: ByteArray? = null
             try {
+                user = SecretText.utf8(username)
+                pass = SecretText.utf8(password)
                 require(user.size <= MAX_FIELD_BYTES && pass.size <= MAX_FIELD_BYTES) { "credential too long" }
                 val out = ByteArray(1 + 2 + user.size + 2 + pass.size)
                 out[0] = VERSION
@@ -57,8 +54,8 @@ class EngineSecret private constructor(bytes: ByteArray) : Closeable {
                 check(at == out.size)
                 return EngineSecret(out)
             } finally {
-                user.fill(0)
-                pass.fill(0)
+                user?.fill(0)
+                pass?.fill(0)
             }
         }
 

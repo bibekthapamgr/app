@@ -568,6 +568,31 @@ func TestProxyAddressesAreCachedAndShared(t *testing.T) {
 		}
 	})
 
+	t.Run("a dial after ForgetProxyAddrs does not join a lookup from before", func(t *testing.T) {
+		var calls atomic.Int32
+		oldNetwork := make(chan struct{})
+		d, _ := newDialer(t, func(context.Context, string) ([]netip.Addr, error) {
+			if calls.Add(1) == 1 {
+				<-oldNetwork // the lookup on the old network hangs, then fails
+				return nil, errors.New("old network gone")
+			}
+			return []netip.Addr{proxy.Addr.Addr()}, nil
+		})
+		errOld := make(chan error, 1)
+		go func() { _, err := d.Dial(context.Background(), target); errOld <- err }()
+		waitCalls(t, &calls, 1)
+		d.ForgetProxyAddrs() // the network changed
+		dialOK(t, d)         // looks up again at once instead of waiting for the old lookup
+		close(oldNetwork)
+		if err := <-errOld; CodeOf(err) != CodeProxyDNS {
+			t.Fatalf("the dial waiting on the old lookup gets its answer: %v", err)
+		}
+		dialOK(t, d) // the old failure was not cached over the new answer
+		if n := calls.Load(); n != 2 {
+			t.Fatalf("%d lookups, want 2", n)
+		}
+	})
+
 	t.Run("a lookup that panics does not block later dials", func(t *testing.T) {
 		var calls atomic.Int32
 		d, _ := newDialer(t, func(context.Context, string) ([]netip.Addr, error) {

@@ -149,7 +149,8 @@ object ProfileValidator {
         }
     }
 
-    private fun String.utf8Length(): Int = encodeToByteArray().size
+    // Counted without encoding, so checking a password's length leaves no copy of it behind.
+    private fun String.utf8Length(): Int = SecretText.utf8Length(this)
 
     /**
      * Only '0'–'9': Kotlin's isDigit() also accepts other scripts' digits, which
