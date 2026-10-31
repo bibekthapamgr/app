@@ -93,15 +93,26 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
 
 /**
  * The service's side: consent, interfaces and the notification, all recorded. Android's
- * VPN network is simulated as one network that follows the newest open interface (as
- * Android moves an existing VPN network over on a reconnect), or, with [routes] off,
- * never moves to a new interface.
+ * VPN network is simulated as one ready network leading into the newest open interface,
+ * or none with [routes] off.
  */
 class FakeHost(private val log: CallLog) : VpnHost {
     @Volatile var consent = true
 
-    /** Android routes apps into each new interface; off, it never does. */
+    /** Android routes apps into the newest interface; off, into none. */
     @Volatile var routes = true
+
+    @Volatile private var networksError: RuntimeException? = null
+
+    @Volatile private var networksReadsBeforeError = 0
+    private val networksReads = AtomicInteger()
+
+    /** From now on, reading Android's VPN networks throws [error] once [after] more reads have worked. */
+    fun failNetworkReads(error: RuntimeException, after: Int = 0) {
+        networksReads.set(0)
+        networksReadsBeforeError = after
+        networksError = error
+    }
 
     /** What a check's socket guard does when the session aborts it (the engine's call then returns). */
     @Volatile var onAbort: () -> Unit = {}
@@ -143,9 +154,10 @@ class FakeHost(private val log: CallLog) : VpnHost {
     }
 
     override fun vpnNetworks(): List<VpnNetwork> {
-        val open = tuns.filter { !it.closed }
-        val routed = if (routes) open.lastOrNull() else open.dropLast(1).lastOrNull()
-        return listOfNotNull(routed?.let { VpnNetwork(id = NETWORK_ID, interfaceName = it.name, ready = true) })
+        val error = networksError
+        if (error != null && networksReads.getAndIncrement() >= networksReadsBeforeError) throw error
+        if (!routes) return emptyList()
+        return listOfNotNull(tuns.lastOrNull { !it.closed }?.let { VpnNetwork(id = NETWORK_ID, interfaceName = it.name, ready = true) })
     }
 
     override fun socketGuard(): SocketGuard {

@@ -144,6 +144,23 @@ class HomeScreenTest {
     }
 
     @Test
+    fun aProxyWithoutAWayOutSaysSo() {
+        show(
+            ready(
+                ConnectionState(
+                    profileId = "p1",
+                    error = ConnectionError("TARGET_UNREACHABLE", "proxy could not reach the destination (HTTP 503)"),
+                ),
+            ),
+        )
+        compose.onNodeWithText("Your proxy can't reach the internet").assertIsDisplayed()
+        scrolledTo(
+            "203.0.113.10:3128 accepted the connection but couldn't open a test connection to connectivitycheck.gstatic.com. " +
+                "The proxy may have no internet access right now, or it blocks that address. Check with your proxy provider.",
+        ).assertIsDisplayed()
+    }
+
+    @Test
     fun stoppingWhileBlockedAsksFirst() {
         val blocked = ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.ENGINE_STOPPED))
         show(ready(blocked, dialog = HomeDialog.ConfirmStop))

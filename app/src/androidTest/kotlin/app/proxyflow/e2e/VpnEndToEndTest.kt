@@ -17,6 +17,7 @@ import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.vpn.ProxyFlowVpnService
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,7 +25,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.Timeout
 import org.junit.runner.RunWith
 
 /**
@@ -43,6 +46,10 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class VpnEndToEndTest {
+    /** A test that hangs fails with where it hung (setup and clean-up included) instead of stalling the run. */
+    @get:Rule
+    val timeout: Timeout = Timeout.builder().withTimeout(TEST_TIMEOUT_S, TimeUnit.SECONDS).withLookingForStuckThread(true).build()
+
     private val app = App()
     private lateinit var env: E2eConfig
     private lateinit var networks: VpnNetworks
@@ -132,6 +139,8 @@ class VpnEndToEndTest {
         val silent = app.save("Silent", ProxyProtocol.SOCKS5, env.proxyHost, env.silentPort)
         app.connect(socks.id)
         assertReachesDestination("switch-socks5")
+        val interfaceBefore = Descriptors.tun().single() to ProxyFlowVpnService.interfaceName(Descriptors.tun().single())
+        val establishedAtFirst = ProxyFlowVpnService.establishedInterfaces.get()
 
         app.controller.connect(silent.id)
         app.await(what = "Reconnecting to the silent proxy") { it.status == ConnectionStatus.Reconnecting && it.profileId == silent.id }
@@ -149,7 +158,13 @@ class VpnEndToEndTest {
             history.states.any { it.status == ConnectionStatus.Reconnecting && it.profileId == http.id },
         )
         assertConnectedAsAndroidSeesIt()
-        assertEquals("the old interface is closed once the new one runs", 1, Descriptors.tun().size)
+        // One interface for the whole connection: a new one would open a gap while Android moves its routes.
+        assertEquals("no interface was established for the switches", establishedAtFirst, ProxyFlowVpnService.establishedInterfaces.get())
+        assertEquals(
+            "the same interface throughout",
+            interfaceBefore,
+            Descriptors.tun().single() to ProxyFlowVpnService.interfaceName(Descriptors.tun().single()),
+        )
         assertReachesDestination("switch-http-connect")
         app.disconnectAndSettle()
         assertReleased()
@@ -287,6 +302,10 @@ class VpnEndToEndTest {
             Os.close(directory)
         }
         val blocked = app.awaitStatus(ConnectionStatus.Blocked)
+        // The interface itself was never harmed: put it back under its number for the restart, which runs the
+        // next engine on the same interface.
+        Os.dup2(keep.fileDescriptor, tun)
+        keep.close()
 
         assertEquals(ConnectionError.ENGINE_STOPPED, blocked.error?.code)
         assertTrue("the VPN stays, so apps' traffic is held", networks.present())
@@ -297,7 +316,6 @@ class VpnEndToEndTest {
 
         app.controller.restart()
         app.awaitStatus(ConnectionStatus.Connected)
-        keep.close()
 
         assertEquals(1, Descriptors.tun().size)
         assertConnectedAsAndroidSeesIt()
@@ -368,6 +386,7 @@ class VpnEndToEndTest {
 
     private companion object {
         const val TAG = "ProxyFlowE2E"
+        const val TEST_TIMEOUT_S = 240L
         const val CYCLES = 10
         const val THREAD_SLACK = 6
         const val CHECK_RUNNING_MS = 1_500L

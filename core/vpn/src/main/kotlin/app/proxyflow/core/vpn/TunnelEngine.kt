@@ -44,24 +44,19 @@ interface TunnelEngine {
 }
 
 /**
- * The pre-flight check's answer (ADR-0010 §4). It passes when the tunnel opened, and
- * when the proxy accepted the sign-in and tried the destination but could not reach it
- * ([DESTINATION_UNREACHABLE]: HTTP 502, 503 or 504, SOCKS5 0x03 to 0x06): the proxy
- * itself works, the check's destination is what failed. Everything else fails the check
- * with its code, among them a refusal by the proxy (HTTP 403, SOCKS5 0x02), which
- * providers also send for an expired plan or an address that isn't allowed, a general
- * failure (SOCKS5 0x01, or another HTTP status such as 401, 402, 404, 429 or 500) and a
- * request the proxy doesn't support.
+ * The pre-flight check's answer (ADR-0010 §4). It passes only when the proxy opened the
+ * tunnel. Any other answer fails the check with its code: a proxy that refuses the
+ * check's destination (HTTP 403, SOCKS5 0x02 — what providers also send for an expired
+ * plan or an address that isn't allowed), that answers with a general failure (SOCKS5
+ * 0x01, or another HTTP status such as 401, 402, 404, 429 or 500), that can't reach it
+ * (HTTP 502–504, SOCKS5 0x03–0x06: usually no working way out to the Internet) or that
+ * doesn't support the request would show Connected while apps' connections fail.
  */
 data class PreflightAnswer(val ok: Boolean, val code: String? = null, val detail: String? = null) {
-    val passes: Boolean get() = ok || code in DESTINATION_UNREACHABLE
+    val passes: Boolean get() = ok
 
     /** Why the check failed, for the screens: the engine's code, or INTERNAL when it gave none. */
     val error: ConnectionError get() = ConnectionError(code ?: ConnectionError.INTERNAL, detail)
-
-    companion object {
-        val DESTINATION_UNREACHABLE = setOf("TARGET_UNREACHABLE", "TARGET_REFUSED")
-    }
 }
 
 /** [TunnelEngine] on the real engine (libgojni.so, loaded on first use). */

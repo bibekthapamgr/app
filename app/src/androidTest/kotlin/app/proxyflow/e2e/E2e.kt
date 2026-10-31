@@ -331,7 +331,7 @@ class App {
 }
 
 /** How long a test's setup waits for an earlier test's VPN service and interface to go. */
-const val SETTLE_BEFORE_TEST_MS = 90_000L
+const val SETTLE_BEFORE_TEST_MS = 30_000L
 
 /** Polls [condition] until it holds or [timeoutMillis] passes; the failure carries [diagnose]'s report. */
 fun eventually(what: String, timeoutMillis: Long = 10_000, diagnose: () -> String = { "" }, condition: () -> Boolean) {

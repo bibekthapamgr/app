@@ -34,7 +34,7 @@ sequenceDiagram
     S->>S: credentials (Keystore), bound to the attempt's copy of the profile
     S->>E: probe(connectivitycheck.gstatic.com:443) on a protected socket
     E->>P: TCP (+TLS) + SOCKS5 / CONNECT, then close
-    P-->>E: OK, or "could not reach it" (anything else fails the check)
+    P-->>E: tunnel opened (any other answer fails the check)
     S->>VS: establish() — the VPN interface now exists
     S->>E: start(fd, MTU 9000)
     VS-->>A: Android creates the VPN network and its app rules (asynchronously)
@@ -51,8 +51,8 @@ sequenceDiagram
 | Disconnected | none | stopped | normal network | B2 (or B6b / B6d / H1 with the last reason) | none (revocation: an alert) |
 | Connecting | none, then up while Android moves apps over | stopped, then running | normal network until Android routes apps into the interface | B3 with its steps, Cancel | Connecting… with the step, Cancel |
 | Connected | up, Android routes apps into it | running | TCP through the proxy, by name | B4: timer, protection summary, Disconnect | Connected with timer, Disconnect |
-| Reconnecting (switch or restart) | up (the old one until Android has moved apps to the new one) | stopped, then running on the new interface | held | "Reconnecting to …", Stop | Reconnecting… traffic paused |
-| Blocked (engine failed, a reconnect failed, the profile was deleted) | up (the newest) | stopped | held | blocked layout with the reason, Restart / Try again, Edit profile, Stop (confirmed); only Stop for `PROFILE_DELETED` | Traffic blocked, Restart, Disconnect |
+| Reconnecting (switch or restart) | up, the same one | stopped, then the next engine runs on it | held | "Reconnecting to …", Stop | Reconnecting… traffic paused |
+| Blocked (engine failed, a reconnect failed, the profile was deleted) | up, the same one | stopped | held | blocked layout with the reason, Restart / Try again, Edit profile, Stop (confirmed); only Stop for `PROFILE_DELETED` | Traffic blocked, Restart, Disconnect |
 
 Transitions, all handled by `VpnSession`:
 
@@ -63,27 +63,28 @@ Transitions, all handled by `VpnSession`:
 | connect(q) for a profile that no longer exists | any | unchanged while a connection runs; Blocked stays Blocked (`PROFILE_DELETED`) for its own profile |
 | connect(q) for another profile, Restart | Connected, Blocked | Reconnecting: the engine stops, the interface stays |
 | the profile's server, protocol, TLS or sign-in changed during the attempt | Connecting, Reconnecting | the same state, checking the new settings from the start |
-| check fails: proxy-level code, a refusal or general failure from the proxy, `INTERNAL` | Connecting | Disconnected with the code (B6b) — nothing changed on the phone |
+| check fails: anything but an opened tunnel (proxy-level codes, refusals, general failures, an unreachable destination), `INTERNAL` | Connecting | Disconnected with the code (B6b) — nothing changed on the phone |
 | check fails | Reconnecting | Blocked with the code |
-| check passes, interface established, engine runs | Connecting, Reconnecting | still Connecting / Reconnecting (step: starting protection) until Android routes apps into the new interface |
-| Android routes apps into the new interface | Connecting, Reconnecting | Connected (a reconnect closes the old interface only now) |
-| the engine cannot start, or Android does not route within 10 s | Connecting | Disconnected (the new interface is closed again) |
-| the engine cannot start, or Android does not route within 10 s | Reconnecting | Blocked on the newest interface (the old one is closed) |
+| check passes; a first connect establishes the interface; the engine runs on it | Connecting, Reconnecting | still Connecting / Reconnecting (step: starting protection) until Android routes apps into the interface |
+| Android routes apps into the interface (at once on a reconnect) | Connecting, Reconnecting | Connected |
+| the engine cannot start, or Android does not route within 10 s | Connecting | Disconnected (the interface is closed again) |
+| the engine cannot start, or Android no longer routes the interface | Reconnecting | Blocked on the interface |
 | `engine_failed` | Connected | Blocked (`ENGINE_STOPPED`) |
 | `engine_failed` | Connecting (waiting for Android) | Disconnected (`ENGINE_STOPPED`) |
-| no consent, or `establish()` refused | any | Disconnected (`VPN_PERMISSION_DENIED`, H1) |
+| no consent, or `establish()` refused (Android has removed any VPN) | any | Disconnected (`VPN_PERMISSION_DENIED`, H1) |
 | disconnect | any | Disconnected (no error) |
 | revocation | any with an interface | Disconnected (`VPN_REVOKED`, B6d and an alert) |
-| the connection's profile is deleted ("Disconnect and delete" disconnects first) | Connecting | Disconnected |
+| the connection's profile is deleted ("Disconnect and delete" disconnects first), also during the re-check of an edit | Connecting | Disconnected |
 | the connection's profile disappears otherwise | Connected, Reconnecting, Blocked | Blocked (`PROFILE_DELETED`): the engine stops, traffic is held until the user stops |
 | the service is destroyed | any | Disconnected (`INTERNAL`) |
+| an exception nothing expected in the check or the routing wait | Connecting / Reconnecting | as a failed check: Disconnected / Blocked (`INTERNAL`) |
 
 What goes through the VPN once connected is unchanged from M4 and the traffic support matrix (`docs/m1/02-traffic-support-matrix.md`): TCP over IPv4 and IPv6 through the proxy; DNS answered on the phone with fake addresses, so the proxy receives names and resolves them; UDP other than DNS refused; ICMP never answered; ProxyFlow's own connections (the engine's, the pre-flight check's) outside the VPN, both excluded and protected. Proxy failures after connecting (a proxy that dies, a password changed on the provider's side) are refused connection by connection, never sent around the proxy, but Home keeps showing Connected until M7's escalation rule.
 
 ## 3. Ownership and clean-up
 
 - The session holds the interface's `ParcelFileDescriptor`; the engine reads the raw descriptor and never closes it. Every path out of a connection stops the engine first and closes the descriptor after (`VpnSessionTest.disconnectStopsTheEngineBeforeClosingTheInterfaceThenTheService`).
-- A reconnect establishes the new interface before closing the old one, starts the engine on the new one, and closes the old one once Android routes apps into the new one, so there is no moment without an interface. A reconnect that fails keeps the newest interface: Android has moved to it, and drops the VPN if it goes.
+- One interface per connection. A reconnect stops the engine and starts the next one on the same interface, which holds apps' traffic in between. Creating a new interface instead would leak: inside `establish()` Android brings the old interface down at once and moves the VPN's routes to the new one afterwards, and meanwhile its fall-through rule sends apps' traffic to the normal network. A reconnect that fails keeps the interface.
 - "Connected" is Android's view, not only the session's: a VPN network leading into the session's interface (its name from `/proc/self/fdinfo`) that Android reports VALIDATED. `ConnectivityManager.getAllNetworks()` is polled, because network callbacks never report a VPN that excludes the caller.
 - The service is started by the session when a connection needs it and stops itself with `stopSelfResult()`; Android keeps it bound while an interface exists. Its status notification: the first update at once, then at least 300 ms apart with the last state always shown; a late stop never removes a newer connection's notification.
 - Credentials are read from the Keystore twice per connection (check, engine), each time with the stored profile checked against the attempt's copy, turned into `EngineSecret` bytes at once and zeroed after use; they never become a `String`. The check's read happens inside the check's coroutine, so a check cancelled before it ran decrypts nothing.
@@ -104,10 +105,10 @@ What goes through the VPN once connected is unchanged from M4 and the traffic su
 
 | Level | What | Where |
 |---|---|---|
-| JVM | Every transition in §2 with a fake engine and a fake service: order of check, establish, engine start and Android's routing; Connected never before Android routes, and a fresh interface Android never routes taken down again; which answers pass the check; no interface on failed checks; credentials bound to the attempt's copy of the profile (an edit during the check checks the new server first); a check cancelled before it ran decrypts nothing, one cancelled while it ran is cut short and counted until it returns; engine start failures of every kind; duplicate starts; switching without a gap; blocked states and Restart; revocation; consent refused; the service starting late, never, or refused; Always-on with and without a chosen profile; deleted profiles while connected and while connecting; a connect for a missing profile leaving the connection alone; 20 cycles with nothing left open | `core/vpn/src/test` |
+| JVM | Every transition in §2 with a fake engine and a fake service: order of check, establish, engine start and Android's routing; Connected never before Android routes, and a fresh interface Android never routes taken down again; only an opened tunnel passes the check; no interface on failed checks; switches and restarts on the one interface; credentials bound to the attempt's copy of the profile (an edit during the check checks the new server first; a deletion during that re-check ends the attempt); a check cancelled before it ran decrypts nothing, one cancelled while it ran is cut short (also on a single thread) and counted until it returns; exceptions in the check and in reading Android's networks fail the attempt instead of the app; engine start failures of every kind; duplicate starts; blocked states and Restart; revocation; consent refused, and gone during a switch; the service starting late, never, or refused; Always-on with and without a chosen profile; deleted profiles while connected and while connecting; a connect for a missing profile leaving the connection alone; 20 cycles with nothing left open | `core/vpn/src/test` |
 | JVM | Credentials for a connection only while the stored profile still reaches the same proxy | `core/data/src/test` (`ProfileRepositoryTest`) |
 | JVM (Robolectric) | Home in every state, the explainer, H1, the stop confirmation, the new failure messages, the blocked layout of a deleted profile; the ViewModel's consent flow and which profile Home shows (the connection's own copy while it runs); "Disconnect and delete" in the profile list; the merged manifest (permissions, the service declaration); screenshots of each state in both themes | `feature/home/src/test`, `feature/profiles/src/test`, `app/src/test` |
-| Emulators (API 29, 34, 35, 36) | The real app, service and engine against Dante (SOCKS5) and Squid (HTTP CONNECT) with sign-in on the CI runner: shell traffic to a destination reachable only by name through a proxy; Android's VPN network ready and leading into the session's interface whenever the app says Connected; Android's consent dialog refused and allowed; wrong passwords, a closed port and a silent proxy that never connect and never establish an interface; a switch to a silent proxy (traffic sent while it runs and after it fails is held) and on to a working one; revocation; an engine failure that holds traffic until Restart; a cancelled check cut short; repeated starts and ten connect/disconnect cycles leaving no interface, service, job or socket; nothing listening; the lock-screen version of the notification. A failed wait reports the state, interfaces, Android's VPN networks, the lifecycle log and Android's record of the service | `app/src/androidTest/kotlin/app/proxyflow/e2e` |
+| Emulators (API 29, 34, 35, 36) | The real app, service and engine against Dante (SOCKS5) and Squid (HTTP CONNECT) with sign-in on the CI runner: shell traffic to a destination reachable only by name through a proxy; Android's VPN network ready and leading into the session's interface whenever the app says Connected; Android's consent dialog refused and allowed; wrong passwords, a closed port and a silent proxy that never connect and never establish an interface; a switch to a silent proxy (traffic sent while it runs and after it fails is held) and on to a working one, on the same interface; revocation; an engine failure that holds traffic until Restart; a cancelled check cut short; repeated starts and ten connect/disconnect cycles leaving no interface, service, job or socket; nothing listening; the lock-screen version of the notification. A failed wait reports the state, interfaces, Android's VPN networks, the lifecycle log and Android's record of the service | `app/src/androidTest/kotlin/app/proxyflow/e2e` |
 | CI evidence | Every line the tests sent arrived exactly once and through a proxy (the destination's connections match the proxies' tunnels), no line sent while traffic was held arrived, Squid was asked for the destination by name, packet captures of the emulator's uplink show no packet to the destination and no DNS query for its name, no test password is in logcat; the end of the lifecycle log as a notice | `scripts/m5_evidence.py` |
 
 ### Running the device tests yourself

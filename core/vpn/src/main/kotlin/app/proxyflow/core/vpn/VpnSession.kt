@@ -13,7 +13,9 @@ import app.proxyflow.core.model.ProxyProfile
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
@@ -35,13 +37,16 @@ import kotlinx.coroutines.withTimeoutOrNull
  * wait for Android's routing run on [blocking], so a disconnect or a revocation is
  * never stuck behind them.
  *
- * The session owns the VPN interface: the engine reads it, the session closes it
- * after the engine has stopped. It reports Connected only once the engine runs on a
- * new interface and Android routes apps into it. Until then any failure takes the
- * new interface down again and leaves the phone as it was; once the user has been
- * connected, a failure never removes the interface: traffic stays held until the
- * user restarts or disconnects ("Stop and use normal network",
- * docs/m1/03-user-journeys.md).
+ * The session owns the VPN interface — one per connection: the engine reads it, the
+ * session closes it after the engine has stopped. A switch or a restart stops the
+ * engine and starts the next one on the same interface, which keeps holding apps'
+ * traffic meanwhile; a new interface would make Android bring the old one down before
+ * the new one's routes exist, and Android's fall-through rule would send apps to the
+ * normal network in between. Connected is reported only once the engine runs and
+ * Android routes apps into the interface. Until the user has been connected, any
+ * failure takes the interface down again and leaves the phone as it was; after that,
+ * a failure never removes it: traffic stays held until the user restarts or
+ * disconnects ("Stop and use normal network", docs/m1/03-user-journeys.md).
  *
  * @param state written only here; the screens and the notification read it.
  * @param services starts [ProxyFlowVpnService], which then attaches itself as the [VpnHost].
@@ -78,6 +83,10 @@ class VpnSession(
 
     private val events = Channel<Event>(Channel.UNLIMITED)
 
+    // A job that fails in a way nothing caught must not take the process down with it (which would drop held
+    // traffic): it becomes a failure of the connection. Every job catches what it expects; this is the last resort.
+    private val jobFailures = CoroutineExceptionHandler { _, e -> send(Event.JobFailed(e.javaClass.simpleName)) }
+
     // Touched only by the event loop.
     private var host: VpnHost? = null
     private var pending: ProxyProfile? = null
@@ -87,9 +96,6 @@ class VpnSession(
     private var preflight: Job? = null
     private var routing: Job? = null
     private var tun: TunInterface? = null
-
-    /** A reconnect's previous interface: closed once Android routes apps into the new one. */
-    private var retiring: TunInterface? = null
     private var engineRunning = false
     private var engineGeneration = 0L
 
@@ -159,6 +165,7 @@ class VpnSession(
                 is Event.Routed -> onRouted(event.attempt)
                 is Event.RoutingTimedOut -> onRoutingTimedOut(event.attempt)
                 is Event.EngineFailed -> onEngineFailed(event)
+                is Event.JobFailed -> onJobFailed(event.type)
                 is Event.ServiceStartTimedOut -> onServiceStartTimedOut(event.token)
                 is Event.Barrier -> event.done.complete(Unit)
             }
@@ -198,9 +205,9 @@ class VpnSession(
         // Looked up before anything is stopped: a profile that is gone leaves a running connection alone.
         val profile = profiles.get(profileId) ?: return profileMissing(profileId)
         cancelAttempt()
-        // Switching or restarting: flows end now. Once connected, the interface stays, so traffic is held until the new engine runs.
+        // Switching or restarting: flows end now. Once connected, the interface stays, so traffic is held until the next engine runs on it.
         stopEngine()
-        if (!connectedOnce) closeInterfaces() // an attempt that never connected leaves nothing behind
+        if (!connectedOnce) closeInterface() // an attempt that never connected leaves nothing behind
         val reconnecting = tun != null
         log("connect ${profile.id}${if (reconnecting) " (reconnect)" else ""}")
         publish(
@@ -220,9 +227,8 @@ class VpnSession(
         log("connect $profileId: no such profile")
         val current = state.value
         when {
-            // Restart of a connection whose profile was deleted: traffic stays held until the user stops.
-            current.status == ConnectionStatus.Blocked && current.profileId == profileId ->
-                block(ConnectionError(ConnectionError.PROFILE_DELETED))
+            // The connection's own profile (a restart, or a re-check after an edit): as when it is deleted.
+            current.active && current.profileId == profileId -> onProfileDeleted(profileId)
             // Another connection runs or is being set up: it is not touched.
             current.active -> Unit
             else -> publish(ConnectionState(profileId = profileId, error = ConnectionError(ConnectionError.INTERNAL, PROFILE_GONE)))
@@ -238,7 +244,7 @@ class VpnSession(
             return fail(ConnectionError(ConnectionError.INTERNAL, "Android did not start the VPN service"))
         }
         val token = ++serviceToken
-        serviceWait = scope.launch {
+        serviceWait = scope.launch(jobFailures) {
             delay(timing.serviceStartTimeoutMillis)
             send(Event.ServiceStartTimedOut(token))
         }
@@ -281,17 +287,20 @@ class VpnSession(
     }
 
     private fun runPreflight(current: VpnHost, profile: ProxyProfile) {
-        if (!current.hasConsent()) return fail(ConnectionError(ConnectionError.VPN_PERMISSION_DENIED))
+        // No consent: Android has taken the VPN away (another VPN app, or the user), so there is nothing left to hold.
+        if (!current.hasConsent()) return end(ConnectionError(ConnectionError.VPN_PERMISSION_DENIED))
         current.clearProblem()
         if (!current.showStatus(state.value)) {
             return fail(ConnectionError(ConnectionError.INTERNAL, "Android did not allow the foreground service"))
         }
         val id = ++attempt
         val guard = current.socketGuard()
-        preflight = scope.launch(blocking) {
+        preflight = scope.launch(blocking + jobFailures) {
             val check = coroutineContext.job
             // Cancelled (Disconnect, another profile): the check's sockets are shut down, so the engine returns at once.
-            val aborter = launch {
+            // Started at once and resumed in whichever thread cancels, so this holds even when every thread of
+            // [blocking] is busy, the check's own included.
+            val aborter = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
                 try {
                     awaitCancellation()
                 } finally {
@@ -300,6 +309,12 @@ class VpnSession(
             }
             val result = try {
                 runCheck(current, profile, guard)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Check.Failed(ConnectionError(ConnectionError.INTERNAL, "unexpected ${e.javaClass.simpleName}"))
+            } catch (e: LinkageError) {
+                Check.Failed(ConnectionError(ConnectionError.INTERNAL, "the packet engine could not be loaded"))
             } finally {
                 aborter.cancel()
                 guard.close()
@@ -370,22 +385,25 @@ class VpnSession(
 
     private fun startProtection(current: VpnHost, profile: ProxyProfile, secret: EngineSecret?) {
         val config = engine.tunConfig()
-        val before = current.vpnNetworks()
-        val fresh = try {
-            current.establish(config)
-        } catch (e: Exception) {
-            return fail(ConnectionError(ConnectionError.INTERNAL, "Android could not create the VPN interface"))
+        // A switch or a restart keeps the interface; only a first connect creates one.
+        val existing = tun
+        val before = if (existing == null) current.vpnNetworks() else emptyList()
+        val interfaceForEngine = existing ?: run {
+            val fresh = try {
+                current.establish(config)
+            } catch (e: Exception) {
+                return fail(ConnectionError(ConnectionError.INTERNAL, "Android could not create the VPN interface"))
+            }
+            // No consent any more: Android revoked the VPN or another app took over.
+            if (fresh == null) return end(ConnectionError(ConnectionError.VPN_PERMISSION_DENIED))
+            log("established ${fresh.name ?: "an interface"}")
+            tun = fresh
+            fresh
         }
-        // No consent any more: Android revoked the VPN or another app took over, so any old interface is gone too.
-        if (fresh == null) return end(ConnectionError(ConnectionError.VPN_PERMISSION_DENIED))
-        log("established ${fresh.name ?: "an interface"}")
-        // A reconnect: Android moves apps over to the new interface; the old one is closed once it has.
-        retiring = tun
-        tun = fresh
 
         val generation = ++engineGeneration
         val notStarted = try {
-            engine.start(fresh, config, profile, secret, current::protectSocket) { error ->
+            engine.start(interfaceForEngine, config, profile, secret, current::protectSocket) { error ->
                 send(Event.EngineFailed(generation, error))
             }
             null
@@ -401,21 +419,28 @@ class VpnSession(
             return fail(notStarted)
         }
         engineRunning = true
-        awaitRouting(current, fresh, before)
+        awaitRouting(current, interfaceForEngine, before)
     }
 
     /**
      * `establish()` returns before Android has created the VPN network and its routing rules,
      * so apps' traffic still takes the normal network for a moment. Connected waits until
-     * Android reports the new interface's network ready.
+     * Android reports the interface's network ready — at once on a switch or a restart, whose
+     * interface Android already routes apps into.
      */
-    private fun awaitRouting(current: VpnHost, fresh: TunInterface, before: List<VpnNetwork>) {
+    private fun awaitRouting(current: VpnHost, routedTun: TunInterface, before: List<VpnNetwork>) {
         val id = attempt
-        routing = scope.launch(blocking) {
-            val routed = withTimeoutOrNull(timing.routingTimeoutMillis) {
-                while (!routedInto(fresh, before, current.vpnNetworks())) delay(timing.routingPollMillis)
-                true
-            } ?: false
+        routing = scope.launch(blocking + jobFailures) {
+            val routed = try {
+                withTimeoutOrNull(timing.routingTimeoutMillis) {
+                    while (!routedInto(routedTun, before, current.vpnNetworks())) delay(timing.routingPollMillis)
+                    true
+                } ?: false
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false // Android's view can't be read: never claim it routes apps
+            }
             send(if (routed) Event.Routed(id) else Event.RoutingTimedOut(id))
         }
     }
@@ -423,8 +448,6 @@ class VpnSession(
     private fun onRouted(id: Long) {
         if (id != attempt || routing == null) return
         routing = null
-        retiring?.close()
-        retiring = null
         connectedOnce = true
         log("connected ${state.value.profileId}")
         publish(state.value.copy(status = ConnectionStatus.Connected, step = null, connectedSinceMillis = clock(), error = null))
@@ -442,6 +465,11 @@ class VpnSession(
         if (event.generation != engineGeneration || !engineRunning) return
         log("engine failed: ${event.error.code}")
         fail(event.error)
+    }
+
+    private fun onJobFailed(type: String) {
+        log("unexpected $type in a session job")
+        fail(ConnectionError(ConnectionError.INTERNAL, "unexpected $type"))
     }
 
     private fun onRevoked() {
@@ -467,13 +495,10 @@ class VpnSession(
         if (connectedOnce) block(error) else end(error)
     }
 
-    /** The newest interface stays up with no engine reading it: apps' traffic is held, never sent around the proxy. */
+    /** The interface stays up with no engine reading it: apps' traffic is held, never sent around the proxy. */
     private fun block(error: ConnectionError) {
         cancelAttempt()
         stopEngine()
-        // Android has already moved apps over to the newest interface, which now holds their traffic.
-        retiring?.close()
-        retiring = null
         log("blocked: ${error.code}")
         publish(state.value.copy(status = ConnectionStatus.Blocked, step = null, connectedSinceMillis = null, error = error))
         host?.showStatus(state.value)
@@ -486,7 +511,7 @@ class VpnSession(
         serviceWait?.cancel()
         serviceWait = null
         stopEngine()
-        closeInterfaces()
+        closeInterface()
         connectedOnce = false
         if (state.value.status != ConnectionStatus.Disconnected) log("disconnected${error?.let { ": ${it.code}" } ?: ""}")
         publish(state.value.copy(status = ConnectionStatus.Disconnected, step = null, connectedSinceMillis = null, error = error))
@@ -507,9 +532,7 @@ class VpnSession(
         runCatching { engine.stop() }
     }
 
-    private fun closeInterfaces() {
-        retiring?.close()
-        retiring = null
+    private fun closeInterface() {
         tun?.close()
         tun = null
     }
@@ -581,6 +604,8 @@ class VpnSession(
 
         class EngineFailed(val generation: Long, val error: ConnectionError) : Event
 
+        class JobFailed(val type: String) : Event
+
         class ServiceStartTimedOut(val token: Long) : Event
 
         class Barrier(val done: CompletableDeferred<Unit>) : Event
@@ -600,9 +625,8 @@ class VpnSession(
         /**
          * Android routes apps into [tun]: one of its VPN networks is ready and leads into
          * [tun]'s interface, and was not already there, on that interface, before [tun] was
-         * established. That leaves out a network still being torn down, and catches both ways
-         * Android takes over a reconnect: a new network, or the existing one moved to the new
-         * interface (its routes are in place before the new interface name is reported).
+         * established ([before] is empty for an interface that was already in use). That
+         * leaves out a network of an earlier connection still being torn down.
          */
         internal fun routedInto(tun: TunInterface, before: List<VpnNetwork>, now: List<VpnNetwork>): Boolean = now.any { network ->
             network.ready &&

@@ -108,6 +108,8 @@
     <string name="home_error_refused_message">%1$s refused to open a test connection. Providers answer this way when a plan has ended or your network\'s address isn\'t allowed. Check your account with your proxy provider.</string>
     <string name="home_error_proxy_failure_title">Proxy error</string>
     <string name="home_error_proxy_failure_message">%1$s answered the test connection with an error. Check your account with your proxy provider.</string>
+    <string name="home_error_unreachable_target_title">Your proxy can\'t reach the internet</string>
+    <string name="home_error_unreachable_target_message">%1$s accepted the connection but couldn\'t open a test connection to connectivitycheck.gstatic.com. The proxy may have no internet access right now, or it blocks that address. Check with your proxy provider.</string>
     <string name="home_error_unsupported_title">Not supported by your proxy</string>
     <string name="home_error_unsupported_message">The proxy doesn\'t support the connections ProxyFlow needs: tunnels to a site by its name.</string>
     <string name="home_error_profile_deleted_title">Profile deleted</string>

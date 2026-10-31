@@ -45,7 +45,9 @@ class ProxyFlowVpnService :
     // The status notification. The first status of a connection puts the service in the foreground
     // at once; later ones are spaced out, because Android drops a package's notification updates
     // beyond about five a second, which could leave a stale state showing. The last one always
-    // gets through. A stop that arrives late never removes a newer connection's notification.
+    // gets through. Every startForeground and stopForeground happens under [statusLock], so they
+    // reach Android in order, and a stop that arrives late never removes a newer connection's
+    // notification.
     private val statusLock = Any()
     private var foreground = false
     private var statusGeneration = 0L
@@ -130,43 +132,38 @@ class ProxyFlowVpnService :
                     ready = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
                 )
             }
-        } catch (e: SecurityException) {
-            emptyList()
+        } catch (e: RuntimeException) {
+            emptyList() // SecurityException without ACCESS_NETWORK_STATE, or the system server gone: nothing is known
         }
     }
 
     override fun socketGuard(): SocketGuard = ShutdownGuard()
 
-    override fun showStatus(state: ConnectionState): Boolean {
-        synchronized(statusLock) {
-            if (foreground) {
-                pendingStatus = state
-                main.removeCallbacks(postStatus)
-                main.postDelayed(postStatus, (statusShownAt + STATUS_INTERVAL_MS - SystemClock.elapsedRealtime()).coerceAtLeast(0))
-                return true
-            }
+    override fun showStatus(state: ConnectionState): Boolean = synchronized(statusLock) {
+        if (foreground) {
+            pendingStatus = state
+            main.removeCallbacks(postStatus)
+            main.postDelayed(postStatus, (statusShownAt + STATUS_INTERVAL_MS - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+            return true
         }
         // A connection's first status: Android decides now whether the service may run in the foreground.
         val shown = startForegroundWith(state)
         if (shown) {
-            synchronized(statusLock) {
-                foreground = true
-                statusGeneration++
-                statusShownAt = SystemClock.elapsedRealtime()
-            }
+            foreground = true
+            statusGeneration++
+            statusShownAt = SystemClock.elapsedRealtime()
         }
-        return shown
+        shown
     }
 
     private fun postPendingStatus() {
-        val state = synchronized(statusLock) {
+        synchronized(statusLock) {
             val next = pendingStatus ?: return
             if (!foreground) return
             pendingStatus = null
             statusShownAt = SystemClock.elapsedRealtime()
-            next
+            startForegroundWith(next)
         }
-        startForegroundWith(state)
     }
 
     private fun startForegroundWith(state: ConnectionState): Boolean = try {
@@ -201,9 +198,11 @@ class ProxyFlowVpnService :
         }
         main.removeCallbacks(postStatus)
         main.post {
-            // A newer connection may have put the service in the foreground since: its notification stays.
-            val newer = synchronized(statusLock) { foreground || statusGeneration != generation }
-            if (!newer) ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            synchronized(statusLock) {
+                // A newer connection may have put the service in the foreground since: its notification stays.
+                val newer = foreground || statusGeneration != generation
+                if (!newer) ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            }
             val stopped = stopSelfResult(startId)
             runtime.log.add("service stop $startId: ${if (stopped) "stopping" else "a newer start keeps it"}")
         }
