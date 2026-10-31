@@ -138,9 +138,29 @@ class VpnConsentTest {
         waitForText("Allow a VPN connection")
         waitForText("Only one VPN app can be active. Starting another turns ProxyFlow off.", substring = true)
         compose.onNodeWithText("Continue").performClick()
-        val opened = device.wait(Until.hasObject(By.pkg(VPN_DIALOGS)), DIALOG_TIMEOUT_MS)
+        val opened = waitForAndroidsDialog()
         // The report only for a failure: it reads ProxyFlow's screen, which isn't there while Android's dialog is.
         if (!opened) throw AssertionError("Android's VPN dialog did not open\n${screenReport()}")
+    }
+
+    private fun waitForAndroidsDialog(): Boolean {
+        val deadline = System.currentTimeMillis() + DIALOG_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            dismissNotRespondingDialog()
+            if (device.wait(Until.hasObject(By.pkg(VPN_DIALOGS)), DIALOG_POLL_MS)) return true
+        }
+        return false
+    }
+
+    /**
+     * On a busy emulator another app (the launcher, in run 41235735086) can stop responding, and Android's
+     * "isn't responding" dialog then covers its VPN dialog: Wait dismisses it.
+     */
+    private fun dismissNotRespondingDialog() {
+        device.findObject(By.res("android", "aerr_wait"))?.let {
+            Log.i(TAG, "dismissed an app-not-responding dialog")
+            it.click()
+        }
     }
 
     /** What is in front, what has focus, and what Android logged about starting activities and the VPN. */
@@ -167,6 +187,7 @@ class VpnConsentTest {
 
     /** Presses a button of Android's dialog: by its id, or else by its text. */
     private fun press(id: BySelector, text: String) {
+        dismissNotRespondingDialog()
         val button = device.wait(Until.findObject(id), DIALOG_TIMEOUT_MS)
             ?: device.wait(Until.findObject(By.pkg(VPN_DIALOGS).text(Pattern.compile(text))), DIALOG_TIMEOUT_MS)
         checkNotNull(button) { "no such button in Android's VPN dialog" }.click()
@@ -194,6 +215,7 @@ class VpnConsentTest {
         const val UI_TIMEOUT_MS = 10_000L
         const val CONNECT_TIMEOUT_MS = 45_000L
         const val DIALOG_TIMEOUT_MS = 30_000L
+        const val DIALOG_POLL_MS = 2_000L
         const val REPORT_LINES = 12
         val LOG_TAGS = listOf("ActivityTaskManager", "vpndialogs", "ConfirmDialog", "VpnManager", "Vpn:", "AndroidRuntime", "ProxyFlowVpn")
     }

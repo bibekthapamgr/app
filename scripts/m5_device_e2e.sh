@@ -98,12 +98,27 @@ uplink_name() {
     esac
 }
 START=$SECONDS
-for _ in $(seq 1 45); do
-    if cellular_up; then break; fi
-    sleep 2
-done
 UPLINK=""
-if cellular_up; then
+# The API 35 image's mobile data came up late or never, or dropped during the tests, in four of its last
+# seven runs, while Wi-Fi with mobile data off held (run 41235735086, attempt 1): there Wi-Fi is the uplink.
+if [ "$API" = 35 ]; then
+    wifi_only
+    if uplink_within 60; then
+        UPLINK="$(uplink_name) (mobile data off: unreliable on this image)"
+    else
+        timeout 30 adb shell svc data enable >/dev/null 2>&1 || true
+        wifi_off || true
+        if uplink_within 90; then UPLINK="$(uplink_name) (Wi-Fi did not reach the runner)"; fi
+    fi
+else
+    for _ in $(seq 1 45); do
+        if cellular_up; then break; fi
+        sleep 2
+    done
+fi
+if [ -n "$UPLINK" ] || [ "$API" = 35 ]; then
+    : # chosen above
+elif cellular_up; then
     NOTE=""
     if ! wifi_off; then NOTE=", Wi-Fi would not stay off"; fi
     if uplink_within 60; then

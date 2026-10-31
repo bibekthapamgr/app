@@ -418,6 +418,11 @@ def main(argv: list[str]) -> int:
 
     facts += instrumentation_summary(logcat)
     facts += network_changes(logcat)
+    # What the tests did about the emulator rather than the app: an attempt retried after the phone's own uplink
+    # dropped ("no route to the proxy"), and "isn't responding" dialogs of other apps dismissed.
+    retried = sum(1 for line in logcat if re.search(r"ProxyFlowE2E\s*:\s*uplink dropped", line))
+    dismissed = sum(1 for line in logcat if re.search(r"ProxyFlowE2E\s*:\s*dismissed an app-not-responding dialog", line))
+    facts.append(f"emulator hiccups the tests worked around: {retried} attempts retried after the uplink dropped, {dismissed} not-responding dialogs dismissed")
 
     # The VPN layer's own account of what happened (connection steps, service starts and stops).
     lifecycle = [m.group(1) for line in logcat if (m := re.search(r"ProxyFlowVpn\s*:\s*(.*)$", line))]

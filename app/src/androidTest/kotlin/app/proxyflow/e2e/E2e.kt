@@ -9,12 +9,14 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.system.Os
+import android.util.Log
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import app.proxyflow.ProxyFlowApplication
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.engine.ProxyEngine
+import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfile
@@ -291,8 +293,24 @@ class App {
         return await(what = what) { it !== before && predicate(it) }
     }
 
-    fun connect(profileId: String): ConnectionState =
-        connectAndAwait(profileId, "Connected") { it.status == ConnectionStatus.Connected && it.profileId == profileId }
+    /**
+     * Connects [profileId] and returns the Connected state. An attempt that the phone's own uplink
+     * failed ("no route to the proxy": the emulator's network was gone for a moment, as the API 35
+     * image's sometimes is) is tried once more and logged, and the evidence counts these; any other
+     * failure, or a second one, fails the test at once.
+     */
+    fun connect(profileId: String): ConnectionState {
+        val ended = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
+        if (ended.status == ConnectionStatus.Connected) return ended
+        if (ended.error != UPLINK_DROPPED) throw AssertionError("connecting failed; state is $ended")
+        Log.i(TAG, "uplink dropped: connecting again")
+        val again = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
+        if (again.status != ConnectionStatus.Connected) throw AssertionError("connecting failed twice; state is $again")
+        return again
+    }
+
+    private fun ConnectionState.connectedOrFailed() = status == ConnectionStatus.Connected ||
+        (status == ConnectionStatus.Disconnected || status == ConnectionStatus.Blocked) && error != null
 
     /** An attempt that must fail before connecting: the state it ends in. */
     fun connectExpectingFailure(profileId: String): ConnectionState = connectAndAwait(profileId, "a failed attempt") {
@@ -335,6 +353,11 @@ class App {
         eventually("Android has no VPN network", timeoutMillis, diagnose) { VpnNetworks.now(context).isEmpty() }
     }
 }
+
+private const val TAG = "ProxyFlowE2E"
+
+/** What the engine reports when the phone has no route to the proxy at all: its own uplink is down. */
+private val UPLINK_DROPPED = ConnectionError("PROXY_UNREACHABLE", "no route to the proxy")
 
 /** How long a test's setup waits for an earlier test's VPN service and interface to go. */
 const val SETTLE_BEFORE_TEST_MS = 30_000L
