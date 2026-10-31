@@ -351,6 +351,8 @@ jobs:
       - name: Keystore, storage, engine and VPN tests on an emulator (API ${{ matrix.api-level }}), its uplink captured
         id: emulator
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        # Inside the job's limit, so the evidence, the digest and the upload below still run if the emulator hangs.
+        timeout-minutes: 58
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}

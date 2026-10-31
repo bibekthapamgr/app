@@ -263,10 +263,18 @@ def main(argv: list[str]) -> int:
     problems: list[str] = []
     facts: list[str] = [f"API {args.api}"]
 
-    logcat = read_lines(os.path.join(args.out, "logcat.txt"), required=True)
+    # The dump after the tests, or the stream taken while they ran when the dump is shorter (a device that hung).
+    dumped = read_lines(os.path.join(args.out, "logcat.txt"))
+    streamed = read_lines(os.path.join(args.out, "logcat-live.txt"))
+    logcat = dumped if len(dumped) >= len(streamed) else streamed
+    if not logcat:
+        problems.append("no logcat: neither the dump after the tests nor the stream taken while they ran")
     exchanged = [m.group(1) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*exchange (\S+)", line))]
     held = [m.group(1) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*held (\S+)", line))]
-    facts.append(f"logcat: {len(logcat)} lines, {len(exchanged)} exchanged lines, {len(held)} held lines")
+    facts.append(
+        f"logcat ({'dump after the tests' if logcat is dumped else 'stream taken during the tests'}): "
+        f"{len(logcat)} lines, {len(exchanged)} exchanged lines, {len(held)} held lines"
+    )
     if not exchanged:
         problems.append("no exchanged line in logcat: the end-to-end tests did not run (or logcat lost their lines)")
 

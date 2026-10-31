@@ -16,11 +16,12 @@ mkdir -p "$OUT"
 adb push /tmp/pf/e2e.properties /data/local/tmp/proxyflow-e2e.properties >/dev/null
 adb shell chmod 644 /data/local/tmp/proxyflow-e2e.properties
 
+# Every adb call that could wait for a wedged device is bounded, so the logs below are always collected.
 restart_adbd() {
-    adb "$1" >/dev/null 2>&1 || return 1
+    timeout 30 adb "$1" >/dev/null 2>&1 || return 1
     sleep 3
-    adb wait-for-device
-    adb shell true >/dev/null 2>&1
+    timeout 120 adb wait-for-device
+    timeout 30 adb shell true >/dev/null 2>&1
 }
 
 # The phone's uplink becomes its mobile data, which runs through the emulator's own network
@@ -91,9 +92,9 @@ fi
 # tcpdump is still running after the tests.
 GUEST_CAPTURE=0
 {
-    echo "adb root: $(adb root 2>&1 | tr -d '\r')"
+    echo "adb root: $(timeout 30 adb root 2>&1 | tr -d '\r')"
     sleep 3
-    adb wait-for-device
+    timeout 120 adb wait-for-device
     echo "id: $(adb shell id 2>&1 | tr -d '\r')"
     echo "tcpdump: $(adb shell 'command -v tcpdump || echo none' 2>&1 | tr -d '\r')"
 } > "$OUT/guest-capture.txt" 2>&1
@@ -114,28 +115,36 @@ else
 fi
 restart_adbd unroot || true
 
-adb logcat -G 16M >/dev/null 2>&1 || true
-adb logcat -c || true
+timeout 30 adb logcat -G 16M >/dev/null 2>&1 || true
+timeout 30 adb logcat -c || true
+# Logcat streamed to the runner as the tests run: it survives a device or a step that hangs later.
+adb logcat -v threadtime > "$OUT/logcat-live.txt" 2>&1 &
+LIVE_LOGCAT=$!
 
 # Bounded well inside the job's own limit, so that logcat, the captures and the evidence are still
 # collected when a test hangs (scripts/m5_evidence.py reads how far the tests got from logcat).
-timeout --kill-after=60s "${DEVICE_TESTS_TIMEOUT:-45m}" \
+# Into a file, not through tee: a Gradle daemon that outlives a stopped build would hold a pipe open.
+GRADLE_LOG="$RUNNER_TEMP/gradle-2-device.log"
+timeout --kill-after=60s "${DEVICE_TESTS_TIMEOUT:-40m}" \
     ./gradlew :core:data:connectedDebugAndroidTest :core:engine:connectedDebugAndroidTest :app:connectedDebugAndroidTest \
-    --continue 2>&1 | tee "$RUNNER_TEMP/gradle-2-device.log"
-STATUS=${PIPESTATUS[0]}
+    --continue > "$GRADLE_LOG" 2>&1
+STATUS=$?
+cat "$GRADLE_LOG"
 if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
-    echo "::error title=Device tests (API $API)::The device tests ran past ${DEVICE_TESTS_TIMEOUT:-45m} and were stopped; the evidence lists from logcat which tests ran, failed or never finished."
+    echo "::error title=Device tests (API $API)::The device tests ran past ${DEVICE_TESTS_TIMEOUT:-40m} and were stopped; the evidence lists from logcat which tests ran, failed or never finished."
+    timeout 60 ./gradlew --stop >/dev/null 2>&1 || true # its daemon may still be running them
 fi
 
-adb logcat -d > "$OUT/logcat.txt" 2>&1 || true
+timeout 120 adb logcat -d > "$OUT/logcat.txt" 2>&1 || true
+kill "$LIVE_LOGCAT" 2>/dev/null || true
 if [ "$GUEST_CAPTURE" = 1 ]; then
     restart_adbd root || true
-    echo "tcpdump at the end: $(adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
-    adb shell 'pkill -INT tcpdump || killall -INT tcpdump' >/dev/null 2>&1 || true
+    echo "tcpdump at the end: $(timeout 30 adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
+    timeout 30 adb shell 'pkill -INT tcpdump || killall -INT tcpdump' >/dev/null 2>&1 || true
     sleep 3
     for iface in $(cat "$OUT/guest-interfaces.txt"); do
-        adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1 || true
+        timeout 180 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1 || true
     done
 fi
-adb shell rm -f /data/local/tmp/proxyflow-e2e.properties >/dev/null 2>&1 || true
+timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties >/dev/null 2>&1 || true
 exit "$STATUS"
