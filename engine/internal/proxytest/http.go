@@ -16,6 +16,12 @@ func (s *Server) serveHTTP(c net.Conn) {
 	br := bufio.NewReaderSize(c, 4096)
 	rec := Record{AddrType: "authority"}
 	recorded := false
+	// decide records the outcome before the client can see it (see serveSOCKS5).
+	decide := func(outcome string) {
+		rec.Outcome = outcome
+		s.record(rec)
+		recorded = true
+	}
 	defer func() {
 		if !recorded {
 			s.record(rec)
@@ -35,7 +41,8 @@ func (s *Server) serveHTTP(c net.Conn) {
 		if n == 0 {
 			parts := strings.Split(line, " ")
 			if len(parts) != 3 || parts[0] != "CONNECT" || !strings.HasPrefix(parts[2], "HTTP/1.") {
-				rec.Head, rec.Outcome = head.String(), "protocol"
+				rec.Head = head.String()
+				decide("protocol")
 				s.writeStatus(c, http.StatusMethodNotAllowed, nil)
 				return
 			}
@@ -56,8 +63,8 @@ func (s *Server) serveHTTP(c net.Conn) {
 	s.delay()
 
 	if s.cfg.RawResponse != nil {
+		decide("scripted")
 		_, _ = c.Write(s.cfg.RawResponse)
-		rec.Outcome = "scripted"
 		return
 	}
 	if s.cfg.Username != "" {
@@ -66,36 +73,37 @@ func (s *Server) serveHTTP(c net.Conn) {
 			if scheme == "" {
 				scheme = "Basic"
 			}
-			s.writeStatus(c, http.StatusProxyAuthRequired, []string{"Proxy-Authenticate: " + scheme + ` realm="proxytest"`})
-			rec.Outcome = "auth-failed"
 			if auth == "" {
-				rec.Outcome = "auth-missing"
+				decide("auth-missing")
+			} else {
+				decide("auth-failed")
 			}
+			s.writeStatus(c, http.StatusProxyAuthRequired, []string{"Proxy-Authenticate: " + scheme + ` realm="proxytest"`})
 			return
 		}
 	}
 	if s.cfg.HTTPStatus != 0 && (s.cfg.HTTPStatus < 200 || s.cfg.HTTPStatus > 299) {
+		decide("scripted")
 		s.writeStatus(c, s.cfg.HTTPStatus, nil)
-		rec.Outcome = "scripted"
 		return
 	}
 	host, portStr, err := net.SplitHostPort(authority)
 	port, perr := strconv.ParseUint(portStr, 10, 16)
 	if err != nil || perr != nil {
+		decide("protocol")
 		s.writeStatus(c, http.StatusBadRequest, nil)
-		rec.Outcome = "protocol"
 		return
 	}
 	addr, ok := s.resolve(host, uint16(port))
 	if !ok {
+		decide("unreachable")
 		s.writeStatus(c, http.StatusBadGateway, nil)
-		rec.Outcome = "unreachable"
 		return
 	}
 	up, err := s.dialDest(addr)
 	if err != nil {
+		decide("refused")
 		s.writeStatus(c, http.StatusBadGateway, nil)
-		rec.Outcome = "refused"
 		return
 	}
 	status := 200
@@ -107,13 +115,11 @@ func (s *Server) serveHTTP(c net.Conn) {
 		resp += h + "\r\n"
 	}
 	resp += "\r\n"
+	decide("ok")
 	if _, err := c.Write(append([]byte(resp), s.cfg.TunnelPreface...)); err != nil {
 		s.untrack(up)
 		return
 	}
-	rec.Outcome = "ok"
-	s.record(rec) // before relaying, so tests can inspect it while the tunnel is open
-	recorded = true
 	s.relay(readWriter{br, c}, c, up)
 }
 

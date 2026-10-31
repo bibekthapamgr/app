@@ -14,6 +14,13 @@ func (s *Server) serveSOCKS5(c net.Conn) {
 	br := bufio.NewReader(c)
 	rec := Record{}
 	recorded := false
+	// decide records the outcome before the client can see it, so a test that
+	// reads Records right after its dial returns always finds this connection.
+	decide := func(outcome string) {
+		rec.Outcome = outcome
+		s.record(rec)
+		recorded = true
+	}
 	defer func() {
 		if !recorded {
 			s.record(rec)
@@ -46,8 +53,12 @@ func (s *Server) serveSOCKS5(c net.Conn) {
 	case s.cfg.Username == "" && contains(methods, 0x00):
 		method = 0x00
 	}
-	if _, err := c.Write([]byte{ver, method}); err != nil || method == 0xFF || ver != 5 {
-		rec.Outcome = "auth-missing"
+	if method == 0xFF || ver != 5 {
+		decide("auth-missing")
+		_, _ = c.Write([]byte{ver, method})
+		return
+	}
+	if _, err := c.Write([]byte{ver, method}); err != nil {
 		return
 	}
 	if method == 0x02 {
@@ -58,8 +69,8 @@ func (s *Server) serveSOCKS5(c net.Conn) {
 		}
 		rec.Username, rec.Password = user, pass
 		if user != s.cfg.Username || pass != s.cfg.Password {
+			decide("auth-failed")
 			_, _ = c.Write([]byte{1, 1})
-			rec.Outcome = "auth-failed"
 			return
 		}
 		if _, err := c.Write([]byte{1, 0}); err != nil {
@@ -98,8 +109,8 @@ func (s *Server) serveSOCKS5(c net.Conn) {
 		}
 		host, rec.AddrType = string(name), "domain"
 	default:
+		decide("protocol")
 		s.socksReply(c, 0x08, nil)
-		rec.Outcome = "protocol"
 		return
 	}
 	var pb [2]byte
@@ -111,27 +122,28 @@ func (s *Server) serveSOCKS5(c net.Conn) {
 	s.delay()
 
 	if req[1] != 1 {
+		decide("protocol")
 		s.socksReply(c, 0x07, nil)
-		rec.Outcome = "protocol"
 		return
 	}
 	if s.cfg.SOCKSReply != 0 {
+		decide("scripted")
 		s.socksReply(c, s.cfg.SOCKSReply, nil)
-		rec.Outcome = "scripted"
 		return
 	}
 	addr, ok := s.resolve(host, port)
 	if !ok {
+		decide("unreachable")
 		s.socksReply(c, 0x04, nil)
-		rec.Outcome = "unreachable"
 		return
 	}
 	up, err := s.dialDest(addr)
 	if err != nil {
+		decide("refused")
 		s.socksReply(c, 0x05, nil)
-		rec.Outcome = "refused"
 		return
 	}
+	decide("ok")
 	if !s.socksReply(c, 0x00, up.LocalAddr()) {
 		s.untrack(up)
 		return
@@ -142,9 +154,6 @@ func (s *Server) serveSOCKS5(c net.Conn) {
 			return
 		}
 	}
-	rec.Outcome = "ok"
-	s.record(rec) // before relaying, so tests can inspect it while the tunnel is open
-	recorded = true
 	s.relay(readWriter{br, c}, c, up)
 }
 

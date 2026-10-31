@@ -35,7 +35,9 @@ class AndroidEnginePlatform(
 ) : Platform {
     private val trust = X509TrustManagerExtensions(trustManager)
 
-    override fun protect(fd: Long): Boolean = protector(fd.toInt())
+    // An exception must not cross into Go: only methods with an error result can carry one.
+    // A socket that could not be protected is reported as such, which fails the dial closed.
+    override fun protect(fd: Long): Boolean = runCatching { protector(fd.toInt()) }.getOrDefault(false)
 
     override fun resolveProxyHost(host: String): String {
         val addresses = network?.getAllByName(host) ?: InetAddress.getAllByName(host)
@@ -56,11 +58,14 @@ class AndroidEnginePlatform(
             ""
         } catch (e: CertificateException) {
             CertificateChains.verdict(e)
+        } catch (e: RuntimeException) {
+            "TLS_UNTRUSTED: the platform could not check the certificate"
         }
     }
 
     override fun onEvent(json: String) {
-        EngineJson.event(json)?.let(onEvent)
+        val event = EngineJson.event(json) ?: return
+        runCatching { onEvent(event) }
     }
 
     companion object {

@@ -6,6 +6,7 @@ import android.system.OsConstants
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.proxyflow.core.model.ProxyProtocol
+import java.io.FileDescriptor
 import java.io.FileInputStream
 import java.net.ServerSocket
 import java.util.Base64
@@ -76,6 +77,22 @@ class EngineOnDeviceTest {
     )
 
     private fun secret(user: String, pass: String) = EngineSecret.of(user.toCharArray(), pass.toCharArray())
+
+    /**
+     * A datagram socketpair standing in for the TUN descriptor (each read is one
+     * packet, as on a TUN). ParcelFileDescriptor only offers stream pairs publicly.
+     */
+    private fun datagramPair(): List<ParcelFileDescriptor> {
+        val a = FileDescriptor()
+        val b = FileDescriptor()
+        Os.socketpair(OsConstants.AF_UNIX, OsConstants.SOCK_DGRAM, 0, a, b)
+        try {
+            return listOf(ParcelFileDescriptor.dup(a), ParcelFileDescriptor.dup(b)).onEach { closeables += it }
+        } finally {
+            Os.close(a)
+            Os.close(b)
+        }
+    }
 
     @Test
     fun socks5AndHttpConnectCarryTcpToTheDestination() {
@@ -213,9 +230,7 @@ class EngineOnDeviceTest {
 
     @Test
     fun theEngineStartsAndStopsOnADescriptorItDoesNotOwn() {
-        val pair = ParcelFileDescriptor.createSocketPair(OsConstants.SOCK_DGRAM)
-        closeables += pair[0]
-        closeables += pair[1]
+        val pair = datagramPair()
         val proxy = proxy(MockProxy.Protocol.SOCKS5)
         engine.start(pair[0].fd, profile(proxy), null, systemPlatform)
         assertEquals(EngineState.Running, engine.status().state)
@@ -256,9 +271,7 @@ class EngineOnDeviceTest {
                 outputs +=
                     engine.selfTest(logging, secret(user, pass), "echo.test:7", "x".toByteArray(), 1, 20_000, systemPlatform).toString()
             }
-            val pair = ParcelFileDescriptor.createSocketPair(OsConstants.SOCK_DGRAM)
-            closeables += pair[0]
-            closeables += pair[1]
+            val pair = datagramPair()
             engine.start(pair[0].fd, profile(good), secret(user, pass), systemPlatform)
             outputs += engine.status().toString() + engine.stats().toString() + engine.flows().toString()
             outputs +=

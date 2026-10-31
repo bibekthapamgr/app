@@ -112,20 +112,23 @@ class MockProxy(
             !wantsSignIn && 0.toByte() in methods -> 0
             else -> 0xFF
         }
-        output.write(byteArrayOf(5, method.toByte()))
         var user: String? = null
         var pass: String? = null
+        // Each outcome is recorded before the client can see it, so a test reading
+        // records right after its call returns always finds this connection.
         if (method == 0xFF) {
             records += Record("", "", null, null, "auth-missing")
+            output.write(byteArrayOf(5, method.toByte()))
             return
         }
+        output.write(byteArrayOf(5, method.toByte()))
         if (method == 2) {
             check(input.readUnsignedByte() == 1)
             user = String(ByteArray(input.readUnsignedByte()).also { input.readFully(it) })
             pass = String(ByteArray(input.readUnsignedByte()).also { input.readFully(it) })
             if (user != username || pass != password) {
-                output.write(byteArrayOf(1, 1))
                 records += Record("", "", user, pass, "auth-failed")
+                output.write(byteArrayOf(1, 1))
                 return
             }
             output.write(byteArrayOf(1, 0))
@@ -143,18 +146,18 @@ class MockProxy(
         val target = if (':' in host) "[$host]:$port" else "$host:$port"
         val destination = resolve(host, port)
         if (command != 1 || destination == null) {
-            output.write(byteArrayOf(5, if (command != 1) 7 else 4, 0, 1, 0, 0, 0, 0, 0, 0))
             records += Record(target, type, user, pass, "unreachable")
+            output.write(byteArrayOf(5, if (command != 1) 7 else 4, 0, 1, 0, 0, 0, 0, 0, 0))
             return
         }
         val upstream = runCatching { Socket().apply { connect(destination, 5000) } }.getOrNull()
         if (upstream == null) {
-            output.write(byteArrayOf(5, 5, 0, 1, 0, 0, 0, 0, 0, 0))
             records += Record(target, type, user, pass, "refused")
+            output.write(byteArrayOf(5, 5, 0, 1, 0, 0, 0, 0, 0, 0))
             return
         }
-        output.write(byteArrayOf(5, 0, 0, 1, 127, 0, 0, 1, 0, 0))
         records += Record(target, type, user, pass, "ok")
+        output.write(byteArrayOf(5, 0, 0, 1, 127, 0, 0, 1, 0, 0))
         relay(input, output, upstream)
     }
 
@@ -179,8 +182,8 @@ class MockProxy(
             pass = decoded.substringAfter(':')
         }
         if (username != null && (user != username || pass != password)) {
-            output.write("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"mock\"\r\n\r\n".toByteArray())
             records += Record(authority, "authority", user, pass, if (authorization == null) "auth-missing" else "auth-failed")
+            output.write("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"mock\"\r\n\r\n".toByteArray())
             return
         }
         val host = authority.substringBeforeLast(':').removePrefix("[").removeSuffix("]")
@@ -188,12 +191,12 @@ class MockProxy(
         val destination = resolve(host, port)
         val upstream = destination?.let { runCatching { Socket().apply { connect(it, 5000) } }.getOrNull() }
         if (upstream == null) {
-            output.write("HTTP/1.1 502 Bad Gateway\r\n\r\n".toByteArray())
             records += Record(authority, "authority", user, pass, "unreachable")
+            output.write("HTTP/1.1 502 Bad Gateway\r\n\r\n".toByteArray())
             return
         }
-        output.write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray())
         records += Record(authority, "authority", user, pass, "ok")
+        output.write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray())
         relay(input, output, upstream)
     }
 
