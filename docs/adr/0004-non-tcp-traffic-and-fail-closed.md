@@ -1,6 +1,6 @@
 # ADR-0004 — Non-TCP traffic policy and fail-closed semantics
 
-**Status:** Proposed · **Date:** 2026-10-30
+**Status:** Accepted 2026-10-31 (decided by the tech lead under the owner's delegation of the networking decisions) · **Date:** 2026-10-30
 
 ## Context
 
@@ -37,3 +37,7 @@ The in-app "kill switch" is therefore always on while connected (it is the engin
 ## Evidence
 
 E08 (UDP and UDP/443 rejected, ICMP unreachable delivered, zero UDP on uplink), E09 (kernel pings, small and 2,000-byte fragmented, plus raw IPv4 and IPv6 echo requests — small, 2 KB fragmented, behind an extension header, atomic fragment: zero replies; zero ICMP on the uplink), unit `TestPingIsNeverAnswered` (fails without the filter), `TestEchoFilterBlocksOutboundReplies`, `TestClassifyICMP`, E10 (outage), E11 A/B/C (crash vs teardown with and without lockdown), unit `TestIPv6UDPRejectedAndDNSAnswered`, `TestIPv6TCPIsForwardedByAddress`.
+
+## Implementation (M4)
+
+`engine/tunnel` (`handleUDP`, `echofilter.go`) with the tests named above, plus the M4 engine tests for fail-closed behaviour through the real adapters (`TestProxyOutageFailsClosed`, `TestStopEndsOpenFlowsAndCancelsSetups`) and the on-device self-test, which checks that UDP to a destination is refused (`EngineOnDeviceTest`).

@@ -1,6 +1,6 @@
 # ADR-0003 — DNS: fake-IP with resolution at the proxy
 
-**Status:** Proposed (owner decision D5 on record types) · **Date:** 2026-10-30
+**Status:** Accepted 2026-10-31 (decision D5 delegated by the owner: the recommended record-type handling in point 4) · **Date:** 2026-10-30
 
 ## Context
 
@@ -31,3 +31,7 @@ Apps resolve hostnames before connecting. If those lookups go to the ISP's resol
 ## Evidence
 
 E07 (A mapped, TXT refused, queries to 8.8.8.8 and to the underlay resolver intercepted, zero port-53 packets on the uplink), E16 (only proxy hostnames reached the underlying resolver; unknown proxy host → `PROXY_DNS_FAILED`), unit tests `TestResponder*`, `TestPool*`, fuzz target `FuzzResponder`.
+
+## Implementation (M4)
+
+`engine/fakedns` and `engine/tunnel/udp.go` (UDP/53 to any address answered locally; at most 256 DNS sockets at once, extra ones dropped and counted). The proxy's own hostname is resolved through the app's `Platform.ResolveProxyHost` callback (`Network.getAllByName` on the underlying network); the engine has no other resolver in production.

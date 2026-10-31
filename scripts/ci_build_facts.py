@@ -10,9 +10,12 @@ on the release runtime classpath.
 Usage:
   ci_build_facts.py <output of ./gradlew :app:dependencies --configuration releaseRuntimeClasspath>
   ci_build_facts.py --device-tests <label>   (each instrumented test and its result, per emulator)
+  ci_build_facts.py --go-tests <go test -json output>   (engine tests per package; failures as errors)
+  ci_build_facts.py --engine-aar <engine/build/pfengine-facts.txt>   (what engine/build-aar.sh built)
 """
 
 import glob
+import json
 import os
 import re
 import secrets
@@ -98,6 +101,39 @@ def device_tests(label: str) -> list[str]:
     return lines or [f"DEVICE TESTS {label}: no results found"]
 
 
+def go_tests(path: str) -> tuple[list[str], list[str]]:
+    """Counts per package from `go test -json`, and the output of every failing test."""
+    counts: dict[str, list[int]] = {}
+    output: dict[tuple[str, str], list[str]] = {}
+    failed: list[tuple[str, str]] = []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            pkg, test, action = ev.get("Package", ""), ev.get("Test"), ev.get("Action")
+            short_pkg = pkg.removeprefix("github.com/bibekthapamgr/app/")
+            if test and action == "output":
+                output.setdefault((short_pkg, test), []).append(ev.get("Output", ""))
+            if test and "/" not in test and action in ("pass", "fail", "skip"):
+                c = counts.setdefault(short_pkg, [0, 0, 0])
+                c[("pass", "fail", "skip").index(action)] += 1
+                if action == "fail":
+                    failed.append((short_pkg, test))
+            if not test and action == "fail" and short_pkg not in counts:
+                counts.setdefault(short_pkg, [0, 0, 0])
+                failed.append((short_pkg, "(package did not build or a test crashed)"))
+    total = [sum(c[i] for c in counts.values()) for i in range(3)]
+    lines = [f"GO TESTS {total[0]} passed, {total[1]} failed, {total[2]} skipped (top-level tests, race detector on)"]
+    lines += [f"  {pkg}: {c[0]} passed, {c[1]} failed, {c[2]} skipped" for pkg, c in sorted(counts.items())]
+    errors = []
+    for pkg, test in failed:
+        text = "".join(output.get((pkg, test), []))[-3000:]
+        errors.append(f"{pkg} {test} FAILED\n{text}")
+    return lines, errors
+
+
 def escape(text: str) -> str:
     return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
@@ -125,5 +161,14 @@ def emit(lines: list[str]) -> None:
 if __name__ == "__main__":
     if sys.argv[1] == "--device-tests":
         emit(device_tests(sys.argv[2]))
+    elif sys.argv[1] == "--go-tests":
+        summary, failures = go_tests(sys.argv[2])
+        emit(summary)
+        for failure in failures[:10]:
+            print(failure)
+            print(f"::error title=go test::{escape(failure[:MAX_CHUNK])}")
+    elif sys.argv[1] == "--engine-aar":
+        with open(sys.argv[2], encoding="utf-8", errors="replace") as f:
+            emit([line.rstrip("\n") for line in f])
     else:
         emit(tests() + apks() + manifests() + database_export() + dependencies(sys.argv[1]))

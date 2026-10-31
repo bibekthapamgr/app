@@ -1,9 +1,11 @@
 name: android
 
-# App checks: formatting (ktlint), Android Lint, JVM and Robolectric tests,
-# the committed Room schema, debug and release builds, the release manifest,
+# App checks: the Go packet engine (engine job: tests with the race detector,
+# fuzzing, a vulnerability scan, then the gomobile AAR the Android modules
+# use), formatting (ktlint), Android Lint, JVM and Robolectric tests, the
+# committed Room schema, debug and release builds, the release manifest,
 # screenshots of every screen compared with the committed ones, and (device
-# job) the Android Keystore and storage tests on emulators. The secrets scan
+# job) the Android Keystore, storage and engine tests on emulators. The secrets scan
 # has its own workflow (secrets.yml), which runs on every push whatever changed.
 # Third-party actions are pinned to commit SHAs (tag in the comment) so a
 # moved tag cannot change what runs. Each Gradle step runs even when an
@@ -26,7 +28,85 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The packet engine (engine/, ADR-0001..0005). go.sum is checked against the
+  # checksum database; the tests run the adapters against mock SOCKS5 and HTTP
+  # CONNECT proxies (sign-in, TLS with a test PKI, timeouts, cancellation),
+  # the netstack through them, and check that nothing leaks (goroutines,
+  # descriptors) or prints a credential. The AAR is built from exactly the
+  # tested dependencies (build-aar.sh checks) and handed to the jobs below.
+  engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: engine/go.sum
+
+      - name: Modules match go.sum and the checksum database, go.mod is tidy
+        run: |
+          go mod download
+          go mod verify
+          go mod tidy -diff
+
+      - name: Formatting (gofmt) and go vet
+        if: ${{ !cancelled() }}
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then echo "::error title=gofmt::not formatted: $unformatted"; exit 1; fi
+          go vet ./...
+
+      - name: Tests with the race detector (adapters, mock proxies, netstack, lifecycle, leaks)
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          go test -race -count=1 -json ./... > "$RUNNER_TEMP/go-test.json"
+          status=$?
+          python3 ../scripts/ci_build_facts.py --go-tests "$RUNNER_TEMP/go-test.json"
+          exit $status
+
+      - name: Fuzz every parser (30 s each)
+        if: ${{ !cancelled() }}
+        run: |
+          for target in adapters:FuzzReadSOCKS5Reply adapters:FuzzReadConnectResponse adapters:FuzzParseCredentials \
+                        adapters:FuzzConnectRequest fakedns:FuzzResponder; do
+            go test -run '^$' -fuzz "^${target#*:}\$" -fuzztime 30s "./${target%%:*}"
+          done
+
+      - name: Known vulnerabilities in the engine and its dependencies (govulncheck)
+        if: ${{ !cancelled() }}
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+      - name: Build the AAR (gomobile; armeabi-v7a, arm64-v8a, x86_64; 16 KB pages checked)
+        id: aar
+        if: ${{ !cancelled() }}
+        run: |
+          ./build-aar.sh
+          python3 ../scripts/ci_build_facts.py --engine-aar build/pfengine-facts.txt
+
+      - name: Upload the AAR (for the build and device jobs)
+        if: ${{ !cancelled() && steps.aar.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pfengine-aar
+          path: |
+            engine/build/pfengine.aar
+            engine/build/pfengine-facts.txt
+          if-no-files-found: error
+
   build:
+    # Runs even when the engine job failed, so every app check still reports;
+    # only the :core:engine tasks then fail, for lack of the AAR.
+    needs: engine
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
@@ -36,6 +116,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false # the build runs project code; it needs no token
+
+      # Whenever the engine job built it, even if another engine check failed.
+      - name: The engine AAR from the engine job
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pfengine-aar
+          path: engine/build
 
       - name: Design tokens and generated colours agree
         run: |
@@ -63,9 +151,9 @@ jobs:
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: ./gradlew spotlessCheck --continue 2>&1 | tee "$RUNNER_TEMP/gradle-1-spotless.log"
 
-      - name: Android Lint (app and every module it uses)
+      - name: Android Lint (app and every module it uses, and the engine module)
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
-        run: ./gradlew :app:lintDebug --continue 2>&1 | tee "$RUNNER_TEMP/gradle-2-lint.log"
+        run: ./gradlew :app:lintDebug :core:engine:lintDebug --continue 2>&1 | tee "$RUNNER_TEMP/gradle-2-lint.log"
 
       - name: Unit, ViewModel and Robolectric UI tests
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
@@ -174,10 +262,15 @@ jobs:
   # the real SQLite, and every file in the app's data directory checked for
   # plaintext (core/data/src/androidTest). Robolectric has no Android Keystore,
   # so these tests only run here: on the oldest supported Android (minSdk 29)
-  # and a current one.
+  # and a current one. The engine (core/engine/src/androidTest) runs here too:
+  # the real libgojni.so carrying TCP through mock SOCKS5 and HTTP CONNECT
+  # proxies, TLS checked by the platform trust manager, the whole packet
+  # engine on a socketpair, and logcat searched for the test credentials.
   device:
+    needs: engine
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -189,6 +282,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # Whenever the engine job built it, even if another engine check failed.
+      - name: The engine AAR from the engine job
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pfengine-aar
+          path: engine/build
 
       - id: wrapper
         uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
@@ -210,10 +311,10 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Build the instrumented tests
-        run: ./gradlew :core:data:assembleDebugAndroidTest 2>&1 | tee "$RUNNER_TEMP/gradle-1-device-build.log"
+        run: ./gradlew :core:data:assembleDebugAndroidTest :core:engine:assembleDebugAndroidTest --continue 2>&1 | tee "$RUNNER_TEMP/gradle-1-device-build.log"
 
       # The action runs each script line with sh; bash keeps the Gradle exit status through tee.
-      - name: Keystore and storage tests on an emulator (API ${{ matrix.api-level }})
+      - name: Keystore, storage and engine tests on an emulator (API ${{ matrix.api-level }})
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}
@@ -221,7 +322,7 @@ jobs:
           arch: x86_64
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: bash -c 'set -o pipefail; ./gradlew :core:data:connectedDebugAndroidTest --continue 2>&1 | tee "$RUNNER_TEMP/gradle-2-device.log"'
+          script: bash -c 'set -o pipefail; ./gradlew :core:data:connectedDebugAndroidTest :core:engine:connectedDebugAndroidTest --continue 2>&1 | tee "$RUNNER_TEMP/gradle-2-device.log"'
 
       - name: Device test counts (emitted as notices)
         if: ${{ !cancelled() }}
@@ -239,4 +340,6 @@ jobs:
           path: |
             core/data/build/reports/androidTests/
             core/data/build/outputs/androidTest-results/
+            core/engine/build/reports/androidTests/
+            core/engine/build/outputs/androidTest-results/
           if-no-files-found: warn

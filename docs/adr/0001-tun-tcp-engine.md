@@ -1,6 +1,6 @@
 # ADR-0001 — TUN/TCP engine: gVisor netstack
 
-**Status:** Proposed (owner decision D1) · **Date:** 2026-10-30 · **Deciders:** product owner, tech lead
+**Status:** Accepted 2026-10-31 (decision D1, delegated by the owner to the tech lead) · **Date:** 2026-10-30 · **Deciders:** product owner, tech lead
 
 ## Context
 
@@ -32,3 +32,7 @@ Full comparison: `docs/m1/08-dependency-review.md` §1.
 ## Evidence
 
 Lab run `run-m1-20261030T003301Z` (canonical, from the current code; three earlier runs are kept as history): E01–E04, E07–E14, E16 pass with this engine; E13 throughput table; E12 cleanup (`Stop()` took 24 ms with 200 flows open, goroutines 608 → 2); 54/54 Go tests plus 20 race-detector repeats of the engine tests; fuzzing with no crashes. The M1 checks also found that gVisor's IPv6 layer answers pings by itself, large fragmented ones included; the engine now filters echo traffic (ADR-0004).
+
+## Implementation (M4)
+
+`engine/` (Go module `github.com/bibekthapamgr/app/engine`, Go 1.27.3): `tunnel` (the netstack engine), `adapters`, `fakedns`, `pfengine` (the gomobile API) and `internal/proxytest` (mock proxies for tests). gVisor stays pinned at `v0.0.0-20261029062900-94fcb330700e`; gomobile at `golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e`; the AAR is built by `engine/build-aar.sh` in CI. Licences and pins: `docs/m4/dependency-review.md`. Engine API and protocol behaviour: `docs/m4/protocol-compatibility.md`.

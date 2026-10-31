@@ -75,7 +75,7 @@ Dark theme is designed for B2, B4, B6a and C2 (all other screens follow the same
 | `CREDENTIAL_UNREADABLE` | System | Re-enter your password | The saved password can't be read on this phone any more, so it isn't used. Enter it again. | Edit profile | — | n/a |
 | `ENGINE_STOPPED` | System | Protection stopped unexpectedly | The packet engine stopped while connected. Traffic stays blocked until you restart it or disconnect. | Restart | Copy diagnostics | Error, blocked |
 
-*Codes not emitted by the engine (`VPN_*`, `ALWAYS_ON_OTHER_APP`, `OFFLINE`, `CREDENTIAL_UNREADABLE`, `ENGINE_STOPPED`) are produced by the VPN service / storage layers in M3/M5. The engine's own split is `IsProxyLevel()` in `adapters/errors.go`: 10 proxy-level codes, 9 others; only proxy-level codes count towards the escalation rule.*
+*Codes not emitted by the engine (`VPN_*`, `ALWAYS_ON_OTHER_APP`, `OFFLINE`, `CREDENTIAL_UNREADABLE`) are produced by the VPN service / storage layers in M3/M5; `ENGINE_STOPPED` is reported by the engine when its packet loop ends without being stopped (the TUN closed or failed, M4) and acted on by the VPN service. The engine's own split is `IsProxyLevel()` in `engine/adapters/errors.go`: 10 proxy-level codes, 10 others; only proxy-level codes count towards the escalation rule. One of the others, `CANCELED` (M4), is internal: a connection still being set up when the engine stops or resets its flows; it is counted, never shown and never logged as a failure.*
 
 Escalation rule: a proxy-level code from **3 consecutive** dials (or any auth/TLS code once) switches Home to the error state; the first success clears it. Target-level codes never change the global state.
 

@@ -1,6 +1,6 @@
 # ADR-0005 — TLS to proxy, trust anchors and the Play encryption requirement
 
-**Status:** Proposed (owner decisions D2, D7) · **Date:** 2026-10-30
+**Status:** Decisions 1, 2 and 4 accepted 2026-10-31 (technical; delegated by the owner) — decision 3 (**D2**, plaintext proxies in the Play build) and **D7** (TLS default in the form) remain open for the owner · **Date:** 2026-10-30
 
 ## Context
 
@@ -31,3 +31,7 @@
 ## Evidence
 
 E04 (six cases: valid SOCKS5+TLS, valid HTTP+TLS with auth, expired, hostname mismatch, untrusted issuer, TLS to a plaintext port), E05 (plaintext exposure), unit `TestTLSToProxyValidation`, `TestTLSToPlaintextProxy`. On-device validation with the platform trust manager in M6.
+
+## Implementation (M4)
+
+`engine/adapters/tls.go` and `core/engine` (`AndroidEnginePlatform`). One refinement of decision 2: the engine checks the hostname itself (Go's RFC 6125 matching on the leaf, `TLS_HOSTNAME`) and then hands the chain to the platform trust manager through `X509TrustManagerExtensions.checkServerTrusted(chain, "GENERIC", host)`, which decides trust and validity (`TLS_UNTRUSTED`, `TLS_EXPIRED`) — Android's trust manager does not check hostnames, so this split keeps both checks. Go's built-in verification is replaced by this callback on every handshake, resumed sessions included; there is no switch to turn it off and no plaintext fallback. On-device evidence (system trust rejects a private CA, an expired certificate, a wrong name): `core/engine/src/androidTest/.../EngineOnDeviceTest.kt`.
