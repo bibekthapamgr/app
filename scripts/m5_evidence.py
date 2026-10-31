@@ -181,11 +181,16 @@ def read_capture(path: str) -> Capture:
 # --- logs -------------------------------------------------------------------
 
 
-def read_lines(path: str) -> list[str]:
+UNREADABLE: list[str] = []
+
+
+def read_lines(path: str, required: bool = False) -> list[str]:
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             return f.read().splitlines()
-    except OSError:
+    except OSError as e:
+        if required:
+            UNREADABLE.append(f"{os.path.basename(path)}: {e.strerror}")
         return []
 
 
@@ -209,7 +214,7 @@ def main(argv: list[str]) -> int:
     problems: list[str] = []
     facts: list[str] = [f"API {args.api}"]
 
-    logcat = read_lines(os.path.join(args.out, "logcat.txt"))
+    logcat = read_lines(os.path.join(args.out, "logcat.txt"), required=True)
     exchanged = [m.group(1) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*exchange (\S+)", line))]
     held = [m.group(1) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*held (\S+)", line))]
     facts.append(f"logcat: {len(logcat)} lines, {len(exchanged)} exchanged lines, {len(held)} held lines")
@@ -229,7 +234,7 @@ def main(argv: list[str]) -> int:
     facts.append("logcat: neither test password appears" if not any("password appears" in p for p in problems) else "logcat: a password appears")
 
     # The destination: "<time> <peer> <line>".
-    destination = [line.split(" ", 2) for line in read_lines(os.path.join(args.pf, "destination.log")) if line.count(" ") >= 2]
+    destination = [line.split(" ", 2) for line in read_lines(os.path.join(args.pf, "destination.log"), required=True) if line.count(" ") >= 2]
     lines_at_destination = [parts[2] for parts in destination]
     for line in exchanged:
         count = lines_at_destination.count(line)
@@ -241,12 +246,12 @@ def main(argv: list[str]) -> int:
     facts.append(f"destination: {len(destination)} connections; every exchanged line arrived once; no held line arrived")
 
     # The proxies' tunnels to the destination.
-    squid = read_lines(os.path.join(args.pf, "squid-access.log"))
+    squid = read_lines(os.path.join(args.pf, "squid-access.log"), required=True)
     squid_tunnels = [line for line in squid if "TCP_TUNNEL/200" in line and f"CONNECT {DESTINATION_NAME}:{DESTINATION_PORT}" in line]
     squid_by_address = [line for line in squid if f"CONNECT {DESTINATION_ADDRESS}:{DESTINATION_PORT}" in line]
     squid_denied = [line for line in squid if "TCP_DENIED/407" in line]
     squid_preflight = [line for line in squid if "CONNECT connectivitycheck.gstatic.com:443" in line]
-    dante = read_lines(os.path.join(args.pf, "danted.log"))
+    dante = read_lines(os.path.join(args.pf, "danted.log"), required=True)
     dante_tunnels = [line for line in dante if re.search(r"tcp/connect \[: .*" + re.escape(f"{DESTINATION_ADDRESS}.{DESTINATION_PORT}"), line)]
     dante_named = any(DESTINATION_NAME in line for line in dante)
     dante_auth_failed = [line for line in dante if "pass" not in line and ("authentication failed" in line or "username" in line and "block" in line)]
@@ -273,6 +278,16 @@ def main(argv: list[str]) -> int:
         )
     else:
         facts.append(f"every connection that reached the destination came through a proxy ({through_proxies})")
+
+    # How the logs look, so a format the checks above do not match shows up in the annotation.
+    for name, lines in (("squid-access.log", squid), ("danted.log", dante)):
+        sample = [line for line in lines if "connect" in line.lower()][-3:] or lines[-3:]
+        facts.append(f"{name}: {len(lines)} lines; last: {[line[:220] for line in sample]}")
+    guest = read_lines(os.path.join(args.out, "guest-capture.txt"))
+    if guest:
+        facts.append("in-phone capture: " + " | ".join(guest))
+    if UNREADABLE:
+        problems.append(f"unreadable evidence: {UNREADABLE}")
 
     # Packet captures.
     paths = sorted(glob.glob(os.path.join(args.out, "guest-*.pcap")))

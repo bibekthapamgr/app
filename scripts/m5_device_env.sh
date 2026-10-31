@@ -38,6 +38,10 @@ sudo systemctl stop squid danted >/dev/null 2>&1 || true
 sudo ip addr add 10.99.0.1/32 dev lo
 echo "10.99.0.1 proxyflow.test" | sudo tee -a /etc/hosts >/dev/null
 
+# The proxies' logs, readable by the evidence check (scripts/m5_evidence.py) whoever writes them.
+touch "$PF/danted.log" "$PF/squid-access.log" "$PF/squid-cache.log"
+chmod 0666 "$PF/danted.log" "$PF/squid-access.log" "$PF/squid-cache.log"
+
 # Dante.
 sudo useradd --no-create-home --shell /usr/sbin/nologin "$SOCKS_USER"
 echo "$SOCKS_USER:$SOCKS_PASS" | sudo chpasswd

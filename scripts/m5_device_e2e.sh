@@ -23,10 +23,24 @@ restart_adbd() {
     adb shell true >/dev/null 2>&1
 }
 
+# The phone's uplink becomes its mobile data, which runs through the emulator's own network
+# stack on every API level, so the emulator's -tcpdump sees it; from API 34 on, Wi-Fi runs
+# through a separate simulator that capture does not see.
+adb shell svc wifi disable >/dev/null 2>&1 || true
+sleep 8
+adb shell ip route > "$OUT/guest-routes.txt" 2>&1 || true
+
 # tcpdump on each uplink interface (not the VPN's tun0), as root, detached so it outlives
 # adbd going back to the shell user: the tests must run as shell, which the VPN covers.
 GUEST_CAPTURE=0
-if restart_adbd root && adb shell 'command -v tcpdump' >/dev/null 2>&1; then
+{
+    echo "adb root: $(adb root 2>&1 | tr -d '\r')"
+    sleep 3
+    adb wait-for-device
+    echo "id: $(adb shell id 2>&1 | tr -d '\r')"
+    echo "tcpdump: $(adb shell 'command -v tcpdump || echo none' 2>&1 | tr -d '\r')"
+} > "$OUT/guest-capture.txt" 2>&1
+if grep -q 'uid=0' "$OUT/guest-capture.txt" && ! grep -q 'tcpdump: none' "$OUT/guest-capture.txt"; then
     adb shell ip -o link show > "$OUT/guest-links.txt" 2>&1
     IFACES="$(awk -F': ' '{print $2}' "$OUT/guest-links.txt" | sed 's/@.*//' | tr -d '\r' | grep -E '^(eth|wlan|radio|rmnet)[0-9]+$' || true)"
     for iface in $IFACES; do
@@ -36,7 +50,7 @@ if restart_adbd root && adb shell 'command -v tcpdump' >/dev/null 2>&1; then
     GUEST_CAPTURE=1
     sleep 2
 else
-    echo "no root or no tcpdump in this image: the emulator's own capture (-tcpdump) is the only one" > "$OUT/guest-capture-skipped.txt"
+    echo "no root or no tcpdump in this image: the emulator's own capture (-tcpdump) is the only one" >> "$OUT/guest-capture.txt"
 fi
 restart_adbd unroot || true
 
