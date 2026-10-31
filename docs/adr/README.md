@@ -13,6 +13,6 @@ M1 rule: "No full implementation begins until the networking approach is approve
 | [0005](0005-tls-to-proxy-and-play-policy.md) | TLS to proxy, trust anchors and the Play encryption requirement | Proposed | D2, D7 |
 | [0006](0006-credential-storage.md) | Credential storage with an Android Keystore key | Proposed | D4 |
 | [0007](0007-platform-baseline.md) | Platform baseline: SDK levels, service type, modules, engine packaging | Proposed (minSdk 29 chosen by the owner) | D3 |
-| [0008](0008-app-architecture.md) | App architecture: modules, MVVM, manual DI, navigation | Proposed (M2) | — |
+| [0008](0008-app-architecture.md) | App architecture: modules, MVVM, manual DI, navigation | Accepted 2026-10-31 (decision delegated by the owner) | — |
 
 Template for new records: copy any ADR, keep the headings, add a row here.

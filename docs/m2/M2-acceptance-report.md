@@ -1,6 +1,6 @@
 # M2 — Android foundation: acceptance report
 
-**Status: every M2 acceptance criterion passes in CI, in three runs of the same commit. Ready for the product owner's review (pull request #1).**
+**Status: every M2 acceptance criterion passes in CI, in three runs of the same commit. On 2026-10-31 the product owner asked for ADR-0008 to be accepted and pull request #1 to be merged.**
 
 | | |
 |---|---|
@@ -48,7 +48,7 @@ From the verified commit's runs (all three identical):
 | Reusable UI components | `core/designsystem/`: primary, secondary, text and destructive buttons; card; text and password fields; switch, radio and choice-chip rows; list row; confirm and choice dialogs; loading, empty and error states; banner; status pill; top bar. The theme is generated from the M1 design tokens and checked against them (`TokenColorsTest`, CI step "Design tokens and generated colours agree") |
 | Build instructions | `README.md` |
 | Initial CI configuration | `.github/workflows/android.yml`: design-token check, Gradle wrapper validation (no Gradle step runs without it), ktlint, Lint, tests, debug and release builds, release manifest check, screenshot comparison, build facts and an error digest. `.github/workflows/secrets.yml`: secrets scan of the files and the history on every push and pull request. Third-party actions pinned to commit SHAs; the jobs that run project code have a read-only token and keep none in their checkout |
-| Architecture decision | `docs/adr/0008-app-architecture.md` (Proposed, awaiting the owner) |
+| Architecture decision | `docs/adr/0008-app-architecture.md` (Accepted 2026-10-31; the owner delegated the decision) |
 | Reference screenshots | `app/screenshots/` — 25 images, every M2 screen in light and dark plus the three dialogs, compared with what the code renders on every CI run |
 | Shipped libraries | `docs/m2/release-runtime-classpath.txt` — 120 libraries: 119 Apache-2.0, one BSD-3-Clause |
 
@@ -141,7 +141,7 @@ The 120 libraries in the release APK are listed in `docs/m2/release-runtime-clas
 - The release manifest check reads the backup rule files from `app/src/main/res/xml`, the ones the manifest names; device-protected storage is not used in M2, so those domains are not listed.
 - The release APK is unsigned: signing keys stay with the owner and are added for the Play release (M11).
 - The debug APK (about 31 MB) is unshrunk and includes debug tooling; the release APK is the size that matters.
-- `spike.yml` (the M1 spike) was only re-pinned in M2, not run: it runs on `main` or manually, and takes up to 30 minutes.
+- `spike.yml` (the M1 spike) ran once on GitHub, on this branch before it was limited to `main` and manual runs ([41071379843](https://github.com/bibekthapamgr/app/actions/runs/41071379843)), and failed in its "Run spike" step; its evidence upload failed too. The cause is not known yet, because Actions logs cannot be read from the build workspace and that workflow does not report through annotations. M1's spike evidence comes from the runs recorded in `spike/evidence/`. In M2 the workflow was only re-pinned; making it pass on a GitHub runner is open.
 
 ## How to check it yourself
 

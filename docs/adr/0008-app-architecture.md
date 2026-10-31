@@ -1,6 +1,6 @@
 # ADR-0008 — App architecture: modules, MVVM, manual DI, navigation
 
-**Status:** Proposed (M2) · **Date:** 2026-10-30
+**Status:** Accepted 2026-10-31 · **Proposed:** 2026-10-30 (M2) · The product owner delegated the decision to the author (Claude) after the M2 review
 
 ## Context
 
