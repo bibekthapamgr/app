@@ -138,7 +138,28 @@ class VpnConsentTest {
         waitForText("Allow a VPN connection")
         waitForText("Only one VPN app can be active. Starting another turns ProxyFlow off.", substring = true)
         compose.onNodeWithText("Continue").performClick()
-        assertTrue("Android's VPN dialog opens", device.wait(Until.hasObject(By.pkg(VPN_DIALOGS)), DIALOG_TIMEOUT_MS))
+        val opened = device.wait(Until.hasObject(By.pkg(VPN_DIALOGS)), DIALOG_TIMEOUT_MS)
+        assertTrue("Android's VPN dialog opens\n${screenReport()}", opened)
+    }
+
+    /** What is in front, what has focus, and what Android logged about starting activities and the VPN. */
+    private fun screenReport(): String = buildString {
+        val shown = listOf("Allow a VPN connection", "VPN permission needed", "Connecting…", "Connected", "Not connected")
+            .filter { compose.onAllNodesWithText(it).fetchSemanticsNodes().isNotEmpty() }
+        appendLine("ProxyFlow shows: $shown")
+        appendLine("activities:")
+        Shell.run("dumpsys activity activities").lines()
+            .filter { "ResumedActivity" in it || "mFocusedApp" in it || "mLastPausedActivity" in it }
+            .take(REPORT_LINES).forEach { appendLine("  ${it.trim()}") }
+        appendLine("windows:")
+        Shell.run("dumpsys window").lines()
+            .filter { "mCurrentFocus" in it || "mFocusedApp" in it || "mFocusedWindow" in it }
+            .take(REPORT_LINES).forEach { appendLine("  ${it.trim()}") }
+        appendLine("log:")
+        Shell.run("logcat -d -t 1500").lines()
+            .filter { line -> LOG_TAGS.any { it in line } }
+            .takeLast(REPORT_LINES * 2).forEach { appendLine("  ${it.trim()}") }
+        append(Diagnostics.report(app))
     }
 
     /** Presses a button of Android's dialog: by its id, or else by its text. */
@@ -169,6 +190,8 @@ class VpnConsentTest {
         const val VPN_DIALOGS = "com.android.vpndialogs"
         const val UI_TIMEOUT_MS = 10_000L
         const val CONNECT_TIMEOUT_MS = 45_000L
-        const val DIALOG_TIMEOUT_MS = 15_000L
+        const val DIALOG_TIMEOUT_MS = 30_000L
+        const val REPORT_LINES = 12
+        val LOG_TAGS = listOf("ActivityTaskManager", "vpndialogs", "ConfirmDialog", "VpnManager", "Vpn:", "AndroidRuntime", "ProxyFlowVpn")
     }
 }

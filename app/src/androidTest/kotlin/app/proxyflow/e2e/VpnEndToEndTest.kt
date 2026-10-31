@@ -277,9 +277,10 @@ class VpnEndToEndTest {
         assertReachesDestination("before-engine-failure")
 
         // Make the engine's reads fail (EISDIR) while a duplicate keeps the interface itself alive.
+        // The directory is the app's own: SELinux lets an app open little else.
         val tun = Descriptors.tun().single()
         val keep = ParcelFileDescriptor.fromFd(tun)
-        val directory = Os.open("/", OsConstants.O_RDONLY, 0)
+        val directory = Os.open(app.context.filesDir.path, OsConstants.O_RDONLY, 0)
         try {
             Os.dup2(directory, tun)
         } finally {
@@ -348,7 +349,9 @@ class VpnEndToEndTest {
         assertTrue("no VPN interface", Descriptors.tun().isEmpty())
         assertEquals("no VPN service", 0, ProxyFlowVpnService.liveInstances.get())
         assertEquals("the engine stopped", EngineState.Stopped, ProxyEngine().status().state)
-        assertEquals("no session job", 0, app.runtime.session.activeJobs())
+        eventually("no session job is left", timeoutMillis = JOBS_FINISH_MS, diagnose = { Diagnostics.report(app) }) {
+            app.runtime.session.activeJobs() == 0
+        }
         eventually("Android has no VPN network", diagnose = { Diagnostics.report(app) }) { !networks.present() }
         eventually("the status notification is removed") { app.notification(ProxyFlowVpnService.STATUS_NOTIFICATION_ID) == null }
     }
@@ -369,6 +372,7 @@ class VpnEndToEndTest {
         const val THREAD_SLACK = 6
         const val CHECK_RUNNING_MS = 1_500L
         const val CHECK_CUT_SHORT_MS = 3_000L
+        const val JOBS_FINISH_MS = 3_000L
         const val SETTLE_MS = 1_000L
         const val HELD_TIMEOUT_S = 5
     }

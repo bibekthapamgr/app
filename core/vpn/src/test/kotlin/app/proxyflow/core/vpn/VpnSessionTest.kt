@@ -154,8 +154,7 @@ class VpnSessionTest {
         val profile = save()
         for (code in listOf("TARGET_NOT_ALLOWED", "PROXY_GENERAL_FAILURE", "TARGET_UNSUPPORTED")) {
             engine.answer = PreflightAnswer(ok = false, code = code, detail = "proxy answered HTTP 402")
-            session.connect(profile.id)
-            val ended = awaitError()
+            val ended = connectUntilItEnds(profile.id)
             assertEquals(ConnectionStatus.Disconnected, ended.status)
             assertEquals(code, ended.error?.code)
         }
@@ -389,8 +388,7 @@ class VpnSessionTest {
         val failures = listOf(IllegalStateException("trust manager"), UnsatisfiedLinkError("libgojni.so"))
         for (failure in failures) {
             engine.startError = failure
-            session.connect(profile.id)
-            val ended = awaitError()
+            val ended = connectUntilItEnds(profile.id)
             assertEquals(ConnectionStatus.Disconnected, ended.status)
             assertEquals(ConnectionError.INTERNAL, ended.error?.code)
         }
@@ -619,7 +617,7 @@ class VpnSessionTest {
         assertEquals("every engine stopped", CYCLES, log.count("stop"))
         assertEquals("the service let go each time", CYCLES, log.count("host stop"))
         assertFalse(engine.running)
-        assertEquals("no coroutine left behind", 0, session.activeJobs())
+        eventually("no coroutine left behind") { session.activeJobs() == 0 }
     }
 
     @Test
@@ -739,7 +737,7 @@ class VpnSessionTest {
         assertTrue(host.tuns.single().closed)
         assertFalse(engine.running)
         assertNeverConnected()
-        assertEquals(0, session.activeJobs())
+        eventually("the routing wait has finished") { session.activeJobs() == 0 }
     }
 
     @Test
@@ -791,7 +789,8 @@ class VpnSessionTest {
 
         assertTrue(host.tuns.all { it.closed })
         assertFalse(engine.running)
-        assertEquals(0, session.activeJobs())
+        // Cancelled, the routing wait finishes on its own dispatcher a moment later.
+        eventually("the routing wait has finished") { session.activeJobs() == 0 }
     }
 
     @Test
@@ -854,6 +853,19 @@ class VpnSessionTest {
     private fun awaitStatus(status: ConnectionStatus): ConnectionState = await { it.status == status }
 
     private fun awaitError(): ConnectionState = await { it.error != null && it.status != ConnectionStatus.Connecting }
+
+    /** Connects and returns the state this attempt ended in, never one an earlier attempt left behind. */
+    private fun connectUntilItEnds(profileId: String): ConnectionState {
+        val mark = state.history.size
+        session.connect(profileId)
+        var ended: ConnectionState? = null
+        eventually("the attempt ended") {
+            ended = state.history.drop(mark).lastOrNull { it.status == ConnectionStatus.Disconnected && it.error != null }
+            ended != null
+        }
+        runBlocking { session.awaitIdle() }
+        return checkNotNull(ended)
+    }
 
     /** The first state matching [predicate], once the event that published it has been handled to its end. */
     private fun await(predicate: (ConnectionState) -> Boolean): ConnectionState = runBlocking {
