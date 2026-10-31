@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -15,12 +16,14 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.printToString
 import androidx.lifecycle.SavedStateHandle
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import app.proxyflow.core.data.InMemoryProfileRepository
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.testing.DumpOnFailureRule
+import app.proxyflow.core.testing.FakeConnectionTester
+import app.proxyflow.core.testing.TestProfiles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Rule
@@ -106,7 +109,7 @@ class AddEditProxyScreenTest {
     fun formWindowIsHiddenFromScreenshotsAndRecents() {
         var shown by mutableStateOf(true)
         compose.setContent {
-            val viewModel = remember { AddEditProxyViewModel(SavedStateHandle(), InMemoryProfileRepository()) }
+            val viewModel = remember { AddEditProxyViewModel(SavedStateHandle(), TestProfiles().repository, FakeConnectionTester()) }
             ProxyFlowTheme {
                 if (shown) AddEditProxyRoute(viewModel = viewModel, onDone = {})
             }
@@ -116,6 +119,56 @@ class AddEditProxyScreenTest {
         shown = false
         compose.waitForIdle()
         assertEquals(0, compose.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
+    @Test
+    fun unreadableCredentialsAreExplainedWhereTheyAreEnteredAgain() {
+        showForm(AddEditUiState(isEdit = true, input = ProxyProfileInput(requiresSignIn = true), credentialsUnreadable = true))
+        compose.onNodeWithText("Re-enter your username and password").assertIsDisplayed()
+        compose.onNodeWithText("can't be read on this phone any more", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun aFailedSaveIsReported() {
+        showForm(AddEditUiState(saveFailed = true))
+        compose.onNodeWithText("Couldn't save this proxy. Try again.").assertIsDisplayed()
+    }
+
+    @Test
+    fun testConnectionNeverShowsAPassItWasNotGiven() {
+        var tests = 0
+        var state by mutableStateOf(AddEditUiState())
+        compose.setContent { ProxyFlowTheme { AddEditProxyScreen(state, AddEditActions(onTest = { tests++ })) } }
+
+        compose.onNodeWithText("Test connection").performScrollTo().performClick()
+        assertEquals(1, tests)
+
+        state = state.copy(test = ConnectionTestState.Testing)
+        compose.onNodeWithText("Testing the connection…").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Test connection").assertIsNotEnabled()
+
+        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Unavailable))
+        compose.onNodeWithText("Testing isn't available yet").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Nothing was sent to your proxy", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Test passed").assertDoesNotExist()
+
+        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Failed("AUTH_FAILED")))
+        compose.onNodeWithText("Test failed").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("AUTH_FAILED", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Test passed").assertDoesNotExist()
+
+        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Passed(latencyMillis = 87)))
+        compose.onNodeWithText("Test passed").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("87 ms", substring = true).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun aProfileThatCantBeReadOffersNoFormAndNoSave() {
+        showForm(AddEditUiState(isEdit = true, loadFailed = true))
+        compose.onNodeWithText("Couldn't open this proxy").assertIsDisplayed()
+        compose.onNodeWithText("Nothing was changed", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Server").assertDoesNotExist()
+        compose.onNodeWithText("Save").assertIsNotEnabled()
     }
 
     private companion object {

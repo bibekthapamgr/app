@@ -22,7 +22,10 @@ class AboutScreenTest {
     fun showsVersionScopeAndLimits() {
         compose.setContent { ProxyFlowTheme { AboutScreen(version = "0.2.0 (2)", onBack = {}) } }
         compose.onNodeWithText("Version 0.2.0 (2) · free, no account").assertIsDisplayed()
-        compose.onNodeWithText("This build sets up the app only.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("This build saves your proxies but doesn't connect yet.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("encrypted with an Android Keystore key that is never exported or backed up", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
         compose.onNodeWithText("UDP (calls, some games) and ping are blocked", substring = true).performScrollTo().assertIsDisplayed()
     }
 

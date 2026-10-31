@@ -222,6 +222,16 @@ object PfIcons {
             "M5 12l5 5 9-10",
         )
     }
+
+    /** Two overlapping sheets: "Duplicate". */
+    val Copy: ImageVector by lazy {
+        strokeIcon(
+            "Copy",
+            2.0f,
+            "M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-10a1 1 0 0 1 -1 -1v-10a1 1 0 0 1 1 -1z",
+            "M5 15h-0a1 1 0 0 1 -1 -1v-10a1 1 0 0 1 1 -1h10a1 1 0 0 1 1 1v0",
+        )
+    }
     val MoreVert: ImageVector by lazy {
         strokeIcon(
             "MoreVert",

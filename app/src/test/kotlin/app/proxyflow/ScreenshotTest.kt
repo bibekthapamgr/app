@@ -9,15 +9,18 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.model.ThemePreference
+import app.proxyflow.core.model.TlsMode
 import app.proxyflow.feature.about.AboutScreen
 import app.proxyflow.feature.home.HomeScreen
 import app.proxyflow.feature.home.HomeUiState
@@ -26,6 +29,7 @@ import app.proxyflow.feature.logs.LogsUiState
 import app.proxyflow.feature.profiles.AddEditActions
 import app.proxyflow.feature.profiles.AddEditProxyScreen
 import app.proxyflow.feature.profiles.AddEditUiState
+import app.proxyflow.feature.profiles.ConnectionTestState
 import app.proxyflow.feature.profiles.ProfilesScreen
 import app.proxyflow.feature.profiles.ProfilesUiState
 import app.proxyflow.feature.settings.SettingsScreen
@@ -44,8 +48,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Screenshots of every M2 screen in light and dark theme, named after the M1
- * design boards, kept in app/screenshots. CI runs
+ * Screenshots of every screen and state built so far (M2, M3) in light and dark
+ * theme, named after the M1 design boards, kept in app/screenshots. CI runs
  * `./gradlew :app:verifyAndRecordRoborazziDebug`: any screen that no longer
  * matches its committed copy fails the build, and the new image is published on
  * the ci-screenshots/<branch> branch to be reviewed and committed. Locally,
@@ -54,7 +58,9 @@ import org.robolectric.annotation.GraphicsMode
  *
  * The proxy form states are the ones its ViewModel produces for that input (D3
  * takes its errors from the validator itself), so those images show what a user
- * sees. F2 shows sample log entries: nothing writes to the log before M7.
+ * sees. D5 shows the only answer "Test connection" can give before the engine
+ * exists (M4): not available, never a pass. F2 shows sample log entries:
+ * nothing writes to the log before M7.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -109,8 +115,34 @@ class ScreenshotTest {
         captureScreenRoboImage("$DIR/C3_delete_confirm_light.png")
     }
 
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun profileActions() {
+        compose.setContent {
+            ProxyFlowTheme { ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}) }
+        }
+        compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
+        compose.waitForIdle() // let the menu draw before the screen is captured
+        captureScreenRoboImage("$DIR/C2_profile_actions_light.png")
+    }
+
     @Test
     fun addProxyEmpty() = captureBothThemes("D1_add_proxy") { AddEditProxyScreen(AddEditUiState(), AddEditActions()) }
+
+    @Test
+    fun editProxyWithSavedPassword() = captureBothThemes("D1_edit_proxy") {
+        // What the form shows for a saved profile: its username decrypted, its password never.
+        AddEditProxyScreen(
+            AddEditUiState(
+                isEdit = true,
+                input = ProxyProfileInput.from(tokyo, username = "user"),
+                hasSavedPassword = true,
+                keepsSavedPassword = true,
+                originalName = tokyo.displayName,
+            ),
+            AddEditActions(),
+        )
+    }
 
     @Test
     fun addProxyErrors() {
@@ -150,7 +182,7 @@ class ScreenshotTest {
                 AddEditProxyScreen(
                     AddEditUiState(
                         isEdit = true,
-                        input = ProxyProfileInput.from(office).copy(port = "3129"),
+                        input = ProxyProfileInput.from(office, username = "office").copy(port = "3129"),
                         // The port changed, so the saved password is not kept (ProxyProfileInput.sameCredentialTargetAs).
                         hasSavedPassword = true,
                         dirty = true,
@@ -163,6 +195,33 @@ class ScreenshotTest {
         compose.onNodeWithContentDescription("Back").performClick()
         compose.waitForIdle() // let the dialog draw before the screen is captured
         captureScreenRoboImage("$DIR/D8_unsaved_changes_light.png")
+    }
+
+    @Test
+    fun testing() = captureBothThemes("D5_testing", scrollTo = "Testing the connection…") {
+        AddEditProxyScreen(AddEditUiState(input = tokyoForm, dirty = true, test = ConnectionTestState.Testing), AddEditActions())
+    }
+
+    @Test
+    fun testNotAvailableYet() = captureBothThemes("D5_test_unavailable", scrollTo = "Testing isn't available yet") {
+        AddEditProxyScreen(
+            AddEditUiState(input = tokyoForm, dirty = true, test = ConnectionTestState.Done(ConnectionTestResult.Unavailable)),
+            AddEditActions(),
+        )
+    }
+
+    @Test
+    fun credentialsUnreadable() = captureBothThemes("H3_credentials_unreadable") {
+        // What the form shows when the saved username and password can't be decrypted any more.
+        AddEditProxyScreen(
+            AddEditUiState(
+                isEdit = true,
+                input = ProxyProfileInput.from(office),
+                credentialsUnreadable = true,
+                originalName = office.displayName,
+            ),
+            AddEditActions(),
+        )
     }
 
     @Test
@@ -204,12 +263,14 @@ class ScreenshotTest {
 
     /**
      * Renders [content] in the light theme, captures it, switches to dark and captures again.
+     * With [scrollTo], the screen is first scrolled until that text is in view.
      * When verifying, a changed image fails at once; both themes are captured before the
      * test fails, so one run reports and records both.
      */
-    private fun captureBothThemes(name: String, content: @Composable () -> Unit) {
+    private fun captureBothThemes(name: String, scrollTo: String? = null, content: @Composable () -> Unit) {
         var dark by mutableStateOf(false)
         compose.setContent { ProxyFlowTheme(darkTheme = dark) { content() } }
+        scrollTo?.let { compose.onNodeWithText(it).performScrollTo() }
         val light = runCatching { compose.onRoot().captureRoboImage("$DIR/${name}_light.png") }
         dark = true
         compose.waitForIdle()
@@ -228,9 +289,8 @@ class ScreenshotTest {
             protocol = ProxyProtocol.SOCKS5,
             host = "proxy.example.com",
             port = 1443,
-            username = "user",
-            hasPassword = true,
-            useTls = true,
+            tlsMode = TlsMode.Tls,
+            requiresSignIn = true,
         )
         val office = ProxyProfile(
             id = "p2",
@@ -238,11 +298,11 @@ class ScreenshotTest {
             protocol = ProxyProtocol.HTTP,
             host = "203.0.113.10",
             port = 3128,
-            username = "office",
-            hasPassword = true,
+            requiresSignIn = true,
         )
         val backup =
             ProxyProfile(id = "p3", name = "Backup SOCKS", protocol = ProxyProtocol.SOCKS5, host = "socks.example.net", port = 1080)
         val profilesState = ProfilesUiState(loading = false, profiles = listOf(tokyo, office, backup), activeProfileId = "p1")
+        val tokyoForm = ProxyProfileInput.from(tokyo, username = "user").copy(password = "secret")
     }
 }

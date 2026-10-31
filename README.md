@@ -11,7 +11,8 @@ What it promises, and where that ends (the single source for these claims is `do
 **Status**
 
 - **M1 — requirements, feasibility, UI/UX:** delivered (`docs/m1/M1-acceptance-report.md`). The owner chose minSdk 29 (D3).
-- **M2 — Android foundation:** builds, lints and passes every test in CI; awaiting the owner's review (`docs/m2/M2-acceptance-report.md`). This build sets up the app only: it cannot connect yet (the VPN service is M5) and keeps profiles only in memory (storage with Keystore encryption is M3). Both limits are stated in the app itself.
+- **M2 — Android foundation:** delivered and merged (`docs/m2/M2-acceptance-report.md`).
+- **M3 — proxy profiles and secure storage:** every acceptance criterion passes in CI, including the Keystore tests on Android 10 and 15 emulators; awaiting the owner's review (`docs/m3/M3-acceptance-report.md`). Profiles are stored in Room; usernames and passwords are encrypted under an Android Keystore key made for each set of credentials (ADR-0006, ADR-0009). The app still cannot connect: the engine arrives in M4 and the VPN service in M5, so "Test connection" says that testing isn't available yet, and the app says so too.
 
 ## Repository
 
@@ -20,14 +21,15 @@ What it promises, and where that ends (the single source for these claims is `do
 | `app/` | Application shell: `MainActivity`, navigation graph, bottom bar, manual DI (`AppContainer`), app-level tests and reference screenshots (`app/screenshots/`) |
 | `core/model/` | Pure Kotlin: proxy profile model and form validation (no Android dependency) |
 | `core/designsystem/` | Theme generated from the design tokens, icons, and the reusable components (buttons, cards, fields, dialogs, loading, empty and error states, banners, status pill) |
-| `core/data/` | Repository interfaces and their M2 implementations (DataStore settings, in-memory profiles and logs, a connection controller that cannot connect yet) |
-| `core/testing/` | Test fakes and the main-dispatcher rule |
+| `core/data/` | Repositories: profiles in Room (`db/`) with credentials sealed by per-profile Android Keystore keys (`crypto/`), settings and the active profile in DataStore, in-memory logs, a connection controller and tester that cannot connect yet. `src/androidTest/` runs on emulators (Android Keystore) |
+| `core/data/schemas/` | Exported Room schema for every database version (checked in CI, used by the migration tests) |
+| `core/testing/` | Test fakes (in-memory profile store, software keys standing in for the Keystore on the JVM, a fake connection tester) and the main-dispatcher rule |
 | `feature/{home,profiles,settings,logs,about}/` | One module per area: stateless screens, ViewModels, navigation entry points, tests |
 | `config/lint/` | Android Lint configuration |
 | `gradle/libs.versions.toml` | Every dependency and plugin version |
 | `scripts/` | `check-secrets.sh` (keys, signing files and credentials in the files or anywhere in the history; rules in `check_secrets.py`), `check_release_manifest.py` (permissions, backups and exported components of the release build), `ci_error_digest.py` and `ci_build_facts.py` (CI summaries) |
-| `docs/m1/`, `docs/m2/` | Milestone deliverables and acceptance reports |
-| `docs/adr/` | Architecture decision records 0001–0008 |
+| `docs/m1/`, `docs/m2/`, `docs/m3/` | Milestone deliverables and acceptance reports |
+| `docs/adr/` | Architecture decision records 0001–0009 |
 | `design/` | Screen boards, design tokens, contrast checker, Compose colour generator |
 | `spike/` | M1 feasibility spike (Go engine prototype, lab harness, evidence runs) |
 | `.github/workflows/` | `android.yml` (app checks and builds), `secrets.yml` (secrets scan on every push and pull request), `spike.yml` (M1 spike) |
@@ -49,6 +51,7 @@ Point the build at your SDK with `ANDROID_HOME` or a `local.properties` file con
 ```bash
 ./gradlew :app:assembleDebug            # debug APK: app/build/outputs/apk/debug/
 ./gradlew testDebugUnitTest :core:model:test  # all JVM, ViewModel and Robolectric UI tests
+./gradlew :core:data:connectedDebugAndroidTest  # Keystore and storage tests on a connected phone or emulator
 ./gradlew spotlessCheck                 # Kotlin formatting (ktlint); spotlessApply fixes it
 ./gradlew :app:lintDebug                # Android Lint for the app and every module it uses
 ./gradlew :app:assembleRelease          # R8-shrunk release APK (unsigned without signing config)
@@ -60,7 +63,9 @@ scripts/check-secrets.sh                # files you would commit; --history scan
 
 `scripts/check-secrets.sh` also works as a pre-commit hook: `ln -s ../../scripts/check-secrets.sh .git/hooks/pre-commit`.
 
-The same checks run in CI (`.github/workflows/android.yml`). Tests run on the JVM with Robolectric, so no emulator is needed; on-device instrumentation tests start in M5, where routing must be proven on real devices.
+The same checks run in CI (`.github/workflows/android.yml`). Most tests run on the JVM with Robolectric. The Android Keystore exists only on Android, so the credential-storage tests in `core/data/src/androidTest` run on emulators in CI; routing tests on real devices start in M5.
+
+After changing a Room entity, build `core/data` (any of the commands above) and commit the regenerated file in `core/data/schemas/` together with a migration and its test (ADR-0009).
 
 What CI adds for reviewers:
 
@@ -68,6 +73,8 @@ What CI adds for reviewers:
 - `scripts/ci_build_facts.py` reports test counts per module, APK sizes, the permissions of the merged manifests and the shipped libraries as notices.
 - The release build's merged manifest must pass `scripts/check_release_manifest.py`: only allow-listed permissions (none but androidx.core's own receiver permission in M2), backups and device transfers off, not debuggable, no cleartext opt-in, nothing exported without a permission except the launcher activity.
 - Every screen is compared with its committed image (`verifyAndRecordRoborazziDebug`); a changed screen fails the run and its new image is recorded. On pull requests a separate job publishes the images on the branch `ci-screenshots/<branch>`, also after a failed run; copy them into `app/screenshots/` when the change is meant. That job is the only one with a token that can push, and it never pushes to the pull request itself.
+- The Room schema generated from the entities must equal the committed one in `core/data/schemas/`; the generated file is published with the screenshots (`ci-screenshots/<branch>`).
+- The `device` job runs `core/data`'s instrumented tests on Android emulators with the real Android Keystore (API 29, the minimum, and API 35) and reports every test and its result as a notice.
 - `secrets.yml` runs the secrets scan on every push and pull request, whatever changed, over the current files and every commit; findings name the file and line, never the value.
 - Each run's **android-reports** artifact holds the APKs, test and Lint reports, screenshots and, for changed screens, Roborazzi's comparison images.
 

@@ -1,9 +1,10 @@
 name: android
 
-# M2 app checks: formatting (ktlint), Android Lint, JVM and Robolectric tests,
-# debug and release builds, the release manifest, and screenshots of every
-# screen compared with the committed ones. The secrets scan has its own
-# workflow (secrets.yml), which runs on every push whatever changed.
+# App checks: formatting (ktlint), Android Lint, JVM and Robolectric tests,
+# the committed Room schema, debug and release builds, the release manifest,
+# screenshots of every screen compared with the committed ones, and (device
+# job) the Android Keystore and storage tests on emulators. The secrets scan
+# has its own workflow (secrets.yml), which runs on every push whatever changed.
 # Third-party actions are pinned to commit SHAs (tag in the comment) so a
 # moved tag cannot change what runs. Each Gradle step runs even when an
 # earlier one failed, so one run reports every problem at once; none runs
@@ -70,6 +71,18 @@ jobs:
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: ./gradlew testDebugUnitTest :core:model:test --continue 2>&1 | tee "$RUNNER_TEMP/gradle-3-test.log"
 
+      # The tests above compiled core/data, which exports the Room schema to core/data/schemas.
+      # A schema that changed without its file (and a migration, ADR-0009) being committed fails
+      # here; the generated file is published with the screenshots for review.
+      - name: Room schema in core/data/schemas matches the entities
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: |
+          if [ -d core/data/schemas ]; then git add --intent-to-add core/data/schemas; fi
+          if ! git diff --exit-code --stat -- core/data/schemas; then
+            echo "::error file=core/data/src/main/kotlin/app/proxyflow/core/data/db/ProxyFlowDatabase.kt,title=Room schema::The exported Room schema is not the committed one. Commit the file from ci-screenshots/<branch> (and add a migration if the version changed)."
+            exit 1
+          fi
+
       - name: Debug build
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: ./gradlew :app:assembleDebug 2>&1 | tee "$RUNNER_TEMP/gradle-4-debug.log"
@@ -98,12 +111,15 @@ jobs:
         if: failure()
         run: python3 scripts/ci_error_digest.py "$RUNNER_TEMP"/gradle-*.log
 
-      - name: Upload screenshots (for the screenshots job)
+      # Two paths: the artifact keeps them under their common root, the repository root.
+      - name: Upload screenshots and the Room schema (for the screenshots job)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: screenshots
-          path: app/screenshots/
+          path: |
+            app/screenshots/
+            core/data/schemas/
           if-no-files-found: error
 
       - name: Upload reports, screenshots and APKs
@@ -117,11 +133,12 @@ jobs:
             app/screenshots/
             app/build/outputs/roborazzi/
             app/build/outputs/apk/
+            core/data/schemas/
           if-no-files-found: warn
 
-  # Publishes the recorded screenshots on a side branch (ci-screenshots/<branch>), so
-  # they can be reviewed and committed as reference images without downloading
-  # artifacts. Also after a failed build: when a screen changed, its new image is
+  # Publishes the recorded screenshots and the exported Room schema on a side branch
+  # (ci-screenshots/<branch>), so they can be reviewed and committed without
+  # downloading artifacts. Also after a failed build: when a screen changed, its new image is
   # what needs reviewing. Runs separately from the build so that only this job,
   # which runs no project code, holds a token that can push; it never pushes to
   # the PR branch itself.
@@ -140,14 +157,86 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: screenshots
-          path: app/screenshots
+          path: .
 
-      - name: Push the screenshots to ci-screenshots/<branch>
+      - name: Push the screenshots and schema to ci-screenshots/<branch>
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/screenshots
+          if [ -d core/data/schemas ]; then git add core/data/schemas; fi
           git commit --allow-empty -m "Screenshots recorded in CI for $(git rev-parse --short HEAD)"
           git push --force origin "HEAD:refs/heads/ci-screenshots/$HEAD_REF"
+
+  # ADR-0006 on real Android runtimes: credentials sealed with Android Keystore keys,
+  # the real SQLite, and every file in the app's data directory checked for
+  # plaintext (core/data/src/androidTest). Robolectric has no Android Keystore,
+  # so these tests only run here: on the oldest supported Android (minSdk 29)
+  # and a current one.
+  device:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [29, 35]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: wrapper
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - id: java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - id: gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      # GitHub's Linux runners have KVM, but only root may use it by default.
+      - name: Let the emulator use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Build the instrumented tests
+        run: ./gradlew :core:data:assembleDebugAndroidTest 2>&1 | tee "$RUNNER_TEMP/gradle-1-device-build.log"
+
+      # The action runs each script line with sh; bash keeps the Gradle exit status through tee.
+      - name: Keystore and storage tests on an emulator (API ${{ matrix.api-level }})
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash -c 'set -o pipefail; ./gradlew :core:data:connectedDebugAndroidTest --continue 2>&1 | tee "$RUNNER_TEMP/gradle-2-device.log"'
+
+      - name: Device test counts (emitted as notices)
+        if: ${{ !cancelled() }}
+        run: python3 scripts/ci_build_facts.py --device-tests "API ${{ matrix.api-level }}"
+
+      - name: Error digest (also emitted as annotations, readable through the API)
+        if: failure()
+        run: python3 scripts/ci_error_digest.py "$RUNNER_TEMP"/gradle-*.log
+
+      - name: Upload device test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: device-tests-api-${{ matrix.api-level }}
+          path: |
+            core/data/build/reports/androidTests/
+            core/data/build/outputs/androidTest-results/
+          if-no-files-found: warn

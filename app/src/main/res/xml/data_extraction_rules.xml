@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Nothing leaves the phone in backups or device-to-device transfers (ADR-0006):
-  proxy profiles, and from M3 the Keystore-encrypted passwords, whose key cannot
-  be restored on another device anyway. allowBackup="false" covers Android 10–11;
+  proxy profiles (Room database), settings (DataStore) and the encrypted
+  usernames and passwords, whose Android Keystore keys cannot be restored on
+  another device anyway. allowBackup="false" covers Android 10–11;
   these rules cover Android 12+, where allowBackup alone does not stop transfers.
 -->
 <data-extraction-rules>

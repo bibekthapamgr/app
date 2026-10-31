@@ -1,12 +1,21 @@
 package app.proxyflow.feature.profiles
 
 import androidx.lifecycle.SavedStateHandle
-import app.proxyflow.core.data.InMemoryProfileRepository
+import app.proxyflow.core.data.CredentialsRead
+import app.proxyflow.core.data.CredentialsUnavailableException
+import app.proxyflow.core.data.ProfileForEditing
+import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.data.crypto.AesGcmCredentialCipher
+import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
+import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
+import app.proxyflow.core.testing.FakeConnectionTester
 import app.proxyflow.core.testing.MainDispatcherRule
+import app.proxyflow.core.testing.TestProfiles
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -19,10 +28,16 @@ class AddEditProxyViewModelTest {
     @get:Rule
     val main = MainDispatcherRule()
 
-    private var nextId = 0
-    private val repository = InMemoryProfileRepository(newId = { "p${++nextId}" })
+    private val profiles = TestProfiles()
+    private val repository = profiles.repository
+    private val tester = FakeConnectionTester()
 
-    private fun viewModel(handle: SavedStateHandle = SavedStateHandle()) = AddEditProxyViewModel(handle, repository)
+    private fun viewModel(handle: SavedStateHandle = SavedStateHandle(), repo: ProfileRepository = repository) =
+        AddEditProxyViewModel(handle, repo, tester)
+
+    private suspend fun savedPassword(id: String): String? = (repository.readCredentials(id) as? CredentialsRead.Available)?.let {
+        String(it.password)
+    }
 
     /** Saved state for the form opened on profile [id]. */
     private fun editing(id: String) = SavedStateHandle(mapOf(AddEditProxyViewModel.ARG_PROFILE_ID to id))
@@ -48,7 +63,7 @@ class AddEditProxyViewModelTest {
         assertEquals(ProfileError.ServerInvalid, vm.uiState.value.errors[ProfileField.Server])
         assertEquals(ProfileError.PortOutOfRange, vm.uiState.value.errors[ProfileField.Port])
         assertFalse(vm.uiState.value.saved)
-        assertTrue(repository.profiles.value.isEmpty())
+        assertTrue(profiles.store.records.value.isEmpty())
 
         vm.onServerChange("proxy.example.com")
         assertFalse(ProfileField.Server in vm.uiState.value.errors)
@@ -80,7 +95,7 @@ class AddEditProxyViewModelTest {
 
         assertTrue(vm.uiState.value.saved)
         assertFalse(vm.uiState.value.dirty)
-        assertEquals(listOf("proxy.example.com:1080"), repository.profiles.value.map { it.endpoint })
+        assertEquals(listOf("proxy.example.com:1080"), profiles.store.records.value.map { it.toProfile().endpoint })
     }
 
     @Test
@@ -132,10 +147,9 @@ class AddEditProxyViewModelTest {
         vm.onNameChange("Office")
         vm.save()
 
-        val profile = repository.profiles.value.single()
-        assertEquals(saved.id, profile.id)
+        val profile = repository.get(saved.id)!!
         assertEquals("Office", profile.name)
-        assertTrue(profile.hasPassword)
+        assertEquals("the saved password is kept", "secret", savedPassword(saved.id))
     }
 
     @Test
@@ -159,7 +173,7 @@ class AddEditProxyViewModelTest {
         vm.save()
         assertTrue(vm.uiState.value.saved)
         assertEquals(1081, repository.get(saved.id)?.port)
-        assertEquals(true, repository.get(saved.id)?.hasPassword)
+        assertEquals("new-secret", savedPassword(saved.id))
     }
 
     @Test
@@ -173,7 +187,7 @@ class AddEditProxyViewModelTest {
 
         assertEquals(mapOf(ProfileField.Password to ProfileError.PasswordRequired), vm.uiState.value.errors)
         assertFalse(vm.uiState.value.saved)
-        assertTrue(repository.profiles.value.isEmpty())
+        assertTrue(profiles.store.records.value.isEmpty())
     }
 
     @Test
@@ -227,7 +241,7 @@ class AddEditProxyViewModelTest {
 
     @Test
     fun anEditRestoredAfterProcessDeathTakesTheUsernameFromTheProfile() = runTest {
-        // Profiles that outlive the process (stored on the phone from M3).
+        // Profiles outlive the process: they are stored on the phone (M3).
         val saved = repository.save(null, signIn)
         val before = editing(saved.id)
         viewModel(before).apply {
@@ -245,14 +259,14 @@ class AddEditProxyViewModelTest {
     }
 
     @Test
-    fun aProfileLostWithTheProcessIsOfferedAsANewOne() = runTest {
+    fun aProfileGoneAfterProcessDeathIsOfferedAsANewOne() = runTest {
         val saved = repository.save(null, signIn)
         val before = editing(saved.id)
         viewModel(before).onServerChange("other.example.com")
 
-        // M2 keeps profiles in memory, so the new process starts without them.
-        val newProcess = InMemoryProfileRepository(newId = { "new" })
-        val vm = AddEditProxyViewModel(afterProcessDeath(before), newProcess)
+        // Deleted meanwhile (or the app's data was cleared): the new process doesn't have it.
+        val newProcess = TestProfiles()
+        val vm = viewModel(afterProcessDeath(before), newProcess.repository)
         val state = vm.uiState.value
         assertFalse(state.isEdit)
         assertNull(state.originalName)
@@ -262,7 +276,7 @@ class AddEditProxyViewModelTest {
 
         vm.onRequiresSignInChange(false)
         vm.save()
-        assertEquals("saved as a new profile", listOf("new"), newProcess.profiles.value.map { it.id })
+        assertEquals("saved as a new profile", listOf("p1"), newProcess.store.records.value.map { it.id })
     }
 
     @Test
@@ -276,6 +290,179 @@ class AddEditProxyViewModelTest {
         vm.onServerChange("proxy.example.com")
         vm.onPortChange("1080")
         vm.save()
-        assertEquals("a new id, not the missing one", listOf("p1"), repository.profiles.value.map { it.id })
+        assertEquals("a new id, not the missing one", listOf("p1"), profiles.store.records.value.map { it.id })
+    }
+
+    @Test
+    fun credentialsThatCantBeReadAreAskedForAgain() = runTest {
+        val saved = repository.save(null, signIn)
+        profiles.keys.delete(AesGcmCredentialCipher.aliasFor(profiles.store.get(saved.id)!!.credentials!!.keyId))
+
+        val vm = viewModel(editing(saved.id))
+        val state = vm.uiState.value
+        assertTrue(state.credentialsUnreadable)
+        assertFalse(state.hasSavedPassword)
+        assertEquals("", state.input.username)
+        assertTrue("sign-in stays on", state.input.requiresSignIn)
+
+        vm.save()
+        assertEquals(ProfileError.UsernameRequired, vm.uiState.value.errors[ProfileField.Username])
+        vm.onUsernameChange("user")
+        vm.onPasswordChange("typed-again")
+        vm.save()
+        assertTrue(vm.uiState.value.saved)
+        assertEquals("typed-again", savedPassword(saved.id))
+    }
+
+    @Test
+    fun aFailedSaveSaysSoAndCanBeRetried() = runTest {
+        var fail = true
+        val flaky = object : ProfileRepository by repository {
+            override suspend fun save(id: String?, input: ProxyProfileInput): ProxyProfile {
+                if (fail) error("disk full")
+                return repository.save(id, input)
+            }
+        }
+        val vm = viewModel(repo = flaky)
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.save()
+        assertTrue(vm.uiState.value.saveFailed)
+        assertFalse(vm.uiState.value.saved)
+        assertFalse(vm.uiState.value.saving)
+
+        fail = false
+        vm.save()
+        assertFalse(vm.uiState.value.saveFailed)
+        assertTrue(vm.uiState.value.saved)
+    }
+
+    @Test
+    fun testConnectionShowsOnlyWhatTheTesterFound() = runTest {
+        val vm = viewModel()
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+
+        vm.testConnection()
+        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Unavailable), vm.uiState.value.test)
+        assertEquals(listOf<String?>(null), tester.requests.map { it.first })
+
+        tester.result = ConnectionTestResult.Failed("AUTH_FAILED")
+        vm.testConnection()
+        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Failed("AUTH_FAILED")), vm.uiState.value.test)
+
+        tester.result = ConnectionTestResult.Passed(latencyMillis = 42)
+        vm.testConnection()
+        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Passed(42)), vm.uiState.value.test)
+
+        vm.onPortChange("1081")
+        assertEquals("a result belongs to the form it tested", ConnectionTestState.Idle, vm.uiState.value.test)
+    }
+
+    @Test
+    fun anInvalidFormIsNotTested() = runTest {
+        val vm = viewModel()
+        vm.onServerChange("bad host")
+        vm.testConnection()
+        assertTrue(tester.requests.isEmpty())
+        assertEquals(ConnectionTestState.Idle, vm.uiState.value.test)
+        assertEquals(ProfileError.ServerInvalid, vm.uiState.value.errors[ProfileField.Server])
+        assertEquals(1, vm.uiState.value.rejectedSaves)
+    }
+
+    @Test
+    fun aTestInProgressIsDroppedWhenTheFormChanges() = runTest {
+        val gate = CompletableDeferred<ConnectionTestResult>()
+        val slow = object : app.proxyflow.core.data.ConnectionTester {
+            override suspend fun test(profileId: String?, input: ProxyProfileInput) = gate.await()
+        }
+        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, slow)
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.testConnection()
+        assertEquals(ConnectionTestState.Testing, vm.uiState.value.test)
+
+        vm.onNameChange("Office")
+        gate.complete(ConnectionTestResult.Passed(1))
+        assertEquals("never a pass for a form that was not tested", ConnectionTestState.Idle, vm.uiState.value.test)
+    }
+
+    @Test
+    fun anEditedProfileIsTestedUnderItsIdSoItsSavedPasswordCanBeUsed() = runTest {
+        val saved = repository.save(null, signIn)
+        val vm = viewModel(editing(saved.id))
+        vm.testConnection()
+        assertEquals(saved.id, tester.requests.single().first)
+        assertEquals("", tester.requests.single().second.password)
+    }
+
+    @Test
+    fun aTesterThatBreaksIsReportedAsAFailureNeverAPass() = runTest {
+        val broken = object : app.proxyflow.core.data.ConnectionTester {
+            override suspend fun test(profileId: String?, input: ProxyProfileInput): ConnectionTestResult = error("engine crashed")
+        }
+        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, broken)
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.testConnection()
+        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Failed(AddEditProxyViewModel.INTERNAL_ERROR)), vm.uiState.value.test)
+    }
+
+    @Test
+    fun theFormWaitsForTheProfileAndIgnoresInputUntilThen() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        val gate = CompletableDeferred<Unit>()
+        val slow = object : ProfileRepository by repository {
+            override suspend fun loadForEditing(id: String): ProfileForEditing? {
+                gate.await()
+                return repository.loadForEditing(id)
+            }
+        }
+        val vm = viewModel(editing(saved.id), slow)
+        assertTrue(vm.uiState.value.loading)
+        vm.onServerChange("typed-too-early.example.com")
+        vm.save()
+        vm.testConnection()
+        assertTrue(tester.requests.isEmpty())
+
+        gate.complete(Unit)
+        val state = vm.uiState.value
+        assertFalse(state.loading)
+        assertEquals("the stored profile, not the form defaults", "proxy.example.com", state.input.server)
+        assertTrue(state.input.requiresSignIn)
+        assertEquals("user", state.input.username)
+        assertFalse(state.dirty)
+        assertFalse(state.saved)
+    }
+
+    @Test
+    fun aProfileThatCantBeReadIsShownAsSuchAndNeverSavedOver() = runTest {
+        val saved = repository.save(null, signIn)
+        val failing = object : ProfileRepository by repository {
+            override suspend fun loadForEditing(id: String): ProfileForEditing? = throw CredentialsUnavailableException()
+        }
+        val vm = viewModel(editing(saved.id), failing)
+        assertTrue(vm.uiState.value.loadFailed)
+        assertFalse(vm.uiState.value.loading)
+
+        vm.onRequiresSignInChange(false)
+        vm.save()
+        assertFalse(vm.uiState.value.saved)
+        assertTrue("sign-in and its key are untouched", repository.get(saved.id)!!.requiresSignIn)
+        assertEquals("secret", savedPassword(saved.id))
+    }
+
+    @Test
+    fun namesAreCutWithoutBreakingAnEmoji() {
+        val vm = viewModel()
+        vm.onNameChange("x".repeat(39) + "\uD83D\uDE00")
+        assertEquals("x".repeat(39), vm.uiState.value.input.name)
+    }
+
+    @Test
+    fun thePortTakesOnlyTheDigits0To9() {
+        val vm = viewModel()
+        vm.onPortChange("\u0661\u0660\u0668\u06601080")
+        assertEquals("1080", vm.uiState.value.input.port)
     }
 }

@@ -32,6 +32,8 @@ class ProfileValidatorTest {
             "under_score.example", "999.1.1.1", "1.2.3", "01.2.3.4", "1.2.3.4.5",
             "1:2", "1::2::3", "1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7:8::", "fe80::1%eth0", "12345::1", "::g",
             "a".repeat(64) + ".example", ("a".repeat(63) + ".").repeat(4) + "a",
+            // Digits from other scripts: Kotlin calls them digits, but they are not an address.
+            "\u0661\u0669\u0662.\u0661\u0666\u0668.\u0660.\u0661", "::\u0661", "\uFF10\uFF11.0.0.1",
         ).forEach { host ->
             assertFalse("'$host' should be rejected", ProfileValidator.isValidHost(ProfileValidator.normalizeHost(host)))
         }
@@ -47,7 +49,7 @@ class ProfileValidatorTest {
 
     @Test
     fun portMustBeBetween1And65535() {
-        listOf("", "0", "65536", "-1", "80a", "123456", " ").forEach { port ->
+        listOf("", "0", "65536", "-1", "80a", "123456", " ", "\u0661\u0660\u0668\u0660").forEach { port ->
             assertEquals(
                 "port '$port'",
                 ProfileError.PortOutOfRange,
@@ -131,27 +133,97 @@ class ProfileValidatorTest {
             useTls = false,
             tlsServerName = "ignored.example",
         )
-        val profile = input.toProfile(id = "p1", hasPassword = true)
+        val profile = input.toProfile(id = "p1", createdAtMillis = 1, updatedAtMillis = 2)
         assertEquals("2001:db8::1", profile.host)
         assertEquals("an empty name is stored empty, not as the server", "", profile.name)
         assertEquals("2001:db8::1", profile.displayName)
         assertEquals("[2001:db8::1]:3128", profile.endpoint)
         assertEquals(3128, profile.port)
-        assertEquals("user", profile.username)
-        assertTrue(profile.hasPassword)
-        assertEquals(null, profile.tlsServerName)
+        assertTrue(profile.requiresSignIn)
+        assertEquals(TlsMode.None, profile.tlsMode)
+        assertEquals("a server name only matters with TLS", null, profile.tlsServerName)
+        assertEquals(1L, profile.createdAtMillis)
+        assertEquals(2L, profile.updatedAtMillis)
     }
 
     @Test
-    fun formRoundTripNeverCarriesThePassword() {
+    fun formRoundTripCarriesTheUsernameButNeverThePassword() {
         val profile = ProxyProfile(
             id = "p1", name = "Office", protocol = ProxyProtocol.SOCKS5, host = "203.0.113.10", port = 1080,
-            username = "user", hasPassword = true, useTls = true, tlsServerName = "proxy.example.com",
+            tlsMode = TlsMode.Tls, tlsServerName = "proxy.example.com", requiresSignIn = true,
+            createdAtMillis = 10, updatedAtMillis = 20,
         )
-        val input = ProxyProfileInput.from(profile)
+        val input = ProxyProfileInput.from(profile, username = "user")
+        assertEquals("user", input.username)
         assertEquals("", input.password)
         assertTrue(input.requiresSignIn)
-        assertEquals(profile, input.toProfile(id = "p1", hasPassword = true))
+        assertTrue(input.useTls)
+        assertEquals(profile, input.toProfile(id = "p1", createdAtMillis = 10, updatedAtMillis = 20))
+        assertEquals("no username without sign-in", "", ProxyProfileInput.from(profile.copy(requiresSignIn = false), "user").username)
+    }
+
+    @Test
+    fun controlCharactersAreRefusedInTheNameAndTheCredentials() {
+        val signIn = valid.copy(requiresSignIn = true, username = "user", password = "secret")
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.validate(valid.copy(name = "Office\n"))[ProfileField.Name])
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.validate(signIn.copy(username = "us\ter"))[ProfileField.Username])
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.validate(signIn.copy(password = "secret\r\n"))[ProfileField.Password])
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.validate(signIn.copy(password = "a\u2028b"))[ProfileField.Password])
+        assertTrue("spaces and symbols are fine", ProfileValidator.validate(signIn.copy(password = "p a$\$ wörd!")).isEmpty())
+        // Half of an emoji (an unpaired surrogate) is broken text no storage or proxy keeps intact.
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.validate(valid.copy(name = "Office \uD83D"))[ProfileField.Name])
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.validate(signIn.copy(password = "pw\uDE00"))[ProfileField.Password])
+        assertTrue(
+            "whole emoji are fine",
+            ProfileValidator.validate(signIn.copy(name = "Office \uD83D\uDE00", password = "pw\uD83D\uDE00")).isEmpty(),
+        )
+        assertEquals(ProfileError.ControlCharacters, ProfileValidator.nameError("a\u0007b"))
+        assertEquals(null, ProfileValidator.nameError("Office (copy)"))
+    }
+
+    @Test
+    fun httpCredentialsAreLimitedTo1024Bytes() {
+        val http = valid.copy(protocol = ProxyProtocol.HTTP, requiresSignIn = true, username = "user", password = "secret")
+        val limit = ProfileValidator.MAX_HTTP_CREDENTIAL_BYTES
+        assertTrue(ProfileValidator.validate(http.copy(username = "u".repeat(limit), password = "p".repeat(limit))).isEmpty())
+        assertEquals(
+            ProfileError.UsernameTooLong,
+            ProfileValidator.validate(http.copy(username = "u".repeat(limit + 1)))[ProfileField.Username],
+        )
+        assertEquals(
+            ProfileError.PasswordTooLong,
+            ProfileValidator.validate(http.copy(password = "p".repeat(limit + 1)))[ProfileField.Password],
+        )
+        assertEquals(
+            "bytes, not characters",
+            ProfileError.PasswordTooLong,
+            ProfileValidator.validate(http.copy(password = "ö".repeat(limit / 2 + 1)))[ProfileField.Password],
+        )
+    }
+
+    @Test
+    fun copyNamesStayUniqueAndShortEnough() {
+        assertEquals("Office (copy)", ProfileNames.copyOf("Office", taken = listOf("Office")))
+        assertEquals("Office (copy 2)", ProfileNames.copyOf("Office", taken = listOf("Office", "Office (copy)")))
+        val long = "x".repeat(ProfileValidator.MAX_NAME_LENGTH)
+        val copy = ProfileNames.copyOf(long, taken = listOf(long))
+        assertTrue(copy, copy.length <= ProfileValidator.MAX_NAME_LENGTH)
+        assertTrue(copy, copy.endsWith(" (copy)"))
+        val custom = ProfileNames.copyOf("Office", taken = emptyList()) { base, n -> "$base – kopi $n" }
+        assertEquals("Office – kopi 1", custom)
+
+        // Shortening never cuts an emoji in half.
+        val emoji = "x".repeat(32) + "\uD83D\uDE00" + "yyyyyy"
+        val emojiCopy = ProfileNames.copyOf(emoji, taken = listOf(emoji))
+        assertEquals(null, ProfileValidator.nameError(emojiCopy))
+        assertEquals("x".repeat(32) + " (copy)", emojiCopy)
+
+        // A translated pattern that ignores the number still ends, with plain numbering.
+        val stuck = ProfileNames.copyOf("Office", taken = listOf("Office", "Office copy")) { base, _ -> "$base copy" }
+        assertEquals("Office (1)", stuck)
+
+        assertEquals("x".repeat(39), ProfileNames.truncate("x".repeat(39) + "\uD83D\uDE00", 40))
+        assertEquals("ab", ProfileNames.truncate("ab", 40))
     }
 
     @Test
@@ -181,7 +253,7 @@ class ProfileValidatorTest {
     @Test
     fun credentialsNeverAppearInToString() {
         val input = valid.copy(requiresSignIn = true, username = "alice", password = "s3cret-pw")
-        val text = input.toString() + " " + input.toProfile(id = "p1", hasPassword = true).toString()
+        val text = input.toString() + " " + input.toProfile(id = "p1", createdAtMillis = 0, updatedAtMillis = 0).toString()
         assertFalse(text, "alice" in text)
         assertFalse(text, "s3cret-pw" in text)
         assertTrue(text, "<redacted>" in text)

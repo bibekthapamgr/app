@@ -103,7 +103,7 @@ fun PfErrorState(title: String, body: String, modifier: Modifier = Modifier, ret
     }
 }
 
-enum class BannerTone { Info, Warning, Error }
+enum class BannerTone { Info, Success, Warning, Error }
 
 /** Inline message block, e.g. the plaintext warning on Add/Edit (board D4). */
 @Composable
@@ -111,6 +111,8 @@ fun PfBanner(text: String, tone: BannerTone, modifier: Modifier = Modifier, titl
     val (container, content, icon) = when (tone) {
         BannerTone.Info ->
             Triple(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer, PfIcons.Info)
+        BannerTone.Success ->
+            Triple(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer, PfIcons.Check)
         BannerTone.Warning -> Triple(ProxyFlowTheme.colors.warningContainer, ProxyFlowTheme.colors.onWarningContainer, PfIcons.Warning)
         BannerTone.Error ->
             Triple(MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, PfIcons.AlertCircle)

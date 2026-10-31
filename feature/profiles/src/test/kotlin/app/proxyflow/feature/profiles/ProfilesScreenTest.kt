@@ -90,4 +90,48 @@ class ProfilesScreenTest {
         compose.onNodeWithText("Use this proxy").performClick()
         assertEquals(listOf("p2"), used)
     }
+
+    @Test
+    fun theMenuDuplicatesAProfile() {
+        val duplicated = mutableListOf<String>()
+        compose.setContent {
+            ProxyFlowTheme {
+                ProfilesScreen(
+                    ProfilesUiState(loading = false, profiles = listOf(office, backup), activeProfileId = "p1"),
+                    onAddProxy = {},
+                    onEditProxy = {},
+                    onUseProxy = {},
+                    onDeleteProxy = {},
+                    onDuplicateProxy = { duplicated += it },
+                )
+            }
+        }
+        compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
+        compose.onNodeWithText("Use this proxy").assertDoesNotExist() // already the active one
+        compose.onNodeWithText("Duplicate").performClick()
+        assertEquals(listOf("p1"), duplicated)
+    }
+
+    @Test
+    fun aFailedActionIsReportedOnce() {
+        var shown = 0
+        compose.setContent {
+            ProxyFlowTheme {
+                ProfilesScreen(
+                    ProfilesUiState(loading = false, profiles = listOf(office), activeProfileId = "p1", failed = ProfileAction.Duplicate),
+                    onAddProxy = {},
+                    onEditProxy = {},
+                    onUseProxy = {},
+                    onDeleteProxy = {},
+                    onFailureShown = { shown++ },
+                )
+            }
+        }
+        compose.onNodeWithText("Couldn't duplicate this proxy. Try again.").assertIsDisplayed()
+        assertEquals(0, shown)
+
+        compose.mainClock.advanceTimeBy(10_000) // past the message's display time
+        compose.waitForIdle()
+        assertEquals(1, shown)
+    }
 }

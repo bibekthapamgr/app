@@ -3,7 +3,7 @@ package app.proxyflow
 import android.app.Application
 import android.os.StrictMode
 
-class ProxyFlowApplication : Application() {
+open class ProxyFlowApplication : Application() {
     /**
      * App-wide objects (repositories and the ViewModel factory). They live as
      * long as the process, so no screen state depends on an Activity instance.
@@ -14,8 +14,11 @@ class ProxyFlowApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         if (BuildConfig.DEBUG) enableStrictMode()
-        container = AppContainer(this)
+        container = createContainer()
     }
+
+    /** Tests replace the Android Keystore, which the JVM does not have, by overriding this. */
+    protected open fun createContainer(): AppContainer = AppContainer(this)
 
     /**
      * Debug builds report disk and network access on the main thread to Logcat and

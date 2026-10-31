@@ -14,9 +14,16 @@
     <string name="profiles_edit">Edit</string>
     <string name="profiles_delete">Delete</string>
     <string name="profiles_delete_title">Delete \"%1$s\"?</string>
-    <string name="profiles_delete_body">The profile and its saved username and password are deleted. This can\'t be undone.</string>
+    <string name="profiles_delete_body">The profile, its encrypted username and password, and the key that protects them are deleted from this phone. This can\'t be undone.</string>
     <string name="profiles_cancel">Cancel</string>
-    <string name="profiles_memory_only">This build keeps profiles only while the app is running: they\'re gone once Android closes it. Storing them safely on the phone arrives in the next milestone.</string>
+    <string name="profiles_duplicate">Duplicate</string>
+    <string name="profiles_use_failed">Couldn\'t switch to this proxy. Try again.</string>
+    <string name="profiles_duplicate_failed">Couldn\'t duplicate this proxy. Try again.</string>
+    <string name="profiles_delete_failed">Couldn\'t delete this proxy. Try again.</string>
+    <!-- Name of a duplicated profile: %1$s is the original's name. -->
+    <string name="profiles_copy_name">%1$s (copy)</string>
+    <!-- Name of a further duplicate: %1$s is the original's name, %2$d counts the copies (2, 3, …). -->
+    <string name="profiles_copy_name_numbered">%1$s (copy %2$d)</string>
 
     <!-- Add/Edit proxy (boards D1, D3, D4, D8) -->
     <string name="edit_title_add">Add proxy</string>
@@ -32,6 +39,19 @@
     <string name="edit_username">Username</string>
     <string name="edit_password">Password</string>
     <string name="edit_password_keep">Leave empty to keep the saved password</string>
+    <string name="edit_save_failed">Couldn\'t save this proxy. Try again.</string>
+    <string name="edit_load_failed_title">Couldn\'t open this proxy</string>
+    <string name="edit_load_failed_body">Its saved settings or sign-in couldn\'t be read just now. Nothing was changed. Go back and open it again.</string>
+    <string name="edit_credentials_unreadable_title">Re-enter your username and password</string>
+    <string name="edit_credentials_unreadable_body">The saved sign-in can\'t be read on this phone any more, so it isn\'t used. Enter it again.</string>
+    <string name="edit_test">Test connection</string>
+    <string name="edit_test_running">Testing the connection…</string>
+    <string name="edit_test_unavailable_title">Testing isn\'t available yet</string>
+    <string name="edit_test_unavailable_body">Testing needs the connection engine, which comes in a later version. Nothing was sent to your proxy.</string>
+    <string name="edit_test_passed_title">Test passed</string>
+    <string name="edit_test_passed_body">Your proxy opened a test connection in %1$d ms.</string>
+    <string name="edit_test_failed_title">Test failed</string>
+    <string name="edit_test_failed_body">The test stopped with %1$s.</string>
     <string name="edit_password_reenter">Enter the password again: the server, port, protocol, username or TLS setting changed</string>
     <string name="edit_tls">Encrypt connection (TLS)</string>
     <string name="edit_tls_hint">Recommended. Your proxy must support TLS on this port.</string>
@@ -50,14 +70,17 @@
     <string name="edit_discard">Discard</string>
 
     <!-- Validation messages (docs/m1/04 §5) -->
+    <string name="error_control_characters">Remove line breaks and other invisible or broken characters</string>
     <string name="error_name_too_long">Use 40 characters or fewer</string>
     <string name="error_server_invalid">Enter a hostname or IP address (no spaces)</string>
     <string name="error_port_range">Port must be between 1 and 65535</string>
     <string name="error_username_required">Enter the username from your provider</string>
     <string name="error_username_colon">Usernames can\'t contain \":\" for HTTP proxies</string>
     <string name="error_username_too_long">Usernames can be at most 255 bytes for SOCKS5</string>
+    <string name="error_username_too_long_http">Usernames can be at most 1,024 bytes</string>
     <string name="error_password_without_username">Add a username for this password</string>
     <string name="error_password_required">Enter the password</string>
     <string name="error_password_too_long">Passwords can be at most 255 bytes for SOCKS5</string>
+    <string name="error_password_too_long_http">Passwords can be at most 1,024 bytes</string>
     <string name="error_tls_server_name">Enter a valid server name or leave empty</string>
 </resources>
