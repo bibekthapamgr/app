@@ -104,6 +104,21 @@ func TestHTTPConnectDigestOnlyIsExplained(t *testing.T) {
 	}
 }
 
+func TestHTTPConnectSchemesNeverEchoProxyText(t *testing.T) {
+	resp, err := readConnectResponse(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 407 x\r\nProxy-Authenticate: \x1b[31mEvil" + strings.Repeat("A", 500) + " realm=x\r\nProxy-Authenticate: NTLM\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = connectStatusError(resp, true)
+	if CodeOf(err) != CodeAuthFailed || strings.Contains(err.Error(), "Evil") || strings.Contains(err.Error(), "\x1b") || len(err.Error()) > 200 {
+		t.Fatalf("detail must name known schemes only: %q", err)
+	}
+	if !strings.Contains(err.Error(), "ntlm") {
+		t.Fatalf("known scheme missing from %q", err)
+	}
+}
+
 func TestHTTPConnectOversizedHeaders(t *testing.T) {
 	big := "HTTP/1.1 200 OK\r\nX-Junk: " + strings.Repeat("a", 20<<10) + "\r\n\r\n"
 	_, err := readConnectResponse(bufio.NewReader(strings.NewReader(big)))

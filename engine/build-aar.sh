@@ -22,20 +22,14 @@ NDK_VERSION=28.2.13676358
 ANDROID_API=29 # minSdk (ADR-0007)
 JAVA_PACKAGE=app.proxyflow.engine.go
 
+step() { echo "== build-aar: $*"; }
+
 ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 if [ -z "$ANDROID_HOME" ] || [ ! -d "$ANDROID_HOME" ]; then
   echo "build-aar.sh: set ANDROID_HOME to the Android SDK" >&2
   exit 1
 fi
 export ANDROID_HOME
-if [ ! -x "$ANDROID_HOME/ndk/$NDK_VERSION/ndk-build" ]; then
-  sdkmanager="$(command -v sdkmanager || true)"
-  [ -n "$sdkmanager" ] || sdkmanager="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort | tail -1)"
-  [ -n "$sdkmanager" ] || { echo "build-aar.sh: NDK $NDK_VERSION missing and no sdkmanager found" >&2; exit 1; }
-  yes | "$sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
-fi
-export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
-export CGO_LDFLAGS="-Wl,-z,max-page-size=16384" # explicit, whatever the NDK's default
 
 # x/mobile/bind is needed only for this build: work on copies of go.mod and
 # go.sum and put the originals back afterwards.
@@ -44,11 +38,29 @@ cp go.mod go.sum "$work/"
 restore() { cp "$work/go.mod" go.mod; cp "$work/go.sum" go.sum; rm -rf "$work"; }
 trap restore EXIT
 
+if [ ! -x "$ANDROID_HOME/ndk/$NDK_VERSION/ndk-build" ]; then
+  step "installing NDK $NDK_VERSION"
+  sdkmanager="$(command -v sdkmanager || true)"
+  [ -n "$sdkmanager" ] || sdkmanager="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort | tail -1)"
+  [ -n "$sdkmanager" ] || { echo "build-aar.sh: NDK $NDK_VERSION missing and no sdkmanager found" >&2; exit 1; }
+  # yes ends with SIGPIPE when sdkmanager exits; only sdkmanager's status counts.
+  if ! (yes || true) | "$sdkmanager" --install "ndk;$NDK_VERSION" > "$work/sdkmanager.log" 2>&1; then
+    tail -n 30 "$work/sdkmanager.log" >&2
+    echo "build-aar.sh: sdkmanager could not install ndk;$NDK_VERSION" >&2
+    exit 1
+  fi
+fi
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+export CGO_LDFLAGS="-Wl,-z,max-page-size=16384" # explicit, whatever the NDK's default
+step "NDK $ANDROID_NDK_HOME, $(go version)"
+
 engine_modules() { go list -deps -f '{{with .Module}}{{.Path}} {{.Version}}{{end}}' ./pfengine | sort -u; }
 engine_modules > "$work/modules-before.txt"
 
+step "installing gomobile and gobind $MOBILE_VERSION"
 GOBIN="$work/bin" go install "golang.org/x/mobile/cmd/gomobile@$MOBILE_VERSION" "golang.org/x/mobile/cmd/gobind@$MOBILE_VERSION"
 export PATH="$work/bin:$PATH"
+step "adding golang.org/x/mobile/bind for this build"
 go get "golang.org/x/mobile/bind@$MOBILE_VERSION"
 
 engine_modules > "$work/modules-after.txt"
@@ -59,10 +71,12 @@ fi
 
 mkdir -p build
 rm -f build/pfengine.aar build/pfengine-sources.jar
+step "gomobile bind"
 gomobile bind -target=android/arm,android/arm64,android/amd64 -androidapi "$ANDROID_API" \
   -javapkg "$JAVA_PACKAGE" -trimpath -ldflags="-s -w -buildid=" -o build/pfengine.aar ./pfengine
 
 # Facts and checks on what was built.
+step "checking the AAR"
 readelf="$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf | head -1)"
 unpacked="$work/aar"
 unzip -q build/pfengine.aar -d "$unpacked"

@@ -145,13 +145,23 @@ func readConnectResponse(br *bufio.Reader) (connectResponse, error) {
 		if !ok {
 			continue // tolerate junk header lines; only a few headers matter
 		}
-		if strings.EqualFold(strings.TrimSpace(name), "Proxy-Authenticate") {
+		if strings.EqualFold(strings.TrimSpace(name), "Proxy-Authenticate") && len(resp.AuthSchemes) < 8 {
 			scheme, _, _ := strings.Cut(strings.TrimSpace(value), " ")
-			resp.AuthSchemes = append(resp.AuthSchemes, strings.ToLower(scheme))
+			resp.AuthSchemes = append(resp.AuthSchemes, knownScheme(scheme))
 		}
 	}
 	resp.HeaderByteLen = total
 	return resp, nil
+}
+
+// knownScheme names an authentication scheme for messages. Anything else the
+// proxy sent becomes "other", so no proxy-supplied text reaches logs or the UI.
+func knownScheme(s string) string {
+	switch l := strings.ToLower(s); l {
+	case "basic", "digest", "ntlm", "negotiate", "kerberos", "bearer":
+		return l
+	}
+	return "other"
 }
 
 func connectStatusError(resp connectResponse, sentCreds bool) error {

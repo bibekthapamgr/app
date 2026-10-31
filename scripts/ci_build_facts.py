@@ -12,6 +12,7 @@ Usage:
   ci_build_facts.py --device-tests <label>   (each instrumented test and its result, per emulator)
   ci_build_facts.py --go-tests <go test -json output>   (engine tests per package; failures as errors)
   ci_build_facts.py --engine-aar <engine/build/pfengine-facts.txt>   (what engine/build-aar.sh built)
+  ci_build_facts.py --log-tail <log> <title>   (the end of a failed step's log, as error annotations)
 """
 
 import glob
@@ -167,6 +168,21 @@ if __name__ == "__main__":
         for failure in failures[:10]:
             print(failure)
             print(f"::error title=go test::{escape(failure[:MAX_CHUNK])}")
+    elif sys.argv[1] == "--log-tail":
+        with open(sys.argv[2], encoding="utf-8", errors="replace") as f:
+            tail = f.read().splitlines()[-120:]
+        chunks: list[str] = []
+        current = ""
+        for line in tail:
+            if current and len(current) + len(line) + 1 > MAX_CHUNK:
+                chunks.append(current)
+                current = line
+            else:
+                current = line if not current else current + "\n" + line
+        if current:
+            chunks.append(current)
+        for n, chunk in enumerate(chunks[-10:]):
+            print(f"::error title={sys.argv[3]} log {n + 1}/{min(len(chunks), 10)}::{escape(chunk)}")
     elif sys.argv[1] == "--engine-aar":
         with open(sys.argv[2], encoding="utf-8", errors="replace") as f:
             emit([line.rstrip("\n") for line in f])

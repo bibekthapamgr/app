@@ -64,6 +64,30 @@ jobs:
           if [ -n "$unformatted" ]; then echo "::error title=gofmt::not formatted: $unformatted"; exit 1; fi
           go vet ./...
 
+      - name: Build the AAR (gomobile; armeabi-v7a, arm64-v8a, x86_64; 16 KB pages checked)
+        id: aar
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          ./build-aar.sh > "$RUNNER_TEMP/build-aar.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/build-aar.log"
+          if [ "$status" -ne 0 ]; then
+            python3 ../scripts/ci_build_facts.py --log-tail "$RUNNER_TEMP/build-aar.log" build-aar.sh
+            exit "$status"
+          fi
+          python3 ../scripts/ci_build_facts.py --engine-aar build/pfengine-facts.txt
+
+      - name: Upload the AAR (for the build and device jobs)
+        if: ${{ !cancelled() && steps.aar.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pfengine-aar
+          path: |
+            engine/build/pfengine.aar
+            engine/build/pfengine-facts.txt
+          if-no-files-found: error
+
       - name: Tests with the race detector (adapters, mock proxies, netstack, lifecycle, leaks)
         if: ${{ !cancelled() }}
         run: |
@@ -84,23 +108,6 @@ jobs:
       - name: Known vulnerabilities in the engine and its dependencies (govulncheck)
         if: ${{ !cancelled() }}
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
-
-      - name: Build the AAR (gomobile; armeabi-v7a, arm64-v8a, x86_64; 16 KB pages checked)
-        id: aar
-        if: ${{ !cancelled() }}
-        run: |
-          ./build-aar.sh
-          python3 ../scripts/ci_build_facts.py --engine-aar build/pfengine-facts.txt
-
-      - name: Upload the AAR (for the build and device jobs)
-        if: ${{ !cancelled() && steps.aar.outcome == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: pfengine-aar
-          path: |
-            engine/build/pfengine.aar
-            engine/build/pfengine-facts.txt
-          if-no-files-found: error
 
   build:
     # Runs even when the engine job failed, so every app check still reports;
