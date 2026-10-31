@@ -74,9 +74,13 @@ if ! diff -u "$work/modules-before.txt" "$work/modules-after.txt"; then
   exit 1
 fi
 
+vuln_fact="GOVULNCHECK not run (PF_GOVULNCHECK unset)"
 if [ "${PF_GOVULNCHECK:-0}" = 1 ]; then
   step "govulncheck $GOVULNCHECK_VERSION: the engine, its dependencies and the bind runtime"
-  go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" ./... golang.org/x/mobile/bind golang.org/x/mobile/bind/seq
+  vuln_scope="./... golang.org/x/mobile/bind golang.org/x/mobile/bind/seq"
+  # shellcheck disable=SC2086 # the scope is a list of package patterns
+  go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" $vuln_scope | tee "$work/govulncheck.txt"
+  vuln_fact="GOVULNCHECK $GOVULNCHECK_VERSION over $vuln_scope: $(grep -m1 -E 'No vulnerabilities found|Your code is affected by' "$work/govulncheck.txt" || echo 'passed')"
 fi
 
 mkdir -p build
@@ -94,6 +98,7 @@ facts=build/pfengine-facts.txt
 {
   echo "AAR build/pfengine.aar $(stat -c %s build/pfengine.aar) bytes sha256 $(sha256sum build/pfengine.aar | cut -d' ' -f1)"
   echo "BUILT WITH $(go version), gomobile $MOBILE_VERSION, NDK $NDK_VERSION, -androidapi $ANDROID_API"
+  echo "$vuln_fact"
   for abi in armeabi-v7a arm64-v8a x86_64; do
     so="$unpacked/jni/$abi/libgojni.so"
     if [ ! -f "$so" ]; then

@@ -68,6 +68,7 @@ jobs:
             echo "::error file=engine/go.sum,title=go.sum::go.sum differs from the hashes in the checksum database"
             exit 1
           fi
+          echo "::notice title=go.sum::rebuilt with every hash from sum.golang.org: identical to the committed file ($(wc -l < go.sum) lines)"
 
       - name: Formatting (gofmt) and go vet
         if: ${{ !cancelled() }}

@@ -71,6 +71,29 @@ def gradle_errors(path: str) -> list[str]:
     return found
 
 
+# Frames that say where a failure came from, after the first lines of a stack.
+ORIGIN = re.compile(r"(Caused by|Suppressed:|app\.proxyflow|kotlinx\.coroutines|androidx\.(compose|lifecycle|activity|datastore|room))")
+NOISE = re.compile(r"(jdk\.internal\.reflect|java\.lang\.reflect|org\.robolectric\.shadows|\$\$Reflector|org\.junit\.|sun\.reflect)")
+
+
+def condensed_stack(lines: list[str], head: int = 12, origin: int = 30) -> list[str]:
+    """The first lines of a stack trace, then the frames that show its origin
+    (the app's own code, coroutines, Compose, Lifecycle, DataStore, Room and
+    every "Caused by"), skipping reflection and Robolectric shadow frames."""
+    clean: list[str] = []
+    for line in lines:
+        if not NOISE.search(line) and (not clean or clean[-1] != line):
+            clean.append(line)  # consecutive repeats (recursive frames) collapse to one
+    out = clean[:head]
+    picked = [line for line in clean[head:] if ORIGIN.search(line)]
+    if picked:
+        out.append(f"    ... ({len(clean) - head} more frames; origin frames:)")
+        out += picked[:origin]
+    elif len(clean) > head:
+        out.append(f"    ... ({len(clean) - head} more frames)")
+    return out
+
+
 def test_failures() -> list[str]:
     found: list[str] = []
     seen_messages: set[str] = set()
@@ -96,7 +119,7 @@ def test_failures() -> list[str]:
                     found.append(f"TEST {case.get('classname')}.{case.get('name')}: same failure as above")
                     continue
                 seen_messages.add(key)
-                detail = "\n".join(body[:14])
+                detail = "\n".join(condensed_stack(body))
                 found.append(f"TEST {case.get('classname')}.{case.get('name')}: {message}\n{detail}")
     if len(found) > MAX_TESTS:
         found = found[:MAX_TESTS] + [f"... {len(found) - MAX_TESTS} more test failures"]
