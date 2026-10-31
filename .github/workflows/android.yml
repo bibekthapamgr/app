@@ -359,6 +359,8 @@ jobs:
           target: google_apis
           arch: x86_64
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -tcpdump ${{ runner.temp }}/emulator-uplink.pcap
+          # The action's default of 600 s was not enough for one cold boot on a slower runner (run 41245157563, API 36).
+          emulator-boot-timeout: 900
           disable-animations: true
           script: bash scripts/m5_device_e2e.sh ${{ matrix.api-level }}
 
