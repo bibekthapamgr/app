@@ -303,6 +303,10 @@ class App {
         val ended = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
         if (ended.status == ConnectionStatus.Connected) return ended
         if (ended.error != UPLINK_DROPPED) throw AssertionError("connecting failed; state is $ended")
+        // The failed attempt leaves nothing behind: a first attempt no interface, a switch only the one it holds.
+        if (ended.status == ConnectionStatus.Disconnected) {
+            eventually("the failed attempt left no interface", diagnose = { Diagnostics.report(this) }) { Descriptors.tun().isEmpty() }
+        }
         Log.i(TAG, "uplink dropped: connecting again")
         val again = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
         if (again.status != ConnectionStatus.Connected) throw AssertionError("connecting failed twice; state is $again")
