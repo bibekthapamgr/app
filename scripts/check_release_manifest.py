@@ -6,7 +6,9 @@ release build's manifest after every library's manifest was merged into it, and
 fails CI unless:
 
 - it requests only the permissions in ALLOWED_PERMISSIONS (a milestone that needs
-  a new one, such as INTERNET in M5, adds it there with the reason);
+  a new one adds it there with the reason; M5 added the VPN service's);
+- the VPN service is not exported, requires BIND_VPN_SERVICE, is of foreground
+  type systemExempted and filters for android.net.VpnService only;
 - backups are off: allowBackup="false", and both dataExtractionRules (Android 12+)
   and fullBackupContent (Android 10 and 11) point at rule files in
   app/src/main/res/xml that exclude every storage domain the app writes to;
@@ -32,7 +34,17 @@ ALLOWED_PERMISSIONS = {
     "${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION": (
         "declared and used by androidx.core to keep the app's own runtime-registered receivers private; grants nothing"
     ),
+    # M5 (ADR-0010): the VPN service and the engine's connections to the user's proxy.
+    "android.permission.INTERNET": "the engine's and the pre-flight check's connections to the user's proxy",
+    "android.permission.FOREGROUND_SERVICE": "the VPN runs as a foreground service with its status notification",
+    "android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED": (
+        "the VPN service's foreground type on Android 14+, allowed for VPN apps the user has consented to (ADR-0007)"
+    ),
+    "android.permission.POST_NOTIFICATIONS": "the connection status and problem notifications on Android 13+; optional",
 }
+
+# The only service, and how it must be declared: Android alone may bind it.
+VPN_SERVICE = "app.proxyflow.core.vpn.ProxyFlowVpnService"
 
 # Domains the app can write to without direct-boot support (device-protected storage is not used).
 BACKUP_DOMAINS = {"root", "file", "database", "sharedpref", "external"}
@@ -87,6 +99,25 @@ def is_launcher(component: ET.Element) -> bool:
     return False
 
 
+def check_vpn_service(application: ET.Element, facts: list[str]) -> list[str]:
+    services = [s for s in application.findall("service") if attr(s, "name") == VPN_SERVICE]
+    if len(services) != 1:
+        return [f"expected one {VPN_SERVICE}, found {len(services)}"]
+    service = services[0]
+    problems = []
+    if attr(service, "exported") != "false":
+        problems.append(f"{VPN_SERVICE} must be android:exported=\"false\"")
+    if attr(service, "permission") != "android.permission.BIND_VPN_SERVICE":
+        problems.append(f"{VPN_SERVICE} must require android.permission.BIND_VPN_SERVICE")
+    if attr(service, "foregroundServiceType") != "systemExempted":
+        problems.append(f"{VPN_SERVICE} must have android:foregroundServiceType=\"systemExempted\"")
+    actions = {attr(a, "name") for f in service.findall("intent-filter") for a in f.findall("action")}
+    if actions != {"android.net.VpnService"}:
+        problems.append(f"{VPN_SERVICE} must filter for android.net.VpnService only, found {sorted(a or '' for a in actions)}")
+    facts.append(f"service {VPN_SERVICE} exported=false permission=BIND_VPN_SERVICE type=systemExempted")
+    return problems
+
+
 def check(manifest_path: str) -> tuple[list[str], list[str]]:
     root = ET.parse(manifest_path).getroot()
     package = root.get("package") or ""
@@ -110,6 +141,8 @@ def check(manifest_path: str) -> tuple[list[str], list[str]]:
         problems.append('android:debuggable="true" in a release build')
     if attr(application, "usesCleartextTraffic") == "true":
         problems.append('android:usesCleartextTraffic="true": proxy connections must not opt in to cleartext')
+
+    problems += check_vpn_service(application, facts)
 
     for kind in COMPONENTS:
         for component in application.findall(kind):

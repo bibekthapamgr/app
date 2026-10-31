@@ -1,7 +1,7 @@
 package app.proxyflow
 
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -74,7 +74,7 @@ class NavigationTest {
 
         compose.waitForText("proxy.example.com:1080").assertIsDisplayed()
         compose.onNodeWithText("proxy.example.com").assertIsDisplayed()
-        compose.onNodeWithText("Connect").assertIsNotEnabled()
+        compose.onNodeWithText("Connect").assertIsEnabled()
 
         // Home → Profiles (Change) → Edit proxy → Back.
         compose.onNodeWithText("Change").performClick()

@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""Checks the M5 end-to-end evidence after the device tests (CI device job).
+
+The device tests (app/src/androidTest/.../e2e) send lines from the emulator's
+shell to proxyflow.test:8080 through the VPN, and log each line under the tag
+ProxyFlowE2E ("exchange <line>"; "held <line>" for a line sent while traffic
+must be held). This script reads, for one API level:
+
+  - the destination's log: every connection that reached it, with its line;
+  - Squid's access log and Dante's log: every tunnel each proxy opened;
+  - logcat: the tests' lines, and whether a test password appears anywhere;
+  - packet captures of the emulator's uplink: the emulator's own (-tcpdump,
+    taken by its network stack outside the phone) and, when the image allows
+    root, tcpdump on each uplink interface inside the phone.
+
+It fails unless every exchanged line reached the destination exactly once and
+no held line did; every connection that reached the destination came through a
+proxy (the count matches the proxies' tunnels to it); Squid was asked for the
+destination by name (the phone never resolved it); no capture shows a packet to
+or from the destination's address or a DNS query for its name; at least one
+capture saw the app's connections to both proxies (so the captures cover the
+uplink); and no test password is in logcat. Results are printed and emitted as
+annotations (readable through the API, like the other build facts).
+
+Usage: m5_evidence.py --api N --pf DIR --out DIR [--host-pcap FILE]
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import os
+import re
+import struct
+import sys
+from dataclasses import dataclass, field
+
+DESTINATION_ADDRESS = "10.99.0.1"
+DESTINATION_NAME = "proxyflow.test"
+DESTINATION_PORT = 8080
+PROXY_GATEWAY = "10.0.2.2"  # the runner's loopback as the emulator sees it
+SOCKS_PORT = 1080
+HTTP_PORT = 3128
+
+
+def escape(text: str) -> str:
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+# --- packet captures --------------------------------------------------------
+
+
+@dataclass
+class Capture:
+    path: str
+    packets: int = 0
+    ip_packets: int = 0
+    linktype: int | None = None
+    error: str | None = None
+    syns_to_proxy: dict[int, int] = field(default_factory=lambda: {SOCKS_PORT: 0, HTTP_PORT: 0})
+    to_destination: int = 0
+    dns_queries: int = 0
+    dns_for_destination: list[str] = field(default_factory=list)
+
+    @property
+    def covers_uplink(self) -> bool:
+        return all(count > 0 for count in self.syns_to_proxy.values())
+
+
+def ip_of(raw: bytes) -> str:
+    if len(raw) == 4:
+        return ".".join(str(b) for b in raw)
+    return ":".join(f"{raw[i] << 8 | raw[i + 1]:x}" for i in range(0, 16, 2))
+
+
+def dns_name(payload: bytes) -> str | None:
+    """The first question's name of a DNS query, or None for a response or something else."""
+    if len(payload) < 12 or payload[2] & 0x80:  # QR bit: a response
+        return None
+    if struct.unpack("!H", payload[4:6])[0] < 1:
+        return None
+    labels, at = [], 12
+    while at < len(payload):
+        length = payload[at]
+        if length == 0:
+            return ".".join(labels).lower()
+        if length & 0xC0:
+            return None
+        labels.append(payload[at + 1 : at + 1 + length].decode("ascii", "replace"))
+        at += 1 + length
+    return None
+
+
+def network_payload(linktype: int, frame: bytes) -> bytes | None:
+    """The IP packet inside a frame of the capture's link type."""
+    if linktype == 1:  # Ethernet
+        ethertype, at = struct.unpack("!H", frame[12:14])[0], 14
+        while ethertype in (0x8100, 0x88A8) and len(frame) >= at + 4:  # VLAN tags
+            ethertype, at = struct.unpack("!H", frame[at + 2 : at + 4])[0], at + 4
+        return frame[at:] if ethertype in (0x0800, 0x86DD) else None
+    if linktype == 113:  # Linux cooked v1
+        return frame[16:] if struct.unpack("!H", frame[14:16])[0] in (0x0800, 0x86DD) else None
+    if linktype == 276:  # Linux cooked v2
+        return frame[20:] if struct.unpack("!H", frame[0:2])[0] in (0x0800, 0x86DD) else None
+    if linktype in (101, 228, 229):  # raw IP
+        return frame
+    return None
+
+
+def inspect(packet: bytes, capture: Capture) -> None:
+    version = packet[0] >> 4
+    if version == 4 and len(packet) >= 20:
+        header = (packet[0] & 0x0F) * 4
+        proto, src, dst, rest = packet[9], packet[12:16], packet[16:20], packet[header:]
+    elif version == 6 and len(packet) >= 40:
+        proto, src, dst, rest = packet[6], packet[8:24], packet[24:40], packet[40:]
+    else:
+        return
+    capture.ip_packets += 1
+    src_ip, dst_ip = ip_of(src), ip_of(dst)
+    if DESTINATION_ADDRESS in (src_ip, dst_ip):
+        capture.to_destination += 1
+    if proto == 6 and len(rest) >= 14:  # TCP
+        sport, dport = struct.unpack("!HH", rest[0:4])
+        flags = rest[13]
+        if flags & 0x02 and not flags & 0x10 and dst_ip == PROXY_GATEWAY and dport in capture.syns_to_proxy:
+            capture.syns_to_proxy[dport] += 1
+        if 53 in (sport, dport):
+            offset = (rest[12] >> 4) * 4
+            payload = rest[offset + 2 :]  # TCP DNS has a 2-byte length first
+            name = dns_name(payload)
+            if name is not None:
+                capture.dns_queries += 1
+                if name.rstrip(".") == DESTINATION_NAME:
+                    capture.dns_for_destination.append(dst_ip)
+    elif proto == 17 and len(rest) >= 8:  # UDP
+        sport, dport = struct.unpack("!HH", rest[0:4])
+        if 53 in (sport, dport):
+            name = dns_name(rest[8:])
+            if name is not None:
+                capture.dns_queries += 1
+                if name.rstrip(".") == DESTINATION_NAME:
+                    capture.dns_for_destination.append(dst_ip)
+
+
+def read_capture(path: str) -> Capture:
+    capture = Capture(path)
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        capture.error = str(e)
+        return capture
+    if len(data) < 24:
+        capture.error = f"{len(data)} bytes: no capture"
+        return capture
+    magic = data[:4]
+    if magic in (b"\xd4\xc3\xb2\xa1", b"\x4d\x3c\xb2\xa1"):
+        endian = "<"
+    elif magic in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d"):
+        endian = ">"
+    else:
+        capture.error = f"not a pcap file (magic {magic.hex()}; pcapng is not read)"
+        return capture
+    capture.linktype = struct.unpack(endian + "I", data[20:24])[0] & 0x0FFFFFFF
+    at = 24
+    while at + 16 <= len(data):
+        incl_len = struct.unpack(endian + "I", data[at + 8 : at + 12])[0]
+        frame = data[at + 16 : at + 16 + incl_len]
+        at += 16 + incl_len
+        capture.packets += 1
+        try:
+            packet = network_payload(capture.linktype, frame)
+            if packet:
+                inspect(packet, capture)
+        except (IndexError, struct.error):
+            continue  # a truncated frame
+    return capture
+
+
+# --- logs -------------------------------------------------------------------
+
+
+def read_lines(path: str) -> list[str]:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read().splitlines()
+    except OSError:
+        return []
+
+
+def properties(path: str) -> dict[str, str]:
+    values = {}
+    for line in read_lines(path):
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip()
+    return values
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--api", required=True)
+    parser.add_argument("--pf", required=True, help="the runner-side directory of scripts/m5_device_env.sh")
+    parser.add_argument("--out", required=True, help="what scripts/m5_device_e2e.sh pulled from the emulator")
+    parser.add_argument("--host-pcap", help="the emulator's own capture (-tcpdump)")
+    args = parser.parse_args(argv[1:])
+
+    problems: list[str] = []
+    facts: list[str] = [f"API {args.api}"]
+
+    logcat = read_lines(os.path.join(args.out, "logcat.txt"))
+    exchanged = [m.group(1) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*exchange (\S+)", line))]
+    held = [m.group(1) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*held (\S+)", line))]
+    facts.append(f"logcat: {len(logcat)} lines, {len(exchanged)} exchanged lines, {len(held)} held lines")
+    if not exchanged:
+        problems.append("no exchanged line in logcat: the end-to-end tests did not run (or logcat lost their lines)")
+
+    secrets = properties(os.path.join(args.pf, "e2e.properties"))
+    for key in ("socks.password", "http.password"):
+        secret = secrets.get(key, "")
+        if not secret:
+            problems.append(f"no {key} in e2e.properties")
+            continue
+        hits = [line for line in logcat if secret in line]
+        if hits:
+            tags = sorted({re.sub(r"\s+", " ", line.replace(secret, "<redacted>"))[:120] for line in hits})
+            problems.append(f"the test {key} appears {len(hits)} times in logcat: {tags[:3]}")
+    facts.append("logcat: neither test password appears" if not any("password appears" in p for p in problems) else "logcat: a password appears")
+
+    # The destination: "<time> <peer> <line>".
+    destination = [line.split(" ", 2) for line in read_lines(os.path.join(args.pf, "destination.log")) if line.count(" ") >= 2]
+    lines_at_destination = [parts[2] for parts in destination]
+    for line in exchanged:
+        count = lines_at_destination.count(line)
+        if count != 1:
+            problems.append(f"line {line} reached the destination {count} times, expected once")
+    for line in held:
+        if line in lines_at_destination:
+            problems.append(f"held line {line} reached the destination while traffic had to be held")
+    facts.append(f"destination: {len(destination)} connections; every exchanged line arrived once; no held line arrived")
+
+    # The proxies' tunnels to the destination.
+    squid = read_lines(os.path.join(args.pf, "squid-access.log"))
+    squid_tunnels = [line for line in squid if "TCP_TUNNEL/200" in line and f"CONNECT {DESTINATION_NAME}:{DESTINATION_PORT}" in line]
+    squid_by_address = [line for line in squid if f"CONNECT {DESTINATION_ADDRESS}:{DESTINATION_PORT}" in line]
+    squid_denied = [line for line in squid if "TCP_DENIED/407" in line]
+    squid_preflight = [line for line in squid if "CONNECT connectivitycheck.gstatic.com:443" in line]
+    dante = read_lines(os.path.join(args.pf, "danted.log"))
+    dante_tunnels = [line for line in dante if re.search(r"tcp/connect \[: .*" + re.escape(f"{DESTINATION_ADDRESS}.{DESTINATION_PORT}"), line)]
+    dante_named = any(DESTINATION_NAME in line for line in dante)
+    dante_auth_failed = [line for line in dante if "pass" not in line and ("authentication failed" in line or "username" in line and "block" in line)]
+    facts.append(
+        f"Squid: {len(squid_tunnels)} tunnels to {DESTINATION_NAME}:{DESTINATION_PORT} (asked by name), "
+        f"{len(squid_by_address)} by address, {len(squid_preflight)} pre-flight CONNECTs to connectivitycheck.gstatic.com:443, "
+        f"{len(squid_denied)} refused sign-ins (407)"
+    )
+    facts.append(
+        f"Dante: {len(dante_tunnels)} tunnels to {DESTINATION_ADDRESS}:{DESTINATION_PORT}"
+        f" (its log {'names' if dante_named else 'does not name'} {DESTINATION_NAME}), {len(dante_auth_failed)} refused sign-in lines"
+    )
+    if not squid_tunnels:
+        problems.append("Squid opened no tunnel to the destination by name")
+    if squid_by_address:
+        problems.append(f"Squid was asked for the destination by address {len(squid_by_address)} times: the phone resolved the name itself")
+    if not dante_tunnels:
+        problems.append("Dante opened no tunnel to the destination")
+    through_proxies = len(squid_tunnels) + len(dante_tunnels)
+    if len(destination) != through_proxies:
+        problems.append(
+            f"{len(destination)} connections reached the destination but the proxies opened {through_proxies} tunnels to it: "
+            "something reached it without a proxy"
+        )
+    else:
+        facts.append(f"every connection that reached the destination came through a proxy ({through_proxies})")
+
+    # Packet captures.
+    paths = sorted(glob.glob(os.path.join(args.out, "guest-*.pcap")))
+    if args.host_pcap:
+        paths.insert(0, args.host_pcap)
+    captures = [read_capture(path) for path in paths]
+    covering = 0
+    for capture in captures:
+        name = os.path.basename(capture.path)
+        if capture.error:
+            facts.append(f"capture {name}: unreadable ({capture.error})")
+            continue
+        facts.append(
+            f"capture {name}: link type {capture.linktype}, {capture.packets} packets ({capture.ip_packets} IP), "
+            f"SYNs to the proxies {capture.syns_to_proxy}, DNS queries {capture.dns_queries}, "
+            f"to/from {DESTINATION_ADDRESS}: {capture.to_destination}, DNS queries for {DESTINATION_NAME}: {len(capture.dns_for_destination)}"
+        )
+        if capture.covers_uplink:
+            covering += 1
+        if capture.to_destination:
+            problems.append(f"capture {name}: {capture.to_destination} packets to or from the destination {DESTINATION_ADDRESS} on the uplink")
+        if capture.dns_for_destination:
+            problems.append(f"capture {name}: DNS queries for {DESTINATION_NAME} left the phone (to {sorted(set(capture.dns_for_destination))})")
+    if covering == 0:
+        problems.append("no packet capture saw the app's connections to both proxies, so none shows the uplink")
+    else:
+        facts.append(f"{covering} of {len(captures)} captures saw the app's connections to both proxies (they cover the uplink)")
+
+    token = os.urandom(16).hex()
+    print(f"::stop-commands::{token}")  # the logs come from the code under test
+    print("\n".join(facts))
+    print("\n".join(f"PROBLEM {p}" for p in problems) or "OK")
+    print(f"::{token}::")
+    if problems:
+        print(f"::error title=M5 end-to-end evidence (API {args.api})::{escape(chr(10).join(problems + facts))}")
+        return 1
+    print(f"::notice title=M5 end-to-end evidence (API {args.api})::{escape(chr(10).join(facts))}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

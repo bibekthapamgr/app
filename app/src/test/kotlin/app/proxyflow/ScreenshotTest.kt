@@ -1,5 +1,6 @@
 package app.proxyflow
 
+import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -12,6 +13,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.model.ConnectStep
+import app.proxyflow.core.model.ConnectionError
+import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.LogEntry
@@ -22,6 +26,8 @@ import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.model.ThemePreference
 import app.proxyflow.core.model.TlsMode
 import app.proxyflow.feature.about.AboutScreen
+import app.proxyflow.feature.home.HomeActions
+import app.proxyflow.feature.home.HomeDialog
 import app.proxyflow.feature.home.HomeScreen
 import app.proxyflow.feature.home.HomeUiState
 import app.proxyflow.feature.logs.LogsScreen
@@ -48,7 +54,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Screenshots of every screen and state built so far (M2, M3) in light and dark
+ * Screenshots of every screen and state built so far (M2, M3, M5) in light and dark
  * theme, named after the M1 design boards, kept in app/screenshots. CI runs
  * `./gradlew :app:verifyAndRecordRoborazziDebug`: any screen that no longer
  * matches its committed copy fails the build, and the new image is published on
@@ -79,18 +85,58 @@ class ScreenshotTest {
     fun restoreZone() = TimeZone.setDefault(defaultZone)
 
     @Test
-    fun homeEmpty() = captureBothThemes("B1_home_empty") {
-        HomeScreen(HomeUiState.NoProfile, onAddProxy = {}, onChangeProfile = {}, onConnect = {})
+    fun homeEmpty() = captureBothThemes("B1_home_empty") { HomeScreen(HomeUiState.NoProfile, HomeActions()) }
+
+    @Test
+    fun homeWithProfile() = captureBothThemes("B2_home_disconnected") { HomeScreen(home(ConnectionState.Idle), HomeActions()) }
+
+    @Test
+    fun homeConnecting() = captureBothThemes("B3_home_connecting") {
+        HomeScreen(home(ConnectionState(ConnectionStatus.Connecting, "p1", tokyo.name, step = ConnectStep.CheckingProxy)), HomeActions())
     }
 
     @Test
-    fun homeWithProfile() = captureBothThemes("B2_home_disconnected") {
-        HomeScreen(
-            HomeUiState.Ready(tokyo, ConnectionStatus.Disconnected, canConnect = false),
-            onAddProxy = {},
-            onChangeProfile = {},
-            onConnect = {},
-        )
+    fun homeConnected() = captureBothThemes("B4_home_connected") {
+        val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
+        // 00:12:47 on the timer, as on the design board.
+        HomeScreen(home(connected), HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
+    }
+
+    @Test
+    fun homeReconnecting() = captureBothThemes("B5_home_reconnecting") {
+        HomeScreen(home(ConnectionState(ConnectionStatus.Reconnecting, "p1", tokyo.name, step = ConnectStep.CheckingProxy)), HomeActions())
+    }
+
+    @Test
+    fun homeBlocked() = captureBothThemes("B6_home_blocked_engine_stopped") {
+        val error = ConnectionError(ConnectionError.ENGINE_STOPPED, "reading the TUN interface failed")
+        HomeScreen(home(ConnectionState(ConnectionStatus.Blocked, "p1", tokyo.name, error = error)), HomeActions())
+    }
+
+    @Test
+    fun homeConnectFailed() = captureBothThemes("B6b_connect_failed") {
+        HomeScreen(home(ConnectionState(profileId = "p1", error = ConnectionError("PROXY_UNREACHABLE"))), HomeActions())
+    }
+
+    @Test
+    fun homeVpnRevoked() = captureBothThemes("B6d_vpn_revoked") {
+        HomeScreen(home(ConnectionState(profileId = "p1", error = ConnectionError(ConnectionError.VPN_REVOKED))), HomeActions())
+    }
+
+    @Test
+    fun vpnExplainer() = captureDialog("B9_vpn_explainer") {
+        HomeScreen(home(ConnectionState.Idle, HomeDialog.VpnExplainer(Intent("android.net.vpn.SETUP_VPN"))), HomeActions())
+    }
+
+    @Test
+    fun vpnPermissionDenied() = captureDialog("H1_vpn_permission_denied") {
+        HomeScreen(home(ConnectionState.Idle, HomeDialog.VpnPermissionDenied), HomeActions())
+    }
+
+    @Test
+    fun stopWhileBlocked() = captureDialog("B6_stop_confirm") {
+        val blocked = ConnectionState(ConnectionStatus.Blocked, "p1", tokyo.name, error = ConnectionError(ConnectionError.ENGINE_STOPPED))
+        HomeScreen(home(blocked, HomeDialog.ConfirmStop), HomeActions())
     }
 
     @Test
@@ -260,6 +306,17 @@ class ScreenshotTest {
 
     @Test
     fun about() = captureBothThemes("G1_about") { AboutScreen(version = "0.2.0 (2)", onBack = {}) }
+
+    private fun home(connection: ConnectionState, dialog: HomeDialog? = null) =
+        HomeUiState.Ready(tokyo, connection, canConnect = true, dialog = dialog)
+
+    /** A screen with a dialog open, in the light theme (dialogs draw in their own window, so the whole screen is captured). */
+    @OptIn(ExperimentalRoborazziApi::class)
+    private fun captureDialog(name: String, content: @Composable () -> Unit) {
+        compose.setContent { ProxyFlowTheme { content() } }
+        compose.waitForIdle() // let the dialog draw before the screen is captured
+        captureScreenRoboImage("$DIR/${name}_light.png")
+    }
 
     /**
      * Renders [content] in the light theme, captures it, switches to dark and captures again.

@@ -277,23 +277,29 @@ jobs:
           git commit --allow-empty -m "Screenshots recorded in CI for $(git rev-parse --short HEAD)"
           git push --force origin "HEAD:refs/heads/ci-screenshots/$HEAD_REF"
 
-  # ADR-0006 on real Android runtimes: credentials sealed with Android Keystore keys,
-  # the real SQLite, and every file in the app's data directory checked for
-  # plaintext (core/data/src/androidTest). Robolectric has no Android Keystore,
-  # so these tests only run here: on the oldest supported Android (minSdk 29)
-  # and a current one. The engine (core/engine/src/androidTest) runs here too:
-  # the real libgojni.so carrying TCP through mock SOCKS5 and HTTP CONNECT
-  # proxies, TLS checked by the platform trust manager, the whole packet
-  # engine on a socketpair, and logcat searched for the test credentials.
+  # Real Android runtimes: the oldest supported (minSdk 29), the first with
+  # foreground-service types (34), and current ones (35, 36).
+  # - ADR-0006: credentials sealed with Android Keystore keys, the real SQLite, and
+  #   every file in the app's data directory checked for plaintext (core/data).
+  # - The engine (core/engine): the real libgojni.so carrying TCP through mock SOCKS5
+  #   and HTTP CONNECT proxies, TLS checked by the platform trust manager, the whole
+  #   packet engine on a socketpair, and logcat searched for the test credentials.
+  # - M5 end to end (app, ADR-0010): the real VpnService and engine; Dante (SOCKS5)
+  #   and Squid (HTTP CONNECT) with sign-in on the runner; TCP from the emulator's
+  #   shell to a destination reachable only by name through a proxy; Android's
+  #   consent dialog; revocation, an engine failure, repeated cycles. Afterwards the
+  #   destination and proxy logs, logcat and packet captures of the emulator's uplink
+  #   (its own -tcpdump, and tcpdump inside it when the image allows) are checked by
+  #   scripts/m5_evidence.py: nothing reached the destination around a proxy.
   device:
     needs: engine
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
-        api-level: [29, 35]
+        api-level: [29, 34, 35, 36]
     defaults:
       run:
         shell: bash
@@ -330,21 +336,46 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Build the instrumented tests
-        run: ./gradlew :core:data:assembleDebugAndroidTest :core:engine:assembleDebugAndroidTest --continue 2>&1 | tee "$RUNNER_TEMP/gradle-1-device-build.log"
+        run: |
+          ./gradlew :core:data:assembleDebugAndroidTest :core:engine:assembleDebugAndroidTest :app:assembleDebugAndroidTest \
+            --continue 2>&1 | tee "$RUNNER_TEMP/gradle-1-device-build.log"
+
+      - name: Proxies and destination for the end-to-end tests (Dante, Squid)
+        id: proxies
+        if: ${{ !cancelled() }}
+        run: bash scripts/m5_device_env.sh
 
       # Runs even when one module's tests failed to build (the engine's, say, without
-      # the AAR), so the other module's device tests still report. The action runs each
-      # script line with sh; bash keeps the Gradle exit status through tee.
-      - name: Keystore, storage and engine tests on an emulator (API ${{ matrix.api-level }})
+      # the AAR), so the other modules' device tests still report. The action runs each
+      # script line on its own, so the steps are in scripts/m5_device_e2e.sh.
+      - name: Keystore, storage, engine and VPN tests on an emulator (API ${{ matrix.api-level }}), its uplink captured
+        id: emulator
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}
           target: google_apis
           arch: x86_64
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -tcpdump ${{ runner.temp }}/emulator-uplink.pcap
           disable-animations: true
-          script: bash -c 'set -o pipefail; ./gradlew :core:data:connectedDebugAndroidTest :core:engine:connectedDebugAndroidTest --continue 2>&1 | tee "$RUNNER_TEMP/gradle-2-device.log"'
+          script: bash scripts/m5_device_e2e.sh ${{ matrix.api-level }}
+
+      - name: End-to-end evidence (destination and proxy logs, packet captures, logcat; emitted as annotations)
+        if: ${{ !cancelled() && steps.proxies.outcome == 'success' && steps.emulator.outcome != 'skipped' }}
+        run: |
+          python3 scripts/m5_evidence.py --api ${{ matrix.api-level }} --pf /tmp/pf \
+            --out "$RUNNER_TEMP/m5-api${{ matrix.api-level }}" --host-pcap "$RUNNER_TEMP/emulator-uplink.pcap"
+
+      # The evidence for the report, without the run's passwords file. The captures hold the
+      # proxies' sign-ins in clear (plaintext test proxies): random per run, gone with the runner.
+      - name: Collect the end-to-end evidence
+        if: ${{ !cancelled() && steps.proxies.outcome == 'success' }}
+        run: |
+          dir="$RUNNER_TEMP/m5-evidence-api${{ matrix.api-level }}"
+          mkdir -p "$dir"
+          cp /tmp/pf/destination.log /tmp/pf/squid-access.log /tmp/pf/danted.log "$dir/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/emulator-uplink.pcap" "$dir/" 2>/dev/null || true
+          cp -r "$RUNNER_TEMP/m5-api${{ matrix.api-level }}/." "$dir/" 2>/dev/null || true
 
       - name: Device test counts (emitted as notices)
         if: ${{ !cancelled() }}
@@ -354,7 +385,7 @@ jobs:
         if: failure()
         run: python3 scripts/ci_error_digest.py "$RUNNER_TEMP"/gradle-*.log
 
-      - name: Upload device test reports
+      - name: Upload device test reports and the end-to-end evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -364,4 +395,7 @@ jobs:
             core/data/build/outputs/androidTest-results/
             core/engine/build/reports/androidTests/
             core/engine/build/outputs/androidTest-results/
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+            ${{ runner.temp }}/m5-evidence-api${{ matrix.api-level }}/
           if-no-files-found: warn

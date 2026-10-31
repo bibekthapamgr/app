@@ -2,14 +2,20 @@ package app.proxyflow
 
 import android.app.Application
 import android.os.StrictMode
+import app.proxyflow.core.vpn.VpnRuntime
 
-open class ProxyFlowApplication : Application() {
+open class ProxyFlowApplication :
+    Application(),
+    VpnRuntime.Provider {
     /**
      * App-wide objects (repositories and the ViewModel factory). They live as
      * long as the process, so no screen state depends on an Activity instance.
      */
     lateinit var container: AppContainer
         private set
+
+    /** For ProxyFlowVpnService, which Android creates (ADR-0010). */
+    override val vpnRuntime: VpnRuntime get() = container.vpnRuntime
 
     override fun onCreate() {
         super.onCreate()

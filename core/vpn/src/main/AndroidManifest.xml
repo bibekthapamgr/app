@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The engine's and the pre-flight check's connections to the user's proxy. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The VPN runs as a foreground service of type systemExempted (ADR-0007, ADR-0010 §8). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <!-- Android 13+: the connection notifications; the VPN works without it. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+        <!--
+          Only Android can bind it (BIND_VPN_SERVICE); the app starts it with explicit intents.
+          The intent filter lets Android start it for Always-on VPN.
+        -->
+        <service
+            android:name=".ProxyFlowVpnService"
+            android:exported="false"
+            android:foregroundServiceType="systemExempted"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+    </application>
+
+</manifest>
