@@ -164,6 +164,8 @@ class EngineOnDeviceTest {
             10_000,
             testCaPlatform,
         )
+        // The server sends its CA too; Android's trust manager then reports the expired leaf as an
+        // unknown anchor, so this reason comes from the engine's own check of the leaf's dates.
         assertEquals("expired certificate", "TLS_EXPIRED", expiredResult.code)
 
         val other = proxy(MockProxy.Protocol.HTTP, tls = TestPki.otherName)

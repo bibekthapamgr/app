@@ -88,13 +88,24 @@ func tlsWrap(ctx context.Context, conn net.Conn, host string, o *TLSOptions, ses
 	return tc, nil
 }
 
-// verifyPeer checks the leaf against serverName, then asks the verifier.
+// verifyPeer checks the leaf against serverName and its validity dates, then
+// asks the verifier. The date check only adds a rejection: the verifier still
+// decides trust and checks every certificate of the path it builds. It exists
+// because platform trust managers do not always say why a chain failed
+// (Android's reports an expired leaf as an unknown anchor when the server also
+// sends its root), and the app's message for TLS_EXPIRED points at the phone's
+// clock. Only the leaf is checked here: it is in every path, while an expired
+// intermediate the server sends may be one the verifier does not need.
 func verifyPeer(cs tls.ConnectionState, serverName string, v CertVerifier) error {
 	if len(cs.PeerCertificates) == 0 {
 		return newErr(CodeTLSUntrusted, "proxy presented no certificate", nil)
 	}
-	if err := cs.PeerCertificates[0].VerifyHostname(serverName); err != nil {
+	leaf := cs.PeerCertificates[0]
+	if err := leaf.VerifyHostname(serverName); err != nil {
 		return newErr(CodeTLSHostname, "proxy certificate does not match the proxy hostname", err)
+	}
+	if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+		return newErr(CodeTLSExpired, "proxy certificate is expired or not yet valid", nil)
 	}
 	if err := v.VerifyChain(cs.PeerCertificates, serverName); err != nil {
 		var e *Error

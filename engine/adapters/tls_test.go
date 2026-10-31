@@ -82,6 +82,28 @@ func TestVerifyPeerChecksHostnameBeforeTrust(t *testing.T) {
 	if err := verifyPeer(tls.ConnectionState{}, "proxy.test", v); CodeOf(err) != CodeTLSUntrusted {
 		t.Fatalf("no certificate: got %v", err)
 	}
+	// An expired or not yet valid leaf is TLS_EXPIRED whatever the verifier would
+	// have said (Android's trust manager can report it as an unknown anchor).
+	untrusted := funcVerifier(func(_ []*x509.Certificate, _ string) error { return newErr(CodeTLSUntrusted, "x", nil) })
+	now := time.Now()
+	for name, o := range map[string]proxytest.LeafOptions{
+		"expired":       {DNSNames: []string{"proxy.test"}, NotBefore: now.Add(-48 * time.Hour), NotAfter: now.Add(-24 * time.Hour)},
+		"not yet valid": {DNSNames: []string{"proxy.test"}, NotBefore: now.Add(time.Hour), NotAfter: now.Add(48 * time.Hour)},
+	} {
+		cs := tls.ConnectionState{PeerCertificates: chainOf(ca.Leaf(t, o))}
+		if err := verifyPeer(cs, "proxy.test", untrusted); CodeOf(err) != CodeTLSExpired {
+			t.Fatalf("%s leaf: got %v, want TLS_EXPIRED", name, err)
+		}
+	}
+	// An expired intermediate is left to the verifier, which may not need it.
+	inter := ca.Intermediate(t, "Intermediate")
+	withOldIntermediate := chainOf(inter.Leaf(t, proxytest.LeafOptions{DNSNames: []string{"proxy.test"}}))
+	expiredCopy := *inter.Cert
+	expiredCopy.NotAfter = now.Add(-time.Hour)
+	withOldIntermediate = append(withOldIntermediate, &expiredCopy)
+	if err := verifyPeer(tls.ConnectionState{PeerCertificates: withOldIntermediate}, "proxy.test", v); err != nil {
+		t.Fatalf("the engine must not judge intermediates itself: %v", err)
+	}
 	// A verifier's categorised error passes through; anything else is TLS_UNTRUSTED.
 	expired := funcVerifier(func(_ []*x509.Certificate, _ string) error { return newErr(CodeTLSExpired, "x", nil) })
 	if err := verifyPeer(cs, "proxy.test", expired); CodeOf(err) != CodeTLSExpired {
