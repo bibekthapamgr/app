@@ -32,7 +32,7 @@ What it promises, and where that ends (the single source for these claims is `do
 | `feature/{home,profiles,settings,logs,about}/` | One module per area: stateless screens, ViewModels, navigation entry points, tests |
 | `config/lint/` | Android Lint configuration |
 | `gradle/libs.versions.toml` | Every dependency and plugin version |
-| `scripts/` | `check-secrets.sh` (keys, signing files and credentials in the files or anywhere in the history; rules in `check_secrets.py`), `check_release_manifest.py` (permissions, backups, the VPN service and exported components of the release build), `ci_error_digest.py` and `ci_build_facts.py` (CI summaries), and the M5 end-to-end setup: `m5_device_env.sh` (proxies and destination on the CI runner), `m5_e2e_servers.py`, `m5_device_e2e.sh` (inside the emulator job), `m5_evidence.py` (logs and packet captures checked) |
+| `scripts/` | `check-secrets.sh` (keys, signing files and credentials in the files or anywhere in the history; rules in `check_secrets.py`), `check_release_manifest.py` (permissions, backups, the VPN service and exported components of the release build), `ci_error_digest.py` and `ci_build_facts.py` (CI summaries), and the M5 end-to-end setup: `m5_device_env.sh` (proxies, destination and sink on the CI runner), `m5_e2e_servers.py`, `m5_device_e2e.sh` (inside the emulator job), `m5_evidence.py` (logs and packet captures checked) |
 | `docs/m1/` … `docs/m5/` | Milestone deliverables and acceptance reports |
 | `docs/adr/` | Architecture decision records 0001–0010 |
 | `design/` | Screen boards, design tokens, contrast checker, Compose colour generator |
