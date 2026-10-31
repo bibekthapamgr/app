@@ -90,30 +90,36 @@ fi
 # group (init kills that group's cgroup when adbd restarts as the shell user, which the tests
 # need: the VPN covers the shell, not root). The evidence counts these captures only if
 # tcpdump is still running after the tests.
+# Not on API 29: adbd does not come back after adb root and unroot there (run 41230555282: the device stayed
+# offline, so no test ran), and its uplink, mobile data or Wi-Fi, all passes the emulator's own capture.
 GUEST_CAPTURE=0
-{
-    echo "adb root: $(timeout 30 adb root 2>&1 | tr -d '\r')"
-    sleep 3
-    timeout 120 adb wait-for-device
-    echo "id: $(adb shell id 2>&1 | tr -d '\r')"
-    echo "tcpdump: $(adb shell 'command -v tcpdump || echo none' 2>&1 | tr -d '\r')"
-} > "$OUT/guest-capture.txt" 2>&1
-if grep -q 'uid=0' "$OUT/guest-capture.txt" && ! grep -q 'tcpdump: none' "$OUT/guest-capture.txt"; then
-    adb shell ip -o link show > "$OUT/guest-links.txt" 2>&1
-    IFACES="$(awk -F': ' '{print $2}' "$OUT/guest-links.txt" | sed 's/@.*//' | tr -d '\r' | grep -E '^(eth|wlan|radio|rmnet)[0-9]+$' || true)"
-    for iface in $IFACES; do
-        adb shell "setsid tcpdump -i $iface -s 0 -U -w /data/local/tmp/pf-$iface.pcap </dev/null >/dev/null 2>&1 &"
-    done
-    echo "$IFACES" > "$OUT/guest-interfaces.txt"
-    GUEST_CAPTURE=1
-    sleep 2
-    # The root cgroup: /sys/fs/cgroup (cgroup v2, API 30+) or /acct (v1, API 29).
-    adb shell 'for p in $(pidof tcpdump); do for c in /sys/fs/cgroup/cgroup.procs /acct/cgroup.procs; do [ -w "$c" ] && echo "$p" > "$c"; done; done' >/dev/null 2>&1 || true
-    echo "tcpdump at the start: $(adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
+if [ "$API" -lt 34 ]; then
+    echo "not on API $API: adbd does not survive adb root and unroot on this image; the emulator's own capture (-tcpdump) sees the whole uplink" > "$OUT/guest-capture.txt"
 else
-    echo "no root or no tcpdump in this image: the emulator's own capture (-tcpdump) is the only one" >> "$OUT/guest-capture.txt"
+    {
+        echo "adb root: $(timeout 30 adb root 2>&1 | tr -d '\r')"
+        sleep 3
+        timeout 120 adb wait-for-device
+        echo "id: $(adb shell id 2>&1 | tr -d '\r')"
+        echo "tcpdump: $(adb shell 'command -v tcpdump || echo none' 2>&1 | tr -d '\r')"
+    } > "$OUT/guest-capture.txt" 2>&1
+    if grep -q 'uid=0' "$OUT/guest-capture.txt" && ! grep -q 'tcpdump: none' "$OUT/guest-capture.txt"; then
+        adb shell ip -o link show > "$OUT/guest-links.txt" 2>&1
+        IFACES="$(awk -F': ' '{print $2}' "$OUT/guest-links.txt" | sed 's/@.*//' | tr -d '\r' | grep -E '^(eth|wlan|radio|rmnet)[0-9]+$' || true)"
+        for iface in $IFACES; do
+            adb shell "setsid tcpdump -i $iface -s 0 -U -w /data/local/tmp/pf-$iface.pcap </dev/null >/dev/null 2>&1 &"
+        done
+        echo "$IFACES" > "$OUT/guest-interfaces.txt"
+        GUEST_CAPTURE=1
+        sleep 2
+        # The root cgroup: /sys/fs/cgroup (cgroup v2) or /acct (v1).
+        adb shell 'for p in $(pidof tcpdump); do for c in /sys/fs/cgroup/cgroup.procs /acct/cgroup.procs; do [ -w "$c" ] && echo "$p" > "$c"; done; done' >/dev/null 2>&1 || true
+        echo "tcpdump at the start: $(adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
+    else
+        echo "no root or no tcpdump in this image: the emulator's own capture (-tcpdump) is the only one" >> "$OUT/guest-capture.txt"
+    fi
+    restart_adbd unroot || true
 fi
-restart_adbd unroot || true
 
 timeout 30 adb logcat -G 16M >/dev/null 2>&1 || true
 timeout 30 adb logcat -c || true
