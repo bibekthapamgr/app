@@ -168,13 +168,16 @@ else
         adb shell ip -o link show > "$OUT/guest-links.txt" 2>&1
         IFACES="$(awk -F': ' '{print $2}' "$OUT/guest-links.txt" | sed 's/@.*//' | tr -d '\r' | grep -E '^(eth|wlan|radio|rmnet)[0-9]+$' || true)"
         for iface in $IFACES; do
-            adb shell "setsid tcpdump -i $iface -s 0 -U -w /data/local/tmp/pf-$iface.pcap </dev/null >/dev/null 2>&1 &"
+            # Headers only (160 bytes: IP, TCP, and DNS queries in full): over Wi-Fi, Google Play's updates run through
+            # the VPN too, and a full capture grew too large to pull in time (run 41237942120, API 35).
+            adb shell "setsid tcpdump -i $iface -s 160 -U -w /data/local/tmp/pf-$iface.pcap </dev/null >/dev/null 2>&1 &"
         done
         echo "$IFACES" > "$OUT/guest-interfaces.txt"
         GUEST_CAPTURE=1
         sleep 2
         # The root cgroup: /sys/fs/cgroup (cgroup v2) or /acct (v1).
         adb shell 'for p in $(pidof tcpdump); do for c in /sys/fs/cgroup/cgroup.procs /acct/cgroup.procs; do [ -w "$c" ] && echo "$p" > "$c"; done; done' >/dev/null 2>&1 || true
+        echo "tcpdump on: $(paste -sd ' ' "$OUT/guest-interfaces.txt")" >> "$OUT/guest-capture.txt"
         echo "tcpdump at the start: $(adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
     else
         echo "no root or no tcpdump in this image: the emulator's own capture (-tcpdump) is the only one" >> "$OUT/guest-capture.txt"
@@ -214,8 +217,10 @@ if [ "$GUEST_CAPTURE" = 1 ]; then
     echo "tcpdump at the end: $(timeout 30 adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
     timeout 30 adb shell 'pkill -INT tcpdump || killall -INT tcpdump' >/dev/null 2>&1 || true
     sleep 3
+    echo "captured on the phone: $(timeout 30 adb shell 'ls -l /data/local/tmp/pf-*.pcap' 2>&1 | tr -d '\r' | awk '{print $NF, $5}' | paste -sd ';' -)" >> "$OUT/guest-capture.txt"
     for iface in $(cat "$OUT/guest-interfaces.txt"); do
-        timeout 180 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1 || true
+        timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1 ||
+            echo "pull of pf-$iface.pcap failed or timed out" >> "$OUT/guest-capture.txt"
     done
 fi
 timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties >/dev/null 2>&1 || true
