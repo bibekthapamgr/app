@@ -39,8 +39,7 @@ type Pool struct {
 	last       uint32 // last allocatable address
 	next       uint32 // next address never handed out
 	virgin     int    // how many addresses were never handed out
-	free       []uint32
-	freeHead   int // free[freeHead:] is the queue of freed addresses, oldest first
+	free       ring   // freed addresses, oldest first
 	max        int
 	reuseAfter time.Duration
 	now        func() time.Time
@@ -103,6 +102,11 @@ func NewPool(prefix netip.Prefix, reserved int, maxEntries int, opts ...PoolOpti
 		prefix: prefix, first: first, last: last, next: first + uint32(start.Int64()), virgin: capacity,
 		max: maxEntries, reuseAfter: DefaultReuseAfter, now: time.Now,
 		byIP: map[uint32]*entry{}, byName: map[string]*entry{}, idle: list.New(),
+		// Every address is never used, mapped or freed. Mappings are dropped
+		// only to make room for a new one when there are max of them, so at
+		// most capacity-max addresses wait, plus the one freed for the
+		// allocation under way.
+		free: ring{size: capacity - maxEntries + 1},
 	}
 	for _, o := range opts {
 		o(p)
@@ -220,7 +224,7 @@ func (p *Pool) evict(now time.Time) bool {
 	p.idle.Remove(el)
 	delete(p.byName, e.name)
 	delete(p.byIP, e.ip)
-	p.free = append(p.free, e.ip)
+	p.free.push(e.ip)
 	return true
 }
 
@@ -237,16 +241,38 @@ func (p *Pool) allocate() (uint32, bool) {
 		p.virgin--
 		return ip, true
 	}
-	if p.freeHead == len(p.free) {
+	return p.free.pop()
+}
+
+// ring is a FIFO queue of addresses with a fixed number of slots, allocated
+// when the first address is queued (4 bytes per slot).
+type ring struct {
+	buf        []uint32
+	head, n    int
+	size       int
+	overflowed bool // a push found no slot (cannot happen; see NewPool)
+}
+
+func (r *ring) push(v uint32) {
+	if r.buf == nil {
+		r.buf = make([]uint32, r.size)
+	}
+	if r.n == len(r.buf) {
+		r.overflowed = true // keep the older addresses; this one is lost to the pool
+		return
+	}
+	r.buf[(r.head+r.n)%len(r.buf)] = v
+	r.n++
+}
+
+func (r *ring) pop() (uint32, bool) {
+	if r.n == 0 {
 		return 0, false
 	}
-	ip := p.free[p.freeHead]
-	p.freeHead++
-	if p.freeHead >= 1024 && p.freeHead*2 >= len(p.free) {
-		p.free = append(p.free[:0], p.free[p.freeHead:]...) // reclaim the consumed front
-		p.freeHead = 0
-	}
-	return ip, true
+	v := r.buf[r.head]
+	r.head = (r.head + 1) % len(r.buf)
+	r.n--
+	return v, true
 }
 
 func u32(a netip.Addr) uint32 { b := a.As4(); return binary.BigEndian.Uint32(b[:]) }

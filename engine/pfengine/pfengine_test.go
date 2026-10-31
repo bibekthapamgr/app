@@ -533,6 +533,21 @@ func TestSelfTestCountsOnlyItsOwnGoroutines(t *testing.T) {
 //go:noinline
 func parkHere(stop chan struct{}) { <-stop }
 
+func TestWaitFramesAreSkipped(t *testing.T) {
+	for _, fn := range []string{"runtime.gopark", "sync.runtime_SemacquireWaitGroup", "internal/sync.runtime_SemacquireMutex",
+		"time.Sleep", "gvisor.dev/gvisor/pkg/sleep.(*Sleeper).nextWaker", "gvisor.dev/gvisor/pkg/sync.Gopark", "syscall.Syscall6"} {
+		if !waitFrame(fn) {
+			t.Errorf("%s only says the goroutine waits", fn)
+		}
+	}
+	for _, fn := range []string{"gvisor.dev/gvisor/pkg/tcpip/transport/tcp.(*processor).start", "github.com/bibekthapamgr/app/engine/tunnel.(*Engine).relay",
+		"time.AfterFunc"} {
+		if waitFrame(fn) {
+			t.Errorf("%s says which code runs", fn)
+		}
+	}
+}
+
 func TestSelfTestRejectsBadInput(t *testing.T) {
 	p := &fakePlatform{}
 	cfg := configFor("SOCKS5", "127.0.0.1", 1080, "")

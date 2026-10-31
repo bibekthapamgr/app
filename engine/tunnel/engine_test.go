@@ -393,12 +393,17 @@ func TestOpenConnectionPinsItsFakeAddress(t *testing.T) {
 		t.Fatalf("the open connection's mapping must survive, got %q %v", name, ok)
 	}
 	c.Close()
-	waitFor(t, func() bool { return len(e.Flows()) == 0 }, "the flow to end")
-	rcode, other := queryA(t, e.cs, "other.test")
-	if rcode != dnsmessage.RCodeSuccess || other == ip {
-		t.Fatalf("after the connection closed the mapping may go: rcode %v, address %s (was %s)", rcode, other, ip)
+	// The flow releases its pin as it ends; until then the name is refused.
+	var other netip.Addr
+	waitFor(t, func() bool {
+		var rcode dnsmessage.RCode
+		rcode, other = queryA(t, e.cs, "other.test")
+		return rcode == dnsmessage.RCodeSuccess
+	}, "the mapping to be released when the connection closed")
+	if other == ip {
+		t.Fatalf("the new name got the address that was in use (%s)", ip)
 	}
-	if e.Stats().DNS["exhausted"] != 1 {
+	if e.Stats().DNS["exhausted"] < 1 {
 		t.Fatalf("the refused name must be counted: %v", e.Stats().DNS)
 	}
 }

@@ -72,9 +72,10 @@ const (
 	FakeIPPrefix = "198.18.0.0/15"
 	fakeReserved = 256 // 198.18.0.0-198.18.0.255: TUN, DNS and spare addresses
 	fakeDNSTTL   = 5   // seconds (ADR-0003)
-	// fakeMaxEntries bounds the fake-DNS mappings (about 7 MiB when full of
-	// maximum-length names) and leaves most of the 130 815 addresses free, so
-	// freed addresses wait in a long queue before another name gets one.
+	// fakeMaxEntries bounds the fake-DNS mappings (at most about 7.6 MiB with
+	// maximum-length names, the freed-address queue included) and leaves most
+	// of the 130 815 addresses free, so freed addresses wait in a long queue
+	// before another name gets one.
 	fakeMaxEntries = 16384
 	// verdictTrusted is the only VerifyChain answer that means "trusted".
 	verdictTrusted = "OK"

@@ -55,7 +55,9 @@ type selfTestResult struct {
 	// or through the engine, the netstack or the dialer, that are still alive
 	// after it released everything (waiting up to 2 s): it must be 0. They
 	// are told apart from every other goroutine by a profiler label that
-	// goroutines inherit from the one that starts them.
+	// goroutines inherit from the one that starts them. Goroutines the Go
+	// runtime starts for timer callbacks (the netstack's timers, deadlines)
+	// carry no label and are not counted; they run briefly.
 	GoroutinesLeft int `json:"goroutines_left"`
 	// GoroutinesLeftIn names the function each of those is in (its innermost
 	// frame that is not just waiting); function names only.
@@ -360,9 +362,13 @@ func settledLabelledGoroutines(run string) (int, []string) {
 }
 
 // waitFrame reports frames that only say a goroutine is waiting (the Go
-// runtime, system calls, gVisor's park helper), not which code it runs.
+// runtime, locks, sleeps, system calls, gVisor's park and sleep helpers),
+// not which code it runs.
 func waitFrame(fn string) bool {
-	for _, p := range []string{"runtime.", "internal/poll.", "syscall.", "golang.org/x/sys/unix.", "gvisor.dev/gvisor/pkg/sync."} {
+	for _, p := range []string{
+		"runtime.", "internal/poll.", "internal/sync.", "sync.", "time.Sleep", "syscall.", "golang.org/x/sys/unix.",
+		"gvisor.dev/gvisor/pkg/sync.", "gvisor.dev/gvisor/pkg/sleep.",
+	} {
 		if strings.HasPrefix(fn, p) {
 			return true
 		}

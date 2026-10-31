@@ -34,7 +34,8 @@ jobs:
   # the netstack through them, and check that nothing leaks (goroutines,
   # descriptors) or prints a credential. The AAR is built only from verified
   # modules, exactly the tested ones (build-aar.sh checks), after govulncheck
-  # passed over everything it links, and is handed to the jobs below.
+  # passed over the engine and gomobile's runtime package, and is handed to
+  # the jobs below.
   engine:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
