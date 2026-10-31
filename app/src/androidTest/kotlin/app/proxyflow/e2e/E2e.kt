@@ -320,9 +320,11 @@ class App {
     fun notificationTitle(id: Int): String? = notification(id)?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
 
     /**
-     * Disconnects and waits until the interface and the service are gone; a timeout reports what
-     * was left. A test's own check uses the default; before a test, a longer wait lets one test's
-     * failure stay its own instead of failing every test after it.
+     * Disconnects and waits until the interface, the service and Android's VPN network are gone; a
+     * timeout reports what was left. Android removes its network a moment after the interface
+     * closes, and a test that starts meanwhile would count the old one as its own. A test's own
+     * check uses the default; before a test, a longer wait lets one test's failure stay its own
+     * instead of failing every test after it.
      */
     fun disconnectAndSettle(timeoutMillis: Long = 10_000) {
         controller.disconnect()
@@ -330,6 +332,7 @@ class App {
         val diagnose = { Diagnostics.report(this) }
         eventually("the VPN interface closes", timeoutMillis, diagnose) { Descriptors.tun().isEmpty() }
         eventually("the VPN service stops", timeoutMillis, diagnose) { ProxyFlowVpnService.liveInstances.get() == 0 }
+        eventually("Android has no VPN network", timeoutMillis, diagnose) { VpnNetworks.now(context).isEmpty() }
     }
 }
 
