@@ -97,46 +97,62 @@ uplink_name() {
         *) echo "no interface with an address" ;;
     esac
 }
-START=$SECONDS
-UPLINK=""
-# The API 35 image's mobile data came up late or never, or dropped during the tests, in four of its last
-# seven runs, while Wi-Fi with mobile data off held (run 41235735086, attempt 1): there Wi-Fi is the uplink.
-if [ "$API" = 35 ]; then
-    wifi_only
-    if uplink_within 60; then
-        UPLINK="$(uplink_name) (mobile data off: unreliable on this image)"
+choose_uplink() {
+    UPLINK=""
+    # The API 35 image's mobile data came up late or never, or dropped during the tests, in four of its last
+    # seven runs, while Wi-Fi with mobile data off held (run 41235735086, attempt 1): there Wi-Fi is the uplink.
+    if [ "$API" = 35 ]; then
+        wifi_only
+        if uplink_within 60; then
+            UPLINK="$(uplink_name) (mobile data off: unreliable on this image)"
+        else
+            timeout 30 adb shell svc data enable >/dev/null 2>&1 || true
+            wifi_off || true
+            if uplink_within 90; then UPLINK="$(uplink_name) (Wi-Fi did not reach the runner)"; fi
+        fi
     else
-        timeout 30 adb shell svc data enable >/dev/null 2>&1 || true
-        wifi_off || true
-        if uplink_within 90; then UPLINK="$(uplink_name) (Wi-Fi did not reach the runner)"; fi
+        for _ in $(seq 1 45); do
+            if cellular_up; then break; fi
+            sleep 2
+        done
     fi
-else
-    for _ in $(seq 1 45); do
-        if cellular_up; then break; fi
+    if [ -n "$UPLINK" ] || [ "$API" = 35 ]; then
+        : # chosen above
+    elif cellular_up; then
+        NOTE=""
+        if ! wifi_off; then NOTE=", Wi-Fi would not stay off"; fi
+        if uplink_within 60; then
+            UPLINK="$(uplink_name)$NOTE"
+        else
+            timeout 30 adb shell svc data disable >/dev/null 2>&1 || true
+            sleep 3
+            timeout 30 adb shell svc data enable >/dev/null 2>&1 || true
+            if uplink_within 60; then
+                UPLINK="$(uplink_name)$NOTE (after switching mobile data off and on)"
+            else
+                wifi_only
+                if uplink_within 60; then UPLINK="$(uplink_name) (mobile data did not reach the runner)"; fi
+            fi
+        fi
+    else
+        wifi_only
+        if uplink_within 60; then UPLINK="$(uplink_name) (mobile data never came up, so it is off)"; fi
+    fi
+}
+START=$SECONDS
+choose_uplink
+if [ -z "$UPLINK" ]; then
+    # A boot that brought up no network at all (API 35, runs 41219399550 and 41238841652: no interface had an
+    # address, Wi-Fi or mobile data): the emulator boots once more.
+    timeout 60 adb reboot >/dev/null 2>&1 || true
+    timeout 300 adb wait-for-device || true
+    for _ in $(seq 1 120); do
+        if [ "$(timeout 10 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then break; fi
         sleep 2
     done
-fi
-if [ -n "$UPLINK" ] || [ "$API" = 35 ]; then
-    : # chosen above
-elif cellular_up; then
-    NOTE=""
-    if ! wifi_off; then NOTE=", Wi-Fi would not stay off"; fi
-    if uplink_within 60; then
-        UPLINK="$(uplink_name)$NOTE"
-    else
-        timeout 30 adb shell svc data disable >/dev/null 2>&1 || true
-        sleep 3
-        timeout 30 adb shell svc data enable >/dev/null 2>&1 || true
-        if uplink_within 60; then
-            UPLINK="$(uplink_name)$NOTE (after switching mobile data off and on)"
-        else
-            wifi_only
-            if uplink_within 60; then UPLINK="$(uplink_name) (mobile data did not reach the runner)"; fi
-        fi
-    fi
-else
-    wifi_only
-    if uplink_within 60; then UPLINK="$(uplink_name) (mobile data never came up, so it is off)"; fi
+    sleep 10
+    choose_uplink
+    if [ -n "$UPLINK" ]; then UPLINK="$UPLINK, after a second boot (the first brought up no network)"; fi
 fi
 {
     echo "uplink: ${UPLINK:-none: the phone never reached the runner} ($((SECONDS - START)) s)"
