@@ -39,8 +39,9 @@ import org.junit.Assume.assumeTrue
 /**
  * What the CI runner set up for the end-to-end tests (.github/workflows/android.yml,
  * scripts/m5_device_env.sh): a Dante SOCKS5 proxy and a Squid HTTP proxy, both with
- * sign-in, a proxy that accepts connections and never answers, a closed port, and a
- * destination server reachable only by name through the proxies. The runner writes it
+ * sign-in, a proxy that accepts connections and never answers, a closed port, a
+ * destination server reachable only by name through the proxies, and a sink beside it
+ * that only lines sent while traffic is held go to. The runner writes it
  * to the emulator with adb, so no password appears on any command line; the tests read
  * it as the shell user.
  */
@@ -57,6 +58,7 @@ data class E2eConfig(
     val destinationName: String,
     val destinationAddress: String,
     val destinationPort: Int,
+    val sinkPort: Int,
 ) {
     companion object {
         private const val FILE = "/data/local/tmp/proxyflow-e2e.properties"
@@ -81,6 +83,7 @@ data class E2eConfig(
                 destinationName = value("destination.name"),
                 destinationAddress = value("destination.address"),
                 destinationPort = value("destination.port").toInt(),
+                sinkPort = value("sink.port").toInt(),
             )
         }
     }

@@ -120,23 +120,21 @@ class ProxyFlowVpnService :
 
     override fun protectSocket(fd: Int): Boolean = protect(fd)
 
+    // Throws when Android can't answer (the system server gone, say): an empty list would claim there is no VPN network.
     override fun vpnNetworks(): List<VpnNetwork> {
-        val connectivity = getSystemService(ConnectivityManager::class.java) ?: return emptyList()
-        return try {
-            // allNetworks: callbacks are never told about a VPN that excludes the caller, as ProxyFlow's does.
-            @Suppress("DEPRECATION")
-            val networks = connectivity.allNetworks
-            networks.mapNotNull { network ->
-                val capabilities = connectivity.getNetworkCapabilities(network)
-                if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) != true) return@mapNotNull null
-                VpnNetwork(
-                    id = network.toString(),
-                    interfaceName = connectivity.getLinkProperties(network)?.interfaceName,
-                    ready = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
-                )
-            }
-        } catch (e: RuntimeException) {
-            emptyList() // SecurityException without ACCESS_NETWORK_STATE, or the system server gone: nothing is known
+        val connectivity = checkNotNull(getSystemService(ConnectivityManager::class.java)) { "no ConnectivityManager" }
+
+        // allNetworks: callbacks are never told about a VPN that excludes the caller, as ProxyFlow's does.
+        @Suppress("DEPRECATION")
+        val networks = connectivity.allNetworks
+        return networks.mapNotNull { network ->
+            val capabilities = connectivity.getNetworkCapabilities(network)
+            if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) != true) return@mapNotNull null
+            VpnNetwork(
+                id = network.toString(),
+                interfaceName = connectivity.getLinkProperties(network)?.interfaceName,
+                ready = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+            )
         }
     }
 

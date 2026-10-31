@@ -374,7 +374,7 @@ jobs:
         run: |
           dir="$RUNNER_TEMP/m5-evidence-api${{ matrix.api-level }}"
           mkdir -p "$dir"
-          sudo cp /tmp/pf/destination.log /tmp/pf/squid-access.log /tmp/pf/danted.log "$dir/" 2>/dev/null || true
+          sudo cp /tmp/pf/destination.log /tmp/pf/sink.log /tmp/pf/squid-access.log /tmp/pf/danted.log "$dir/" 2>/dev/null || true
           sudo chown -R "$(id -u):$(id -g)" "$dir"
           cp "$RUNNER_TEMP/emulator-uplink.pcap" "$dir/" 2>/dev/null || true
           cp -r "$RUNNER_TEMP/m5-api${{ matrix.api-level }}/." "$dir/" 2>/dev/null || true

@@ -34,6 +34,9 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
 
     @Volatile var startError: Throwable? = null
 
+    /** Runs inside each probe, after its socket was protected: a test can block or throw for one profile. */
+    @Volatile var probeHook: (ProxyProfile) -> Unit = {}
+
     @Volatile var running = false
         private set
 
@@ -59,6 +62,7 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
         secrets += secret != null
         servers += "probe ${profile.host}"
         check(protect(PROBE_SOCKET)) { "the pre-flight socket was not protected" }
+        probeHook(profile)
         gate?.await(10, TimeUnit.SECONDS)
         secret?.close()
         return answer
@@ -94,7 +98,9 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
 /**
  * The service's side: consent, interfaces and the notification, all recorded. Android's
  * VPN network is simulated as one ready network leading into the newest open interface,
- * or none with [routes] off.
+ * or none with [routes] off. Establishing an interface while another is open is counted in
+ * [overlaps]: Android would take the open one down at once and route the new one only
+ * later, with apps' traffic on the normal network in between (ADR-0010 §5).
  */
 class FakeHost(private val log: CallLog) : VpnHost {
     @Volatile var consent = true
@@ -104,15 +110,18 @@ class FakeHost(private val log: CallLog) : VpnHost {
 
     @Volatile private var networksError: RuntimeException? = null
 
-    @Volatile private var networksReadsBeforeError = 0
+    @Volatile private var failingReads = 0 until 0
     private val networksReads = AtomicInteger()
 
-    /** From now on, reading Android's VPN networks throws [error] once [after] more reads have worked. */
-    fun failNetworkReads(error: RuntimeException, after: Int = 0) {
+    /** From now on, reading Android's VPN networks throws [error] once [after] more reads have worked, [times] times. */
+    fun failNetworkReads(error: RuntimeException, after: Int = 0, times: Int = Int.MAX_VALUE - after) {
         networksReads.set(0)
-        networksReadsBeforeError = after
+        failingReads = after until after + times
         networksError = error
     }
+
+    /** Interfaces established while another one was still open. */
+    val overlaps = AtomicInteger()
 
     /** What a check's socket guard does when the session aborts it (the engine's call then returns). */
     @Volatile var onAbort: () -> Unit = {}
@@ -142,6 +151,10 @@ class FakeHost(private val log: CallLog) : VpnHost {
         lastConfig = config
         establishError?.let { throw it }
         if (establishReturnsNull) return null
+        tuns.firstOrNull { !it.closed }?.let { open ->
+            overlaps.incrementAndGet()
+            log.add("establish while fd=${open.fd} is open")
+        }
         val tun = FakeTun(FIRST_FD + tuns.size, log)
         tuns += tun
         log.add("establish fd=${tun.fd}")
@@ -155,7 +168,7 @@ class FakeHost(private val log: CallLog) : VpnHost {
 
     override fun vpnNetworks(): List<VpnNetwork> {
         val error = networksError
-        if (error != null && networksReads.getAndIncrement() >= networksReadsBeforeError) throw error
+        if (error != null && networksReads.getAndIncrement() in failingReads) throw error
         if (!routes) return emptyList()
         return listOfNotNull(tuns.lastOrNull { !it.closed }?.let { VpnNetwork(id = NETWORK_ID, interfaceName = it.name, ready = true) })
     }

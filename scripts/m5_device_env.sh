@@ -11,6 +11,8 @@
 #   destination 10.99.0.1:8080, named proxyflow.test in /etc/hosts: the proxies resolve the
 #   name; the emulator can only reach it through a proxy unless traffic leaks (which the
 #   destination log, the proxy logs and the packet captures would show).
+#   sink 10.99.0.1:8081: only lines sent while traffic must be held go there, so any
+#   connection it logs is held traffic that got out (at once, or replayed later).
 #
 # The passwords are random for each run and masked in the log; the tests read them from
 # a file pushed to the emulator (scripts/m5_device_e2e.sh), never from a command line.
@@ -41,8 +43,8 @@ sudo ip addr add 10.99.0.1/32 dev lo
 echo "10.99.0.1 proxyflow.test" | sudo tee -a /etc/hosts >/dev/null
 
 # The proxies' logs, readable by the evidence check (scripts/m5_evidence.py) whoever writes them.
-touch "$PF/danted.log" "$PF/squid-access.log" "$PF/squid-cache.log"
-chmod 0666 "$PF/danted.log" "$PF/squid-access.log" "$PF/squid-cache.log"
+touch "$PF/danted.log" "$PF/squid-access.log" "$PF/squid-cache.log" "$PF/sink.log"
+chmod 0666 "$PF/danted.log" "$PF/squid-access.log" "$PF/squid-cache.log" "$PF/sink.log"
 
 # Dante. It connects out from the runner's own interface (the default route's): from the loopback
 # it could reach only local addresses, and the pre-flight check needs the Internet. The destination
@@ -97,8 +99,9 @@ logfile_rotate 0
 EOF
 sudo squid -f "$PF/squid.conf"
 
-# The destination and the silent proxy.
+# The destination, the sink and the silent proxy.
 nohup python3 scripts/m5_e2e_servers.py destination 10.99.0.1 8080 "$PF/destination.log" > "$PF/destination.out" 2>&1 &
+nohup python3 scripts/m5_e2e_servers.py destination 10.99.0.1 8081 "$PF/sink.log" > "$PF/sink.out" 2>&1 &
 nohup python3 scripts/m5_e2e_servers.py silent 127.0.0.1 1081 > "$PF/silent.out" 2>&1 &
 
 # What the tests read on the emulator.
@@ -115,6 +118,7 @@ closed.port=1082
 destination.name=proxyflow.test
 destination.address=10.99.0.1
 destination.port=8080
+sink.port=8081
 EOF
 chmod 0644 "$PF/e2e.properties"
 
@@ -153,4 +157,4 @@ for check in check_preflight_socks check_preflight_http; do
     done
     test "$ok" = 1 || { echo "::error title=M5 proxies::$check: the proxy could not reach $PREFLIGHT_URL"; exit 1; }
 done
-echo "::notice title=M5 proxies::Dante $(danted -v 2>&1 | head -1) on :1080 (SOCKS5, sign-in, out through $EXTERNAL_IF); $(squid -v | head -1) on :3128 (HTTP CONNECT, sign-in); silent proxy :1081; closed port :1082; destination proxyflow.test = 10.99.0.1:8080. Both proxies carried a line to the destination and reached $PREFLIGHT_URL from the runner."
+echo "::notice title=M5 proxies::Dante $(danted -v 2>&1 | head -1) on :1080 (SOCKS5, sign-in, out through $EXTERNAL_IF); $(squid -v | head -1) on :3128 (HTTP CONNECT, sign-in); silent proxy :1081; closed port :1082; destination proxyflow.test = 10.99.0.1:8080; sink for held lines 10.99.0.1:8081. Both proxies carried a line to the destination and reached $PREFLIGHT_URL from the runner."

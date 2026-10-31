@@ -17,7 +17,6 @@ import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.vpn.ProxyFlowVpnService
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -25,9 +24,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.Timeout
 import org.junit.runner.RunWith
 
 /**
@@ -46,10 +43,6 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class VpnEndToEndTest {
-    /** A test that hangs fails with where it hung (setup and clean-up included) instead of stalling the run. */
-    @get:Rule
-    val timeout: Timeout = Timeout.builder().withTimeout(TEST_TIMEOUT_S, TimeUnit.SECONDS).withLookingForStuckThread(true).build()
-
     private val app = App()
     private lateinit var env: E2eConfig
     private lateinit var networks: VpnNetworks
@@ -77,7 +70,7 @@ class VpnEndToEndTest {
         app.deleteAllProfiles()
     }
 
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun socks5TrafficReachesTheDestinationThroughTheProxyByName() {
         val profile = socks()
 
@@ -103,7 +96,7 @@ class VpnEndToEndTest {
         assertReleased()
     }
 
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun httpConnectTrafficReachesTheDestinationThroughTheProxyByName() {
         val profile = http()
 
@@ -116,7 +109,7 @@ class VpnEndToEndTest {
     }
 
     /** Threat model S3: other apps find no port to talk to (the adapters run in-process, ADR-0002). */
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun nothingListensWhileConnected() {
         app.connect(socks().id)
         assertReachesDestination("listeners")
@@ -132,7 +125,7 @@ class VpnEndToEndTest {
      * the switch goes to a proxy that never answers (its check runs until the handshake
      * times out), then on to a working one.
      */
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun switchingProfilesKeepsTrafficInTheTunnel() {
         val socks = socks()
         val http = http()
@@ -170,7 +163,7 @@ class VpnEndToEndTest {
         assertReleased()
     }
 
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun aWrongPasswordNeverConnects() {
         val profiles = listOf(
             app.save("Wrong SOCKS", ProxyProtocol.SOCKS5, env.proxyHost, env.socksPort, env.socksUser, "wrong-${random()}"),
@@ -185,7 +178,7 @@ class VpnEndToEndTest {
         assertNeverConnected()
     }
 
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun anUnreachableProxyNeverConnects() {
         val closed = app.save("Closed port", ProxyProtocol.SOCKS5, env.proxyHost, env.closedPort)
 
@@ -195,7 +188,7 @@ class VpnEndToEndTest {
         assertNeverConnected()
     }
 
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun cancellingTheCheckChangesNothing() {
         val silent = app.save("Silent", ProxyProtocol.SOCKS5, env.proxyHost, env.silentPort)
 
@@ -215,7 +208,7 @@ class VpnEndToEndTest {
         }
     }
 
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun repeatedStartsMakeOneSession() {
         val profile = socks()
 
@@ -233,7 +226,7 @@ class VpnEndToEndTest {
         assertReleased()
     }
 
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun repeatedConnectAndDisconnectLeaveNothingBehind() {
         val profile = socks()
         var socketsAfterSecond = 0
@@ -260,7 +253,7 @@ class VpnEndToEndTest {
         assertTrue("threads $threads, after the second cycle $threadsAfterSecond", threads <= threadsAfterSecond + THREAD_SLACK)
     }
 
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun revocationClosesEverythingAndSaysSo() {
         val profile = socks()
         app.connect(profile.id)
@@ -285,7 +278,7 @@ class VpnEndToEndTest {
         app.disconnectAndSettle()
     }
 
-    @Test
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun anEngineFailureHoldsTrafficUntilRestart() {
         val profile = socks()
         app.connect(profile.id)
@@ -295,17 +288,20 @@ class VpnEndToEndTest {
         // The directory is the app's own: SELinux lets an app open little else.
         val tun = Descriptors.tun().single()
         val keep = ParcelFileDescriptor.fromFd(tun)
-        val directory = Os.open(app.context.filesDir.path, OsConstants.O_RDONLY, 0)
-        try {
-            Os.dup2(directory, tun)
+        val blocked = try {
+            val directory = Os.open(app.context.filesDir.path, OsConstants.O_RDONLY, 0)
+            try {
+                Os.dup2(directory, tun)
+            } finally {
+                Os.close(directory)
+            }
+            app.awaitStatus(ConnectionStatus.Blocked)
         } finally {
-            Os.close(directory)
+            // The interface itself was never harmed: put it back under its number, whatever happened, so the session
+            // closes the interface (not the directory) when it ends, and the restart runs on the same interface.
+            Os.dup2(keep.fileDescriptor, tun)
+            keep.close()
         }
-        val blocked = app.awaitStatus(ConnectionStatus.Blocked)
-        // The interface itself was never harmed: put it back under its number for the restart, which runs the
-        // next engine on the same interface.
-        Os.dup2(keep.fileDescriptor, tun)
-        keep.close()
 
         assertEquals(ConnectionError.ENGINE_STOPPED, blocked.error?.code)
         assertTrue("the VPN stays, so apps' traffic is held", networks.present())
@@ -336,14 +332,17 @@ class VpnEndToEndTest {
         assertEquals("PROXYFLOW-DEST $line", Shell.exchange(env.destinationName, env.destinationPort, line))
     }
 
-    /** One line to the destination's address while traffic is held: no answer, and it never arrives (m5_evidence.py). */
+    /**
+     * One line to the sink while traffic is held: no answer. Nothing else uses the sink, so m5_evidence.py fails on any
+     * connection it logged — the line getting out at once, or a held packet replayed later through a proxy.
+     */
     private fun assertHeld(label: String) {
         val line = "PF-held-$label-${random()}"
         Log.i(TAG, "held $line")
         assertEquals(
-            "nothing reaches the destination while traffic is held",
+            "nothing gets out while traffic is held",
             "",
-            Shell.exchange(env.destinationAddress, env.destinationPort, line, timeoutSeconds = HELD_TIMEOUT_S),
+            Shell.exchange(env.destinationAddress, env.sinkPort, line, timeoutSeconds = HELD_TIMEOUT_S),
         )
     }
 
@@ -386,7 +385,13 @@ class VpnEndToEndTest {
 
     private companion object {
         const val TAG = "ProxyFlowE2E"
-        const val TEST_TIMEOUT_S = 90L
+
+        /**
+         * A test body that hangs fails with its stack instead of stalling the run (the slowest takes 20 s on API 34
+         * and 36). The limit covers the body only: setUp and tearDown run on the runner's thread, so a hung test's
+         * clean-up never overlaps the next test.
+         */
+        const val TEST_TIMEOUT_MS = 90_000L
         const val CYCLES = 10
         const val THREAD_SLACK = 6
         const val CHECK_RUNNING_MS = 1_500L

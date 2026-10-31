@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 DESTINATION_ADDRESS = "10.99.0.1"
 DESTINATION_NAME = "proxyflow.test"
 DESTINATION_PORT = 8080
+SINK_PORT = 8081  # lines sent while traffic must be held go here, and nothing else does
 PROXY_GATEWAY = "10.0.2.2"  # the runner's loopback as the emulator sees it
 SOCKS_PORT = 1080
 HTTP_PORT = 3128
@@ -330,6 +331,23 @@ def main(argv: list[str]) -> int:
         )
     else:
         facts.append(f"every connection that reached the destination came through a proxy ({through_proxies})")
+
+    # The sink: only lines sent while traffic had to be held go there. A connection it logged, or a tunnel a proxy was
+    # asked to open to it, is held traffic that got out: at once, or a held packet replayed later through a proxy
+    # (whose own connection carries no line, so the destination's line check could not see it).
+    sink = read_lines(os.path.join(args.pf, "sink.log"), required=True)
+    sink_requests = [
+        line for line in squid + dante
+        if f"{DESTINATION_ADDRESS}:{SINK_PORT}" in line or f"{DESTINATION_ADDRESS}.{SINK_PORT}" in line
+    ]
+    facts.append(
+        f"sink {DESTINATION_ADDRESS}:{SINK_PORT} for held lines: {len(sink)} connections, {len(sink_requests)} proxy requests "
+        f"({len(held)} held lines sent)"
+    )
+    if sink:
+        problems.append(f"held traffic got out: the sink logged {len(sink)} connections: {[line[:120] for line in sink[:3]]}")
+    if sink_requests:
+        problems.append(f"held traffic reached a proxy later: {len(sink_requests)} requests for the sink: {[line[:160] for line in sink_requests[:3]]}")
 
     # How the logs look, so a format the checks above do not match shows up in the annotation.
     for name, lines in (("squid-access.log", squid), ("danted.log", dante)):

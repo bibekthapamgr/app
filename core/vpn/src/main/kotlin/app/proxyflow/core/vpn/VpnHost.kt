@@ -19,7 +19,8 @@ interface VpnHost {
 
     /**
      * Android's VPN networks right now (ConnectivityManager), so the session can tell when
-     * Android routes apps into an interface it just established. Empty when unavailable.
+     * Android routes apps into an interface it just established. Throws when Android can't
+     * answer: an empty list means there is no VPN network.
      */
     fun vpnNetworks(): List<VpnNetwork>
 

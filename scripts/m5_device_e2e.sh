@@ -60,15 +60,17 @@ for _ in $(seq 1 15); do
     if wifi_down; then break; fi
     sleep 1
 done
+MOBILE="mobile data"
+if ! wifi_down; then MOBILE="mobile data or Wi-Fi (Wi-Fi did not switch off)"; fi
 UPLINK=""
 if uplink_within 60; then
-    UPLINK="mobile data"
+    UPLINK="$MOBILE"
 else
     adb shell svc data disable >/dev/null 2>&1 || true
     sleep 3
     adb shell svc data enable >/dev/null 2>&1 || true
     if uplink_within 60; then
-        UPLINK="mobile data (after switching it off and on)"
+        UPLINK="$MOBILE (after switching mobile data off and on)"
     else
         adb shell svc wifi enable >/dev/null 2>&1 || true
         if uplink_within 60; then UPLINK="Wi-Fi (mobile data never reached the runner)"; fi

@@ -84,8 +84,9 @@ class VpnSession(
     private val events = Channel<Event>(Channel.UNLIMITED)
 
     // A job that fails in a way nothing caught must not take the process down with it (which would drop held
-    // traffic): it becomes a failure of the connection. Every job catches what it expects; this is the last resort.
-    private val jobFailures = CoroutineExceptionHandler { _, e -> send(Event.JobFailed(e.javaClass.simpleName)) }
+    // traffic): it becomes a failure of the attempt it belongs to, and is only logged once that attempt is over.
+    // Every job catches what it expects; this is the last resort.
+    private fun failuresOf(attempt: Long) = CoroutineExceptionHandler { _, e -> send(Event.JobFailed(attempt, e.javaClass.simpleName)) }
 
     // Touched only by the event loop.
     private var host: VpnHost? = null
@@ -103,7 +104,10 @@ class VpnSession(
     private var connectedOnce = false
 
     init {
-        scope.launch { for (event in events) dispatch(event) }
+        // dispatch() turns every failure into a failed attempt; should the loop still end, the process stays up.
+        scope.launch(CoroutineExceptionHandler { _, e -> log("event loop ended: ${e.javaClass.simpleName}") }) {
+            for (event in events) dispatch(event)
+        }
     }
 
     /** Connects [profileId]. Nothing happens while it is already connecting or connected; another profile replaces the session. */
@@ -165,20 +169,20 @@ class VpnSession(
                 is Event.Routed -> onRouted(event.attempt)
                 is Event.RoutingTimedOut -> onRoutingTimedOut(event.attempt)
                 is Event.EngineFailed -> onEngineFailed(event)
-                is Event.JobFailed -> onJobFailed(event.type)
+                is Event.JobFailed -> onJobFailed(event)
                 is Event.ServiceStartTimedOut -> onServiceStartTimedOut(event.token)
                 is Event.Barrier -> event.done.complete(Unit)
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // A bug, a platform call that threw where none was expected, the engine library failing to load, or an
+            // Error: the attempt fails (held traffic stays held) instead of the event loop ending or the process dying.
             unexpected(e)
-        } catch (e: LinkageError) {
-            unexpected(e) // the engine library failed to load
         }
     }
 
-    // A bug, or a platform call that threw where none was expected. The class name only: messages may carry data.
+    // The class name only: messages may carry data.
     private fun unexpected(e: Throwable) {
         log("unexpected ${e.javaClass.simpleName}")
         runCatching { fail(ConnectionError(ConnectionError.INTERNAL, "unexpected ${e.javaClass.simpleName}")) }
@@ -244,7 +248,7 @@ class VpnSession(
             return fail(ConnectionError(ConnectionError.INTERNAL, "Android did not start the VPN service"))
         }
         val token = ++serviceToken
-        serviceWait = scope.launch(jobFailures) {
+        serviceWait = scope.launch(failuresOf(attempt)) {
             delay(timing.serviceStartTimeoutMillis)
             send(Event.ServiceStartTimedOut(token))
         }
@@ -287,7 +291,8 @@ class VpnSession(
     }
 
     private fun runPreflight(current: VpnHost, profile: ProxyProfile) {
-        // No consent: Android has taken the VPN away (another VPN app, or the user), so there is nothing left to hold.
+        // No consent: the user withdrew it, so Android holds no VPN of ours that could hold traffic. (Another VPN app
+        // taking over arrives as a revocation instead; for an app the user allowed before, prepare() takes it back.)
         if (!current.hasConsent()) return end(ConnectionError(ConnectionError.VPN_PERMISSION_DENIED))
         current.clearProblem()
         if (!current.showStatus(state.value)) {
@@ -295,7 +300,7 @@ class VpnSession(
         }
         val id = ++attempt
         val guard = current.socketGuard()
-        preflight = scope.launch(blocking + jobFailures) {
+        preflight = scope.launch(blocking + failuresOf(id)) {
             val check = coroutineContext.job
             // Cancelled (Disconnect, another profile): the check's sockets are shut down, so the engine returns at once.
             // Started at once and resumed in whichever thread cancels, so this holds even when every thread of
@@ -312,7 +317,7 @@ class VpnSession(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Check.Failed(ConnectionError(ConnectionError.INTERNAL, "unexpected ${e.javaClass.simpleName}"))
+                Check.Failed(ConnectionError(ConnectionError.INTERNAL, "unexpected ${e.javaClass.simpleName} in the proxy check"))
             } catch (e: LinkageError) {
                 Check.Failed(ConnectionError(ConnectionError.INTERNAL, "the packet engine could not be loaded"))
             } finally {
@@ -392,14 +397,23 @@ class VpnSession(
             val dropped = existing.drain()
             if (dropped > 0) log("dropped $dropped packets held while no engine ran")
         }
-        val before = if (existing == null) current.vpnNetworks() else emptyList()
+        val before = if (existing != null) {
+            emptyList()
+        } else {
+            try {
+                current.vpnNetworks()
+            } catch (e: Exception) {
+                // Without Android's view from before the interface exists, a network still being torn down could pass for its.
+                return fail(ConnectionError(ConnectionError.INTERNAL, "Android's networks could not be read"))
+            }
+        }
         val interfaceForEngine = existing ?: run {
             val fresh = try {
                 current.establish(config)
             } catch (e: Exception) {
                 return fail(ConnectionError(ConnectionError.INTERNAL, "Android could not create the VPN interface"))
             }
-            // No consent any more: Android revoked the VPN or another app took over.
+            // Not prepared any more: the user withdrew consent, or another VPN app took over (its revocation follows).
             if (fresh == null) return end(ConnectionError(ConnectionError.VPN_PERMISSION_DENIED))
             log("established ${fresh.name ?: "an interface"}")
             tun = fresh
@@ -435,19 +449,20 @@ class VpnSession(
      */
     private fun awaitRouting(current: VpnHost, routedTun: TunInterface, before: List<VpnNetwork>) {
         val id = attempt
-        routing = scope.launch(blocking + jobFailures) {
-            val routed = try {
-                withTimeoutOrNull(timing.routingTimeoutMillis) {
-                    while (!routedInto(routedTun, before, current.vpnNetworks())) delay(timing.routingPollMillis)
-                    true
-                } ?: false
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                false // Android's view can't be read: never claim it routes apps
-            }
+        routing = scope.launch(blocking + failuresOf(id)) {
+            val routed = withTimeoutOrNull(timing.routingTimeoutMillis) {
+                while (!routedNow(current, routedTun, before)) delay(timing.routingPollMillis)
+                true
+            } ?: false
             send(if (routed) Event.Routed(id) else Event.RoutingTimedOut(id))
         }
+    }
+
+    /** A look at Android's view that fails (its service restarting, say) never counts as routed; the wait goes on. */
+    private fun routedNow(current: VpnHost, routedTun: TunInterface, before: List<VpnNetwork>): Boolean = try {
+        routedInto(routedTun, before, current.vpnNetworks())
+    } catch (e: Exception) {
+        false
     }
 
     private fun onRouted(id: Long) {
@@ -472,9 +487,11 @@ class VpnSession(
         fail(event.error)
     }
 
-    private fun onJobFailed(type: String) {
-        log("unexpected $type in a session job")
-        fail(ConnectionError(ConnectionError.INTERNAL, "unexpected $type"))
+    private fun onJobFailed(event: Event.JobFailed) {
+        log("unexpected ${event.type} in a session job${if (event.attempt != attempt) " of an attempt that is over" else ""}")
+        // A cancelled or replaced attempt's job failing late must not touch the connection that followed.
+        if (event.attempt != attempt) return
+        fail(ConnectionError(ConnectionError.INTERNAL, "unexpected ${event.type} in a background job"))
     }
 
     private fun onRevoked() {
@@ -609,7 +626,7 @@ class VpnSession(
 
         class EngineFailed(val generation: Long, val error: ConnectionError) : Event
 
-        class JobFailed(val type: String) : Event
+        class JobFailed(val attempt: Long, val type: String) : Event
 
         class ServiceStartTimedOut(val token: Long) : Event
 

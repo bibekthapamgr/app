@@ -12,6 +12,8 @@ import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -316,25 +318,35 @@ class DefaultProfileRepository(
 
     private suspend fun open(record: ProfileRecord): Opened {
         val sealed = record.credentials ?: return Opened.Unreadable
-        return withContext(cryptoDispatcher) {
-            for (attempt in 1..2) {
-                val plaintext = try {
-                    cipher.open(record.id, sealed)
-                } catch (e: CredentialUnreadableException) {
-                    if (e.permanent) return@withContext Opened.Unreadable
-                    continue
-                }
-                return@withContext try {
-                    val (username, password) = CredentialCodec.decode(plaintext)
-                    Opened.Available(username, password)
-                } catch (e: IllegalArgumentException) {
-                    Opened.Unreadable
-                } finally {
-                    plaintext.fill(0)
-                }
-            }
-            Opened.Unavailable
+        val decrypted = AtomicReference<Opened?>(null)
+        try {
+            return withContext(cryptoDispatcher) { decrypt(record.id, sealed).also(decrypted::set) }
+        } catch (e: CancellationException) {
+            // Cancelled while the Keystore worked (a connection's check that was cancelled, say): withContext
+            // drops its result, so the decrypted copy is wiped here instead of staying in the heap.
+            (decrypted.get() as? Opened.Available)?.wipe()
+            throw e
         }
+    }
+
+    private fun decrypt(profileId: String, sealed: SealedCredentials): Opened {
+        for (attempt in 1..2) {
+            val plaintext = try {
+                cipher.open(profileId, sealed)
+            } catch (e: CredentialUnreadableException) {
+                if (e.permanent) return Opened.Unreadable
+                continue
+            }
+            return try {
+                val (username, password) = CredentialCodec.decode(plaintext)
+                Opened.Available(username, password)
+            } catch (e: IllegalArgumentException) {
+                Opened.Unreadable
+            } finally {
+                plaintext.fill(0)
+            }
+        }
+        return Opened.Unavailable
     }
 
     private suspend fun deleteKeyQuietly(keyId: String) {
