@@ -195,8 +195,7 @@ func (e *Engine) pipe(wg *sync.WaitGroup, dst, src net.Conn, n, total, last *ato
 			}
 		}
 		if rerr != nil {
-			if errors.Is(rerr, os.ErrDeadlineExceeded) &&
-				time.Since(time.Unix(0, last.Load())) < idle {
+			if isTimeout(rerr) && time.Since(time.Unix(0, last.Load())) < idle {
 				continue // the other direction is active
 			}
 			if errors.Is(rerr, io.EOF) {
@@ -206,13 +205,21 @@ func (e *Engine) pipe(wg *sync.WaitGroup, dst, src net.Conn, n, total, last *ato
 					return
 				}
 			}
-			if errors.Is(rerr, os.ErrDeadlineExceeded) {
+			if isTimeout(rerr) {
 				e.stats.idleTimeouts.Add(1)
 			}
 			closeBoth()
 			return
 		}
 	}
+}
+
+// isTimeout reports a read or write deadline. Sockets report
+// os.ErrDeadlineExceeded; gVisor's gonet connections report their own error,
+// which only says so through net.Error.
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.Is(err, os.ErrDeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout())
 }
 
 func setKeepalive(ep tcpip.Endpoint) {

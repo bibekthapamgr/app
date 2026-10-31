@@ -74,6 +74,7 @@ const (
 	DefaultIdleTimeout      = 5 * time.Minute
 	DefaultDNSIdleTimeout   = 2 * time.Second
 	DefaultRelayBufferBytes = 32 << 10
+	DefaultTCPBufferBytes   = 64 << 10 // netstack send and receive buffer per flow; the maximum is twice this
 	DefaultEventQueue       = 1024
 	eventDrainTimeout       = 2 * time.Second
 )
@@ -85,14 +86,19 @@ type Config struct {
 	Dialer  TunnelDialer
 	FakeDNS *fakedns.Responder // required: DNS never leaves the device directly
 
-	MaxConns         int           // concurrent TCP flows, including ones being set up (default 1024)
-	MaxInFlight      int           // TCP handshakes the stack holds open while tunnels are set up (default 512)
-	MaxDNSFlows      int           // concurrent DNS client sockets (default 256)
-	DialTimeout      time.Duration // whole tunnel set-up per flow (default 15 s)
-	IdleTimeout      time.Duration // per-flow idle timeout, both directions together (default 5 min)
-	DNSIdleTimeout   time.Duration // per-DNS-socket idle timeout (default 2 s)
-	TCPBufferBytes   int           // gVisor send/receive buffer default (0 = gVisor default)
-	RelayBufferBytes int           // relay buffer per direction per flow (default 32 KiB)
+	MaxConns       int           // concurrent TCP flows, including ones being set up (default 1024)
+	MaxInFlight    int           // TCP handshakes the stack holds open while tunnels are set up (default 512)
+	MaxDNSFlows    int           // concurrent DNS client sockets (default 256)
+	DialTimeout    time.Duration // whole tunnel set-up per flow (default 15 s)
+	IdleTimeout    time.Duration // per-flow idle timeout, both directions together (default 5 min)
+	DNSIdleTimeout time.Duration // per-DNS-socket idle timeout (default 2 s)
+	// TCPBufferBytes is the netstack's send and receive buffer per flow (default
+	// 64 KiB, at most twice that, never auto-tuned upwards). The netstack only
+	// faces the apps on the phone, where round trips take microseconds, so small
+	// buffers cost little throughput and bound what a stalled flow holds in
+	// memory (gVisor's own defaults are 1 MiB growing to 4 MiB, per direction).
+	TCPBufferBytes   int
+	RelayBufferBytes int // relay buffer per direction per flow (default 32 KiB)
 	UDPReject        UDPRejectMode
 	LogDestinations  bool // privacy switch: include host/IP in events and flows (default off)
 
@@ -161,11 +167,12 @@ type Engine struct {
 	lastErr   *ErrorInfo
 	stopped   chan struct{} // closed when Stop has finished
 
-	events    chan Event
-	evMu      sync.RWMutex
-	evClosed  bool
-	evDone    chan struct{}
-	evDropped atomic.Int64
+	events      chan Event
+	evMu        sync.RWMutex
+	evClosed    bool
+	evDone      chan struct{}
+	evDropped   atomic.Int64
+	evAbandoned atomic.Bool // Stop gave up waiting: deliver nothing more
 }
 
 const nicID tcpip.NICID = 1
@@ -187,6 +194,10 @@ func New(cfg Config) (*Engine, error) {
 	setDefault(&cfg.MaxInFlight, DefaultMaxInFlight)
 	setDefault(&cfg.MaxDNSFlows, DefaultMaxDNSFlows)
 	setDefault(&cfg.RelayBufferBytes, DefaultRelayBufferBytes)
+	setDefault(&cfg.TCPBufferBytes, DefaultTCPBufferBytes)
+	if cfg.TCPBufferBytes < 4<<10 {
+		return nil, fmt.Errorf("engine: TCP buffer %d below 4 KiB", cfg.TCPBufferBytes)
+	}
 	setDefault(&cfg.EventQueue, DefaultEventQueue)
 	if cfg.MTU == 0 {
 		cfg.MTU = DefaultMTU
@@ -253,19 +264,24 @@ func (e *Engine) Start() (err error) {
 	if terr := s.SetTransportProtocolOption(tcp.ProtocolNumber, &sack); terr != nil {
 		return fmt.Errorf("engine: enable SACK: %s", terr)
 	}
-	if b := e.cfg.TCPBufferBytes; b > 0 {
-		rcv := tcpip.TCPReceiveBufferSizeRangeOption{Min: tcp.MinBufferSize, Default: b, Max: max(b, tcp.MaxBufferSize)}
-		snd := tcpip.TCPSendBufferSizeRangeOption{Min: tcp.MinBufferSize, Default: b, Max: max(b, tcp.MaxBufferSize)}
-		if terr := s.SetTransportProtocolOption(tcp.ProtocolNumber, &rcv); terr != nil {
-			return fmt.Errorf("engine: TCP receive buffer: %s", terr)
-		}
-		if terr := s.SetTransportProtocolOption(tcp.ProtocolNumber, &snd); terr != nil {
-			return fmt.Errorf("engine: TCP send buffer: %s", terr)
-		}
+	b := e.cfg.TCPBufferBytes
+	rcv := tcpip.TCPReceiveBufferSizeRangeOption{Min: tcp.MinBufferSize, Default: b, Max: 2 * b}
+	snd := tcpip.TCPSendBufferSizeRangeOption{Min: tcp.MinBufferSize, Default: b, Max: 2 * b}
+	moderate := tcpip.TCPModerateReceiveBufferOption(false) // no auto-tuning past the maximum
+	if terr := s.SetTransportProtocolOption(tcp.ProtocolNumber, &rcv); terr != nil {
+		return fmt.Errorf("engine: TCP receive buffer: %s", terr)
+	}
+	if terr := s.SetTransportProtocolOption(tcp.ProtocolNumber, &snd); terr != nil {
+		return fmt.Errorf("engine: TCP send buffer: %s", terr)
+	}
+	if terr := s.SetTransportProtocolOption(tcp.ProtocolNumber, &moderate); terr != nil {
+		return fmt.Errorf("engine: TCP receive buffer moderation: %s", terr)
 	}
 
 	// Transport handlers must be installed before the NIC starts delivering.
-	tcpFwd := tcp.NewForwarder(s, 0, e.cfg.MaxInFlight, e.handleTCP)
+	// The forwarder sets each accepted flow's receive buffer itself (gVisor's
+	// default would be 1 MiB, whatever the protocol options say).
+	tcpFwd := tcp.NewForwarder(s, 2*b, e.cfg.MaxInFlight, e.handleTCP)
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpFwd.HandlePacket)
 	udpFwd := udp.NewForwarder(s, e.handleUDP)
 	s.SetTransportProtocolHandler(udp.ProtocolNumber, udpFwd.HandlePacket)
@@ -436,8 +452,13 @@ func (e *Engine) startEvents() {
 	}()
 }
 
-// deliver calls the receiver, isolating the engine from its panics.
+// deliver calls the receiver, isolating the engine from its panics. Once Stop
+// has given up waiting for a stuck receiver, the rest of the queue is dropped.
 func (e *Engine) deliver(ev Event) {
+	if e.evAbandoned.Load() {
+		e.evDropped.Add(1)
+		return
+	}
 	defer func() { _ = recover() }()
 	e.cfg.Events(ev)
 }
@@ -460,7 +481,9 @@ func (e *Engine) emit(ev Event) {
 }
 
 // closeEvents stops the event goroutine after it delivered what is queued,
-// waiting at most eventDrainTimeout for a slow receiver.
+// waiting at most eventDrainTimeout for a slow receiver. After that, the call
+// the receiver is stuck in is the only one still running: the queued events
+// behind it are dropped, never delivered after Stop returned.
 func (e *Engine) closeEvents() {
 	e.evMu.Lock()
 	if e.evClosed || e.events == nil {
@@ -471,9 +494,12 @@ func (e *Engine) closeEvents() {
 	e.evClosed = true
 	close(e.events)
 	e.evMu.Unlock()
+	t := time.NewTimer(eventDrainTimeout)
+	defer t.Stop()
 	select {
 	case <-e.evDone:
-	case <-time.After(eventDrainTimeout):
+	case <-t.C:
+		e.evAbandoned.Store(true)
 	}
 }
 

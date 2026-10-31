@@ -17,6 +17,10 @@ const (
 	OutcomeRefused Outcome = "refused" // other types / classes, invalid names
 	OutcomeFormErr Outcome = "formerr" // malformed or unsupported message
 	OutcomeIgnored Outcome = "ignored" // not a query (e.g. a response); dropped
+	// OutcomeExhausted: every fake address is held by a name used recently,
+	// so the query is answered SERVFAIL rather than reusing an address an app
+	// may still connect to (which would send its traffic to the wrong host).
+	OutcomeExhausted Outcome = "exhausted"
 )
 
 // Responder answers DNS queries from the fake-IP pool.
@@ -51,7 +55,10 @@ func (r *Responder) Handle(query []byte) ([]byte, Outcome, string) {
 	}
 	switch q.Type {
 	case dnsmessage.TypeA:
-		ip := r.Pool.Lookup(name)
+		ip, ok := r.Pool.Lookup(name)
+		if !ok {
+			return r.reply(hdr, &q, dnsmessage.RCodeServerFailure, nil), OutcomeExhausted, name
+		}
 		ans := &dnsmessage.AResource{A: ip.As4()}
 		return r.reply(hdr, &q, dnsmessage.RCodeSuccess, ans), OutcomeMapped, name
 	case dnsmessage.TypeAAAA, dnsmessage.TypeHTTPS, dnsmessage.TypeSVCB:

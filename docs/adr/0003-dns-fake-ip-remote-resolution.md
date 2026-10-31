@@ -34,4 +34,6 @@ E07 (A mapped, TXT refused, queries to 8.8.8.8 and to the underlay resolver inte
 
 ## Implementation (M4)
 
-`engine/fakedns` and `engine/tunnel/udp.go` (UDP/53 to any address answered locally; at most 256 DNS sockets at once, extra ones dropped and counted). The proxy's own hostname is resolved through the app's `Platform.ResolveProxyHost` callback (`Network.getAllByName` on the underlying network); the engine has no other resolver in production.
+`engine/fakedns` and `engine/tunnel/udp.go` (UDP/53 to any address answered locally; at most 256 DNS sockets at once, extra ones dropped and counted). The proxy's own hostname is resolved through the app's `Platform.ResolveProxyHost` callback (`Network.getAllByName` on the underlying network), cached for 60 s and forgotten on a network change; the engine has no other resolver in production.
+
+The reuse delay from the consequences above is in place: a mapping is dropped only after 10 minutes without use (answers and connections both count), a freed address waits for a full allocation cycle, the table holds at most 16 384 names, and when every mapping is recent a new name gets `SERVFAIL` instead of an address another app may still hold. The pool lives for the app process, across reconnects, and starts at a random address in each process (`docs/m4/protocol-compatibility.md` §6; tests `TestPoolNeverReusesARecentAddress`, `TestPoolFreedAddressesWaitForAFullCycle`, `TestResponderAnswersServfailWhenExhausted`).

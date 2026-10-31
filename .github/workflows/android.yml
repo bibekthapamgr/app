@@ -1,8 +1,8 @@
 name: android
 
 # App checks: the Go packet engine (engine job: tests with the race detector,
-# fuzzing, a vulnerability scan, then the gomobile AAR the Android modules
-# use), formatting (ktlint), Android Lint, JVM and Robolectric tests, the
+# fuzzing, and the gomobile AAR the Android modules use, built after a
+# vulnerability scan of everything it links), formatting (ktlint), Android Lint, JVM and Robolectric tests, the
 # committed Room schema, debug and release builds, the release manifest,
 # screenshots of every screen compared with the committed ones, and (device
 # job) the Android Keystore, storage and engine tests on emulators. The secrets scan
@@ -32,8 +32,9 @@ jobs:
   # checksum database; the tests run the adapters against mock SOCKS5 and HTTP
   # CONNECT proxies (sign-in, TLS with a test PKI, timeouts, cancellation),
   # the netstack through them, and check that nothing leaks (goroutines,
-  # descriptors) or prints a credential. The AAR is built from exactly the
-  # tested dependencies (build-aar.sh checks) and handed to the jobs below.
+  # descriptors) or prints a credential. The AAR is built only from verified
+  # modules, exactly the tested ones (build-aar.sh checks), after govulncheck
+  # passed over everything it links, and is handed to the jobs below.
   engine:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -51,11 +52,22 @@ jobs:
           go-version: "1.27.3"
           cache-dependency-path: engine/go.sum
 
-      - name: Modules match go.sum and the checksum database, go.mod is tidy
+      - name: Modules match go.sum, go.sum matches the checksum database, go.mod is tidy
+        id: modules
         run: |
           go mod download
           go mod verify
           go mod tidy -diff
+          # With a hash in go.sum the go command never asks the checksum
+          # database. Rebuilt from nothing, every hash comes from
+          # sum.golang.org, and the result must be the committed file.
+          cp go.sum "$RUNNER_TEMP/go.sum.committed"
+          rm go.sum
+          go mod tidy
+          if ! diff -u "$RUNNER_TEMP/go.sum.committed" go.sum; then
+            echo "::error file=engine/go.sum,title=go.sum::go.sum differs from the hashes in the checksum database"
+            exit 1
+          fi
 
       - name: Formatting (gofmt) and go vet
         if: ${{ !cancelled() }}
@@ -64,9 +76,11 @@ jobs:
           if [ -n "$unformatted" ]; then echo "::error title=gofmt::not formatted: $unformatted"; exit 1; fi
           go vet ./...
 
-      - name: Build the AAR (gomobile; armeabi-v7a, arm64-v8a, x86_64; 16 KB pages checked)
+      - name: Build the AAR (govulncheck first; gomobile; armeabi-v7a, arm64-v8a, x86_64; 16 KB pages checked)
         id: aar
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.modules.outcome == 'success' }}
+        env:
+          PF_GOVULNCHECK: "1"
         run: |
           set +e
           ./build-aar.sh > "$RUNNER_TEMP/build-aar.log" 2>&1
@@ -104,10 +118,6 @@ jobs:
                         adapters:FuzzConnectRequest fakedns:FuzzResponder; do
             go test -run '^$' -fuzz "^${target#*:}\$" -fuzztime 30s "./${target%%:*}"
           done
-
-      - name: Known vulnerabilities in the engine and its dependencies (govulncheck)
-        if: ${{ !cancelled() }}
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   build:
     # Runs even when the engine job failed, so every app check still reports;
@@ -320,8 +330,11 @@ jobs:
       - name: Build the instrumented tests
         run: ./gradlew :core:data:assembleDebugAndroidTest :core:engine:assembleDebugAndroidTest --continue 2>&1 | tee "$RUNNER_TEMP/gradle-1-device-build.log"
 
-      # The action runs each script line with sh; bash keeps the Gradle exit status through tee.
+      # Runs even when one module's tests failed to build (the engine's, say, without
+      # the AAR), so the other module's device tests still report. The action runs each
+      # script line with sh; bash keeps the Gradle exit status through tee.
       - name: Keystore, storage and engine tests on an emulator (API ${{ matrix.api-level }})
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}

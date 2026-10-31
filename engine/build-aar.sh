@@ -8,6 +8,10 @@
 # hands the AAR to the build and device jobs; developers run it once before
 # building :core:engine. Also writes build/pfengine-facts.txt (sizes, hashes,
 # ELF alignment, the exact modules inside) for the acceptance evidence.
+#
+# PF_GOVULNCHECK=1 (CI) also runs govulncheck over everything the library
+# links, gomobile's bind runtime included, which is in go.mod only during this
+# build; a known vulnerability then fails the build. It needs the network.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -20,6 +24,7 @@ MOBILE_VERSION=v0.0.0-20260908204917-8b95e45f8d3e
 # requires for 64-bit libraries of apps targeting Android 15+.
 NDK_VERSION=28.2.13676358
 ANDROID_API=29 # minSdk (ADR-0007)
+GOVULNCHECK_VERSION=v1.9.0
 JAVA_PACKAGE=app.proxyflow.engine.go
 
 step() { echo "== build-aar: $*"; }
@@ -67,6 +72,11 @@ engine_modules > "$work/modules-after.txt"
 if ! diff -u "$work/modules-before.txt" "$work/modules-after.txt"; then
   echo "build-aar.sh: adding golang.org/x/mobile changed the engine's dependencies; pin another x/mobile commit" >&2
   exit 1
+fi
+
+if [ "${PF_GOVULNCHECK:-0}" = 1 ]; then
+  step "govulncheck $GOVULNCHECK_VERSION: the engine, its dependencies and the bind runtime"
+  go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" ./... golang.org/x/mobile/bind golang.org/x/mobile/bind/seq
 fi
 
 mkdir -p build

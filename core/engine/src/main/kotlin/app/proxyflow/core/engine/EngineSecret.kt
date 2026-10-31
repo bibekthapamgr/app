@@ -1,8 +1,7 @@
 package app.proxyflow.core.engine
 
+import app.proxyflow.core.model.SecretText
 import java.io.Closeable
-import java.nio.CharBuffer
-import java.nio.charset.CharacterCodingException
 
 /**
  * A proxy username and password on their way into the engine, in the byte
@@ -42,8 +41,13 @@ class EngineSecret private constructor(bytes: ByteArray) : Closeable {
          * @throws IllegalArgumentException for broken text (half of a surrogate pair) or over-long fields.
          */
         fun of(username: CharArray, password: CharArray): EngineSecret {
-            val user = utf8(username)
-            val pass = utf8(password)
+            val user = SecretText.utf8(username)
+            val pass = try {
+                SecretText.utf8(password)
+            } catch (e: IllegalArgumentException) {
+                user.fill(0)
+                throw e
+            }
             try {
                 require(user.size <= MAX_FIELD_BYTES && pass.size <= MAX_FIELD_BYTES) { "credential too long" }
                 val out = ByteArray(1 + 2 + user.size + 2 + pass.size)
@@ -63,18 +67,6 @@ class EngineSecret private constructor(bytes: ByteArray) : Closeable {
             out[at + 1] = value.size.toByte()
             value.copyInto(out, at + 2)
             return at + 2 + value.size
-        }
-
-        private fun utf8(chars: CharArray): ByteArray {
-            val buffer = try {
-                Charsets.UTF_8.newEncoder().encode(CharBuffer.wrap(chars))
-            } catch (e: CharacterCodingException) {
-                throw IllegalArgumentException("not valid text", e)
-            }
-            val out = ByteArray(buffer.remaining())
-            buffer.get(out)
-            if (buffer.hasArray()) buffer.array().fill(0)
-            return out
         }
     }
 }

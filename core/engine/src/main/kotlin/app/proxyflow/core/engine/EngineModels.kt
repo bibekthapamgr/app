@@ -157,8 +157,13 @@ data class SelfTestResult(
     @SerialName("engine_bytes_up") val engineBytesUp: Long = 0,
     @SerialName("engine_bytes_down") val engineBytesDown: Long = 0,
     @SerialName("stop_ms") val stopMillis: Long = 0,
+    /** Goroutines in the whole process before and after; informational (the Go runtime and gomobile run their own). */
     @SerialName("goroutines_before") val goroutinesBefore: Int = 0,
     @SerialName("goroutines_after") val goroutinesAfter: Int = 0,
+    /** Goroutines running engine or netstack code left after the test, beyond those before it: must be 0. */
+    @SerialName("engine_goroutines_left") val engineGoroutinesLeft: Int = 0,
+    /** Goroutines alive after the test that were not before, named by the function that started each. */
+    @SerialName("goroutines_new") val goroutinesNew: List<String> = emptyList(),
 )
 
 /** The addresses the VpnService builder uses (pfengine.NetworkPlan). */

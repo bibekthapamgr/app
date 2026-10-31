@@ -11,6 +11,7 @@ import java.io.FileInputStream
 import java.net.ServerSocket
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,11 +36,12 @@ class EngineOnDeviceTest {
     private val events = CopyOnWriteArrayList<EngineEvent>()
     private lateinit var echo: EchoServer
 
-    /** Trusts the device test CA, as the system store trusts a public CA. */
-    private val testCaPlatform get() = AndroidEnginePlatform(trustManager = TestPki.trustManager(), onEvent = { events += it })
+    /** Trusts the device test CA, as the system store trusts a public CA. No VPN runs in these tests. */
+    private val testCaPlatform get() =
+        AndroidEnginePlatform(AndroidEnginePlatform.NO_VPN, trustManager = TestPki.trustManager(), onEvent = { events += it })
 
     /** The production platform: the system trust store only. */
-    private val systemPlatform get() = AndroidEnginePlatform(onEvent = { events += it })
+    private val systemPlatform get() = AndroidEnginePlatform(AndroidEnginePlatform.NO_VPN, onEvent = { events += it })
 
     @Before
     fun setUp() {
@@ -141,6 +143,26 @@ class EngineOnDeviceTest {
         val tookMillis = (System.nanoTime() - started) / 1_000_000
         assertEquals("HANDSHAKE_TIMEOUT", timedOut.code)
         assertTrue("took $tookMillis ms", tookMillis in 400..3000)
+
+        // A socket the platform could not protect is never used: the dial fails closed,
+        // and a protector that throws counts as one that refused.
+        val proxy = proxy(MockProxy.Protocol.SOCKS5)
+        val asked = AtomicInteger()
+        val refusing: (Int) -> Boolean = {
+            asked.incrementAndGet()
+            false
+        }
+        val throwing: (Int) -> Boolean = {
+            asked.incrementAndGet()
+            error("boom")
+        }
+        for (protector in listOf(refusing, throwing)) {
+            val refused = engine.probe(profile(proxy), null, "echo.test:7", 10_000, AndroidEnginePlatform(protector))
+            assertEquals("PROXY_UNREACHABLE", refused.code)
+            assertTrue("${refused.detail}", refused.detail.orEmpty().contains("protect"))
+        }
+        assertEquals(2, asked.get())
+        assertTrue("nothing may reach the proxy from an unprotected socket", proxy.records.isEmpty())
     }
 
     @Test
@@ -188,8 +210,7 @@ class EngineOnDeviceTest {
     @Test
     fun theWholePacketEngineCarriesTrafficThroughTheProxy() {
         val payload = "hello through gVisor, the adapter and the proxy".toByteArray()
-        // A first run starts whatever the Go runtime starts once per process, so the
-        // goroutine counts below compare like with like.
+        // A first run starts whatever the Go runtime starts once per process.
         engine.selfTest(profile(proxy(MockProxy.Protocol.SOCKS5)), null, "echo.test:7", payload, payload.size, 20_000, systemPlatform)
         for (protocol in MockProxy.Protocol.entries) {
             val proxy = proxy(protocol, "user", "pw")
@@ -204,9 +225,13 @@ class EngineOnDeviceTest {
             )
             assertTrue("UDP must be refused, not forwarded", result.udpRejected)
             assertEquals(1, result.tcpOpened)
-            assertTrue(
-                "goroutines ${result.goroutinesBefore} -> ${result.goroutinesAfter}",
-                result.goroutinesAfter <= result.goroutinesBefore,
+            // The engine's own goroutines must all be gone. The whole-process count is not
+            // compared: the Go runtime and gomobile run goroutines of their own (finalizers
+            // releasing Java references, for one) whenever the collector decides.
+            assertEquals(
+                "engine goroutines left; process ${result.goroutinesBefore} -> ${result.goroutinesAfter}, new: ${result.goroutinesNew}",
+                0,
+                result.engineGoroutinesLeft,
             )
             assertEquals("echo.test:7", proxy.records.last().target)
         }

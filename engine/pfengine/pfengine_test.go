@@ -16,9 +16,11 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+	glog "gvisor.dev/gvisor/pkg/log"
 
 	"github.com/bibekthapamgr/app/engine/adapters"
 	"github.com/bibekthapamgr/app/engine/internal/proxytest"
+	"github.com/bibekthapamgr/app/engine/tunnel"
 )
 
 // fakePlatform plays the Kotlin side.
@@ -29,6 +31,7 @@ type fakePlatform struct {
 	refuse   bool   // Protect returns false
 	protects atomic.Int32
 	verifies atomic.Int32
+	resolves atomic.Int32
 	mu       sync.Mutex
 	events   []string
 }
@@ -39,6 +42,7 @@ func (p *fakePlatform) Protect(fd int64) bool {
 }
 
 func (p *fakePlatform) ResolveProxyHost(host string) (string, error) {
+	p.resolves.Add(1)
 	if a, ok := p.hosts[host]; ok {
 		return a, nil
 	}
@@ -63,7 +67,7 @@ func (p *fakePlatform) VerifyChain(derChain []byte, host string) string {
 	if err := (adapters.RootsVerifier{Roots: p.roots}).VerifyChain(chain, host); err != nil {
 		return string(adapters.CodeOf(err))
 	}
-	return ""
+	return "OK"
 }
 
 func (p *fakePlatform) OnEvent(js string) {
@@ -306,8 +310,8 @@ func TestSelfTestThroughMockProxy(t *testing.T) {
 	if !strings.HasPrefix(r.DNSAnswer, "198.1") || !r.UDPRejected || r.TCPOpened != 1 || r.EngineBytesUp != int64(len(payload)) {
 		t.Fatalf("self-test details: %+v", r)
 	}
-	if r.GoroutinesAfter > r.GoroutinesBefore {
-		t.Fatalf("goroutines %d → %d", r.GoroutinesBefore, r.GoroutinesAfter)
+	if r.EngineGoroutinesLeft != 0 || r.GoroutinesAfter > r.GoroutinesBefore {
+		t.Fatalf("goroutines %d → %d, %d engine ones left, new: %v", r.GoroutinesBefore, r.GoroutinesAfter, r.EngineGoroutinesLeft, r.GoroutinesNew)
 	}
 	if recs := proxy.Records(); recs[len(recs)-1].Target != "web.test:443" || recs[len(recs)-1].AddrType != "domain" {
 		t.Fatalf("the proxy must receive the hostname: %+v", recs[len(recs)-1])
@@ -383,7 +387,12 @@ func TestChainEncodingAndVerdicts(t *testing.T) {
 		t.Fatalf("encoding %v", enc)
 	}
 	cases := map[string]adapters.Code{
-		"":                       "",
+		"OK": "",
+		// Only the exact token means trusted: a Java null arrives as "".
+		"":                       adapters.CodeTLSUntrusted,
+		"ok":                     adapters.CodeTLSUntrusted,
+		" OK":                    adapters.CodeTLSUntrusted,
+		"OK: but not really":     adapters.CodeTLSUntrusted,
 		"TLS_EXPIRED":            adapters.CodeTLSExpired,
 		"TLS_EXPIRED: not after": adapters.CodeTLSExpired,
 		"TLS_HOSTNAME":           adapters.CodeTLSHostname,
@@ -395,6 +404,123 @@ func TestChainEncodingAndVerdicts(t *testing.T) {
 		if (want == "" && err != nil) || (want != "" && adapters.CodeOf(err) != want) {
 			t.Errorf("verdict %q → %v, want %q", verdict, err, want)
 		}
+	}
+}
+
+func TestStatusRemembersWhyStartFailed(t *testing.T) {
+	proxytest.CheckLeaks(t)
+	efd, other := socketpair(t)
+	defer unix.Close(efd)
+	defer unix.Close(other)
+	p := &fakePlatform{}
+	bad := configFor("SOCKS4", "127.0.0.1", 1080, "")
+	failStart := func() string {
+		t.Helper()
+		err := Start(int64(efd), bad, nil, p)
+		if err == nil || !strings.HasPrefix(err.Error(), "INTERNAL: ") {
+			t.Fatalf("Start with a bad protocol: %v", err)
+		}
+		return strings.TrimPrefix(err.Error(), "INTERNAL: ")
+	}
+	detail := failStart()
+	s := decode[tunnel.Status](t, Status())
+	if s.State != "stopped" || s.LastError == nil || s.LastError.Code != "INTERNAL" || s.LastError.Detail != detail || s.LastError.Time.IsZero() {
+		t.Fatalf("status after a failed Start: %+v", s)
+	}
+	Stop()
+	if s := decode[tunnel.Status](t, Status()); s.LastError != nil {
+		t.Fatalf("Stop must clear the start error: %+v", s)
+	}
+	failStart()
+	if err := Start(int64(efd), configFor("SOCKS5", "127.0.0.1", 1080, ""), nil, p); err != nil {
+		t.Fatal(err)
+	}
+	if s := decode[tunnel.Status](t, Status()); s.State != "running" || s.LastError != nil {
+		t.Fatalf("a successful Start must clear the start error: %+v", s)
+	}
+	Stop()
+	if s := decode[tunnel.Status](t, Status()); s.State != "stopped" || s.LastError != nil {
+		t.Fatalf("status after a clean stop: %+v", s)
+	}
+}
+
+func TestResetFlowsForgetsProxyAddresses(t *testing.T) {
+	proxytest.CheckLeaks(t)
+	echo := proxytest.NewEcho(t, "tcp4")
+	proxy := proxytest.NewServer(t, proxytest.Config{Protocol: proxytest.SOCKS5, Hosts: map[string]string{"web.test": echo.String()}})
+	efd, other := socketpair(t)
+	defer unix.Close(efd)
+	defer unix.Close(other)
+	p := &fakePlatform{hosts: map[string]string{"proxy.test": proxy.Host()}}
+	if err := Start(int64(efd), configFor("SOCKS5", "proxy.test", proxy.Port(), ""), nil, p); err != nil {
+		t.Fatal(err)
+	}
+	defer Stop()
+	dial := func() {
+		t.Helper()
+		c, err := getCurrent().dialer.Dial(context.Background(), adapters.Target{Host: "web.test", Port: 443})
+		if err != nil {
+			t.Fatalf("dial through the running engine's dialer: %v", err)
+		}
+		c.Close()
+	}
+	dial()
+	dial()
+	if n := p.resolves.Load(); n != 1 {
+		t.Fatalf("two dials asked the platform %d times, want 1 (cached)", n)
+	}
+	ResetFlows()
+	dial()
+	if n := p.resolves.Load(); n != 2 {
+		t.Fatalf("after ResetFlows the proxy host must be resolved again (%d lookups)", n)
+	}
+}
+
+// The self-test's leak check sees a goroutine running engine code, names who
+// started it, and ignores goroutines that were there before.
+func TestGoroutineAccountingSeesEngineGoroutines(t *testing.T) {
+	originsBefore, before := goroutineOrigins()
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		<-stop
+		close(done)
+	}()
+	originsAfter, after := goroutineOrigins()
+	if after != before+1 {
+		t.Fatalf("engine goroutines %d → %d, want one more", before, after)
+	}
+	if n := newOrigins(originsBefore, originsAfter); len(n) != 1 || !strings.HasSuffix(n[0], "pfengine.TestGoroutineAccountingSeesEngineGoroutines") {
+		t.Fatalf("new goroutines %v", n)
+	}
+	if left := settledEngineGoroutines(before - 1); left != 2 {
+		t.Fatalf("with one engine goroutine too many before and one now, %d left, want 2", left)
+	}
+	close(stop)
+	<-done
+	if left := settledEngineGoroutines(before); left != 0 {
+		t.Fatalf("%d engine goroutines left after it ended", left)
+	}
+}
+
+func TestSelfTestRejectsBadInput(t *testing.T) {
+	p := &fakePlatform{}
+	cfg := configFor("SOCKS5", "127.0.0.1", 1080, "")
+	r := decode[selfTestResult](t, SelfTest(cfg, nil, "web.test:443", nil, maxSelfTestReply+1, 1000, p))
+	if r.OK || r.Code != "INTERNAL" || !strings.Contains(r.Detail, "4096") {
+		t.Fatalf("expect over the reply limit: %+v", r)
+	}
+	if r := decode[selfTestResult](t, SelfTest(cfg, nil, "web.test", nil, 1, 1000, p)); r.Code != "INTERNAL" {
+		t.Fatalf("target without port: %+v", r)
+	}
+}
+
+// The netstack's own log lines (addresses, ports) must not reach logcat.
+func TestNetstackLoggingIsDiscarded(t *testing.T) {
+	if _, ok := glog.Log().Emitter.(discardLog); !ok {
+		t.Fatalf("gVisor logs to %T, want discardLog", glog.Log().Emitter)
+	}
+	if glog.IsLogging(glog.Info) {
+		t.Fatalf("gVisor must not even format Info messages")
 	}
 }
 

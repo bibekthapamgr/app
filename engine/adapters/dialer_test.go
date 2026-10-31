@@ -433,6 +433,178 @@ func TestProxyHostResolution(t *testing.T) {
 	})
 }
 
+func TestProxyAddressesAreCachedAndShared(t *testing.T) {
+	proxytest.CheckLeaks(t)
+	echo := proxytest.NewEcho(t, "tcp4")
+	proxy := proxytest.NewServer(t, proxytest.Config{Protocol: proxytest.SOCKS5, Hosts: map[string]string{"e.test": echo.String()}})
+	target := Target{Host: "e.test", Port: 1}
+	newDialer := func(t *testing.T, resolve Resolver) (*Dialer, *time.Time) {
+		t.Helper()
+		d, err := NewDialer(ProxyConfig{Kind: KindSOCKS5, Host: "proxy.test", Port: proxy.Port(), DialTimeout: testTimeout}, nil, nil, resolve)
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Unix(1_000_000, 0)
+		d.now = func() time.Time { return now }
+		return d, &now
+	}
+	dialOK := func(t *testing.T, d *Dialer) {
+		t.Helper()
+		c, err := d.Dial(context.Background(), target)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		echoRoundTrip(t, c)
+		c.Close()
+	}
+	waitCalls := func(t *testing.T, calls *atomic.Int32, n int32) {
+		t.Helper()
+		for deadline := time.Now().Add(testTimeout); calls.Load() < n; time.Sleep(time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("resolver called %d times, want %d", calls.Load(), n)
+			}
+		}
+	}
+
+	t.Run("concurrent dials share one lookup, then the cache answers", func(t *testing.T) {
+		var calls atomic.Int32
+		release := make(chan struct{})
+		d, now := newDialer(t, func(ctx context.Context, _ string) ([]netip.Addr, error) {
+			calls.Add(1)
+			<-release
+			return []netip.Addr{proxy.Addr.Addr()}, nil
+		})
+		errs := make(chan error, 8)
+		for range 8 {
+			go func() {
+				c, err := d.Dial(context.Background(), target)
+				if err == nil {
+					c.Close()
+				}
+				errs <- err
+			}()
+		}
+		waitCalls(t, &calls, 1)
+		time.Sleep(50 * time.Millisecond) // let the other dials reach the lookup
+		close(release)
+		for range 8 {
+			if err := <-errs; err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+		}
+		dialOK(t, d)
+		if n := calls.Load(); n != 1 {
+			t.Fatalf("nine dials made %d lookups, want 1", n)
+		}
+		*now = now.Add(proxyAddrTTL)
+		dialOK(t, d)
+		if n := calls.Load(); n != 2 {
+			t.Fatalf("an expired entry must be looked up again (%d lookups)", n)
+		}
+		d.ForgetProxyAddrs()
+		dialOK(t, d)
+		if n := calls.Load(); n != 3 {
+			t.Fatalf("ForgetProxyAddrs must force a new lookup (%d lookups)", n)
+		}
+	})
+
+	t.Run("failures are cached briefly", func(t *testing.T) {
+		var calls atomic.Int32
+		d, now := newDialer(t, func(context.Context, string) ([]netip.Addr, error) {
+			calls.Add(1)
+			return nil, errors.New("no such host")
+		})
+		for range 3 {
+			if _, err := d.Dial(context.Background(), target); CodeOf(err) != CodeProxyDNS {
+				t.Fatalf("got %v, want PROXY_DNS_FAILED", err)
+			}
+		}
+		if n := calls.Load(); n != 1 {
+			t.Fatalf("a failed lookup must be reused for a few seconds (%d lookups)", n)
+		}
+		*now = now.Add(proxyAddrNegativeTTL)
+		if _, err := d.Dial(context.Background(), target); CodeOf(err) != CodeProxyDNS || calls.Load() != 2 {
+			t.Fatalf("after the negative TTL the host must be looked up again: %v, %d lookups", err, calls.Load())
+		}
+	})
+
+	t.Run("a lookup abandoned by its dial is retried, not shared", func(t *testing.T) {
+		var calls atomic.Int32
+		release := make(chan struct{})
+		d, _ := newDialer(t, func(ctx context.Context, _ string) ([]netip.Addr, error) {
+			calls.Add(1)
+			select {
+			case <-release:
+				return []netip.Addr{proxy.Addr.Addr()}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		})
+		ctxA, cancelA := context.WithCancel(context.Background())
+		errA := make(chan error, 1)
+		go func() { _, err := d.Dial(ctxA, target); errA <- err }()
+		waitCalls(t, &calls, 1)
+		errB := make(chan error, 1)
+		go func() {
+			c, err := d.Dial(context.Background(), target)
+			if err == nil {
+				c.Close()
+			}
+			errB <- err
+		}()
+		time.Sleep(50 * time.Millisecond) // B waits for A's lookup
+		cancelA()
+		if err := <-errA; CodeOf(err) != CodeCanceled {
+			t.Fatalf("the canceled dial: %v, want CANCELED", err)
+		}
+		waitCalls(t, &calls, 2) // B looks up for itself
+		close(release)
+		if err := <-errB; err != nil {
+			t.Fatalf("the other dial must not inherit the cancellation: %v", err)
+		}
+		dialOK(t, d)
+		if n := calls.Load(); n != 2 {
+			t.Fatalf("B's result must be cached (%d lookups)", n)
+		}
+	})
+
+	t.Run("a lookup that panics does not block later dials", func(t *testing.T) {
+		var calls atomic.Int32
+		d, _ := newDialer(t, func(context.Context, string) ([]netip.Addr, error) {
+			if calls.Add(1) == 1 {
+				panic("resolver bug")
+			}
+			return []netip.Addr{proxy.Addr.Addr()}, nil
+		})
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("the panic must reach the dial that ran the lookup")
+				}
+			}()
+			_, _ = d.Dial(context.Background(), target)
+		}()
+		dialOK(t, d) // would block on a lookup that never finishes
+		if n := calls.Load(); n != 2 {
+			t.Fatalf("%d lookups, want 2", n)
+		}
+	})
+
+	t.Run("the reachable address moves to the front", func(t *testing.T) {
+		// Nothing listens on 127.0.0.2: refused at once.
+		d, _ := newDialer(t, func(context.Context, string) ([]netip.Addr, error) {
+			return []netip.Addr{netip.MustParseAddr("127.0.0.2"), proxy.Addr.Addr()}, nil
+		})
+		dialOK(t, d)
+		d.addrs.mu.Lock()
+		got := d.addrs.addrs
+		d.addrs.mu.Unlock()
+		if len(got) != 2 || got[0] != proxy.Addr.Addr() {
+			t.Fatalf("cached order %v, want the proxy's address first", got)
+		}
+	})
+}
+
 func TestProtectorRunsBeforeConnect(t *testing.T) {
 	echo := proxytest.NewEcho(t, "tcp4")
 	proxy := proxytest.NewServer(t, proxytest.Config{Protocol: proxytest.SOCKS5, Hosts: map[string]string{"e.test": echo.String()}})
@@ -588,6 +760,60 @@ func TestTLSResumptionIsVerifiedAgain(t *testing.T) {
 	reject.Store(true)
 	if _, err := d.Dial(context.Background(), Target{Host: "e.test", Port: 1}); CodeOf(err) != CodeTLSUntrusted {
 		t.Fatalf("a resumed session must still be rejected by the verifier, got %v", err)
+	}
+}
+
+// An app's half-close reaches the destination over TLS 1.3 (close_notify
+// closes one direction) but not over TLS 1.2, where close_notify would end the
+// whole connection and cut the reply short.
+func TestTLSHalfCloseFollowsTheVersion(t *testing.T) {
+	proxytest.CheckLeaks(t)
+	ca := proxytest.NewCA(t, "Root")
+	cert := ca.Leaf(t, proxytest.LeafOptions{DNSNames: []string{"proxy.test"}})
+	for _, tc := range []struct {
+		name    string
+		version uint16
+		eof     bool
+	}{
+		{"TLS 1.3", tls.VersionTLS13, true},
+		{"TLS 1.2", tls.VersionTLS12, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			echo := proxytest.NewEcho(t, "tcp4")
+			cfg := proxytest.ServerTLS(cert)
+			cfg.MaxVersion = tc.version
+			proxy := proxytest.NewServer(t, proxytest.Config{Protocol: proxytest.SOCKS5, TLS: cfg, Hosts: map[string]string{"e.test": echo.String()}})
+			d := dialerTo(t, proxy, KindSOCKS5, nil, &TLSOptions{ServerName: "proxy.test", Verifier: RootsVerifier{Roots: ca.Pool}})
+			conn, err := d.Dial(context.Background(), Target{Host: "e.test", Port: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			if _, err := conn.Write([]byte("ping")); err != nil {
+				t.Fatal(err)
+			}
+			cw, ok := conn.(interface{ CloseWrite() error })
+			if !ok {
+				t.Fatalf("%T must offer CloseWrite to the relay", conn)
+			}
+			if err := cw.CloseWrite(); err != nil {
+				t.Fatalf("CloseWrite: %v", err)
+			}
+			buf := make([]byte, 4)
+			_ = conn.SetReadDeadline(time.Now().Add(testTimeout))
+			if _, err := io.ReadFull(conn, buf); err != nil || string(buf) != "ping" {
+				t.Fatalf("the reply must arrive after the half-close: %q %v", buf, err)
+			}
+			_ = conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+			_, err = conn.Read(buf)
+			if tc.eof && !errors.Is(err, io.EOF) {
+				t.Fatalf("the half-close must reach the echo server, which then closes: got %v", err)
+			}
+			var ne net.Error
+			if !tc.eof && !(errors.As(err, &ne) && ne.Timeout()) {
+				t.Fatalf("no close_notify may be sent over TLS 1.2, so the echo server stays open: got %v", err)
+			}
+		})
 	}
 }
 

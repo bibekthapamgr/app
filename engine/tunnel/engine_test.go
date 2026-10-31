@@ -42,11 +42,14 @@ import (
 
 // fakeDialer stands in for the proxy. By destination name:
 // "fail.test" → AUTH_FAILED, "block.test" → waits until the context ends,
-// "panic.test" → panics; anything else → an echo server behind the "proxy".
+// "panic.test" → panics, "stream.test" → a destination that keeps sending,
+// "quiet.test" → one that never sends or reads; anything else → an echo
+// server behind the "proxy".
 type fakeDialer struct {
 	mu      sync.Mutex
 	targets []adapters.Target
 	started chan adapters.Target // optional: told about every dial
+	quiet   []net.Conn
 }
 
 func (d *fakeDialer) Dial(ctx context.Context, t adapters.Target) (net.Conn, error) {
@@ -70,10 +73,39 @@ func (d *fakeDialer) Dial(ctx context.Context, t adapters.Target) (net.Conn, err
 		return nil, &adapters.Error{Code: adapters.CodeTimeout}
 	case "panic.test":
 		panic("test panic in a dial")
+	case "stream.test": // the destination keeps sending, never reads
+		a, b := net.Pipe()
+		go func() {
+			defer b.Close()
+			chunk := make([]byte, 512)
+			for {
+				if _, err := b.Write(chunk); err != nil {
+					return
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		}()
+		return a, nil
+	case "quiet.test": // the destination never sends and never reads
+		a, b := net.Pipe()
+		go func() { <-ctx.Done(); _ = b.Close() }()
+		d.mu.Lock()
+		d.quiet = append(d.quiet, b)
+		d.mu.Unlock()
+		return a, nil
 	}
 	a, b := net.Pipe()
 	go func() { defer b.Close(); _, _ = io.Copy(b, b) }() // echo server "behind the proxy"
 	return a, nil
+}
+
+// closeQuiet ends the far side of the quiet destinations (test cleanup).
+func (d *fakeDialer) closeQuiet() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, c := range d.quiet {
+		_ = c.Close()
+	}
 }
 
 func (d *fakeDialer) last() adapters.Target {
@@ -468,7 +500,7 @@ func TestStopEndsOpenFlowsAndCancelsSetups(t *testing.T) {
 		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 		if _, err := c.Read(make([]byte, 1)); err == nil {
 			t.Fatal("an app connection is still open after Stop")
-		} else if errors.Is(err, os.ErrDeadlineExceeded) {
+		} else if isTimeout(err) {
 			t.Fatal("an app connection was not ended by Stop")
 		}
 	}
@@ -501,7 +533,7 @@ func TestResetFlowsKeepsEngineRunning(t *testing.T) {
 	for _, c := range []net.Conn{a, b} {
 		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 		_, err := c.Read(make([]byte, 1))
-		if err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		if err == nil || isTimeout(err) {
 			t.Fatalf("a reset flow must end at once, got %v", err)
 		}
 	}
@@ -609,7 +641,12 @@ func TestSlowEventReceiverNeverStallsTraffic(t *testing.T) {
 	if el := time.Since(t0); el > eventDrainTimeout+time.Second {
 		t.Fatalf("Stop waited %v for a stuck event receiver", el)
 	}
-	close(release)
+	atStop := delivered.Load()
+	close(release) // the stuck call returns; the events queued behind it must not follow
+	time.Sleep(200 * time.Millisecond)
+	if got := delivered.Load(); got != atStop {
+		t.Fatalf("%d events were delivered after Stop returned", got-atStop)
+	}
 }
 
 func TestPanicInOneFlowIsIsolated(t *testing.T) {
@@ -709,6 +746,89 @@ func TestProxyOutageFailsClosed(t *testing.T) {
 	if echo.Served() != 1 {
 		t.Fatalf("the destination was reached %d times; only the one tunnelled connection may reach it", echo.Served())
 	}
+}
+
+func TestIdleTimeoutCountsBothDirections(t *testing.T) {
+	proxytest.CheckLeaks(t)
+	e, d := startEngine(t, nil, func(c *Config) { c.IdleTimeout = 500 * time.Millisecond })
+	t.Cleanup(d.closeQuiet)
+
+	// A download: the destination sends every 50 ms, the app never sends.
+	down := dialOK(t, e, resolve(t, e.cs, "stream.test"), 80)
+	defer down.Close()
+	deadline := time.Now().Add(1500 * time.Millisecond) // three idle timeouts
+	got := 0
+	buf := make([]byte, 4096)
+	for time.Now().Before(deadline) {
+		_ = down.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		n, err := down.Read(buf)
+		got += n
+		if err != nil && !isTimeout(err) {
+			t.Fatalf("a flow receiving data was closed after %d bytes: %v", got, err)
+		}
+	}
+	if got == 0 {
+		t.Fatal("no data arrived")
+	}
+
+	// Silence both ways: closed after the idle timeout and counted.
+	quiet := dialOK(t, e, resolve(t, e.cs, "quiet.test"), 80)
+	defer quiet.Close()
+	_ = quiet.SetReadDeadline(time.Now().Add(3 * time.Second))
+	start := time.Now()
+	if _, err := quiet.Read(buf); err == nil || isTimeout(err) {
+		t.Fatalf("an idle flow must be closed by the engine, got %v", err)
+	}
+	if el := time.Since(start); el < 400*time.Millisecond || el > 2*time.Second {
+		t.Fatalf("idle flow closed after %v, want about 500 ms", el)
+	}
+	waitFor(t, func() bool { return e.Stats().IdleTimeouts >= 1 }, "the idle timeout to be counted")
+}
+
+func TestStalledFlowsHoldLittleMemory(t *testing.T) {
+	e, d := startEngine(t, nil)
+	t.Cleanup(d.closeQuiet)
+	var rcv tcpip.TCPReceiveBufferSizeRangeOption
+	var snd tcpip.TCPSendBufferSizeRangeOption
+	var moderate tcpip.TCPModerateReceiveBufferOption
+	st := e.stack.Load()
+	if st.TransportProtocolOption(tcp.ProtocolNumber, &rcv) != nil || st.TransportProtocolOption(tcp.ProtocolNumber, &snd) != nil ||
+		st.TransportProtocolOption(tcp.ProtocolNumber, &moderate) != nil {
+		t.Fatal("cannot read the netstack's TCP options")
+	}
+	if rcv.Max != 2*DefaultTCPBufferBytes || snd.Max != 2*DefaultTCPBufferBytes || bool(moderate) {
+		t.Fatalf("buffers rcv=%+v snd=%+v moderation=%v", rcv, snd, moderate)
+	}
+
+	// An upload into a destination that never reads: the app can push only what
+	// the engine's receive window, one relay buffer and its own send buffer hold.
+	small := tcpip.TCPSendBufferSizeRangeOption{Min: tcp.MinBufferSize, Default: 16 << 10, Max: 16 << 10}
+	if terr := e.cs.SetTransportProtocolOption(tcp.ProtocolNumber, &small); terr != nil {
+		t.Fatal(terr)
+	}
+	c := dialOK(t, e, resolve(t, e.cs, "quiet.test"), 80)
+	defer c.Close()
+	chunk := make([]byte, 8<<10)
+	total := 0
+	for {
+		_ = c.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+		n, err := c.Write(chunk)
+		total += n
+		if err != nil {
+			if !isTimeout(err) {
+				t.Fatalf("write: %v", err)
+			}
+			break
+		}
+		if total > 8<<20 {
+			t.Fatal("the engine accepted more than 8 MiB for a destination that never reads")
+		}
+	}
+	limit := 2*DefaultTCPBufferBytes + DefaultRelayBufferBytes + 16<<10 + 64<<10 // + slack for segments in flight
+	if total > limit {
+		t.Fatalf("a stalled flow took %d bytes, want at most %d", total, limit)
+	}
+	t.Logf("a stalled upload stopped after %d KiB", total>>10)
 }
 
 // --- IPv6 (hermetic: works even where the host kernel has IPv6 disabled) ----

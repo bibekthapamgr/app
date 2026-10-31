@@ -96,10 +96,14 @@ func connectRequest(hostPort string, creds *Credentials, signIn bool) ([]byte, e
 	return req, nil
 }
 
-// readConnectResponse reads the status line and headers, bounded in size.
+// readConnectResponse reads the status line and headers of the final
+// response. Interim 1xx responses before it (RFC 9110 §15.2: a client must
+// accept them even unasked) are skipped, except 101, which makes no sense for
+// CONNECT and is reported. All of them share one size and line budget, so a
+// hostile proxy cannot make us buffer more than 16 KiB or read more than 100
+// header lines in total.
 func readConnectResponse(br *bufio.Reader) (connectResponse, error) {
-	var resp connectResponse
-	total := 0
+	total, lines := 0, 0
 	readLine := func() (string, error) {
 		var line []byte
 		for {
@@ -117,41 +121,47 @@ func readConnectResponse(br *bufio.Reader) (connectResponse, error) {
 			}
 		}
 	}
-	status, err := readLine()
-	if err != nil {
-		return resp, err
-	}
-	// "HTTP/1.1 200 Connection established"
-	if !strings.HasPrefix(status, "HTTP/1.") || len(status) < 12 || status[8] != ' ' {
-		return resp, newErr(CodeProtocol, "not an HTTP proxy response", nil)
-	}
-	code, err := strconv.Atoi(status[9:12])
-	if err != nil || code < 100 || code > 599 || (len(status) > 12 && status[12] != ' ') {
-		return resp, newErr(CodeProtocol, "malformed HTTP status line", nil)
-	}
-	resp.Status = code
-	for lines := 0; ; lines++ {
-		if lines > maxConnectHeaderLines {
-			return resp, newErr(CodeProtocol, "too many proxy response headers", nil)
-		}
-		h, err := readLine()
+	for {
+		var resp connectResponse
+		status, err := readLine()
 		if err != nil {
 			return resp, err
 		}
-		if h == "" {
-			break
+		// "HTTP/1.1 200 Connection established"
+		if !strings.HasPrefix(status, "HTTP/1.") || len(status) < 12 || status[8] != ' ' {
+			return resp, newErr(CodeProtocol, "not an HTTP proxy response", nil)
 		}
-		name, value, ok := strings.Cut(h, ":")
-		if !ok {
-			continue // tolerate junk header lines; only a few headers matter
+		code, err := strconv.Atoi(status[9:12])
+		if err != nil || code < 100 || code > 599 || (len(status) > 12 && status[12] != ' ') {
+			return resp, newErr(CodeProtocol, "malformed HTTP status line", nil)
 		}
-		if strings.EqualFold(strings.TrimSpace(name), "Proxy-Authenticate") && len(resp.AuthSchemes) < 8 {
-			scheme, _, _ := strings.Cut(strings.TrimSpace(value), " ")
-			resp.AuthSchemes = append(resp.AuthSchemes, knownScheme(scheme))
+		resp.Status = code
+		for {
+			if lines++; lines > maxConnectHeaderLines {
+				return resp, newErr(CodeProtocol, "too many proxy response headers", nil)
+			}
+			h, err := readLine()
+			if err != nil {
+				return resp, err
+			}
+			if h == "" {
+				break
+			}
+			name, value, ok := strings.Cut(h, ":")
+			if !ok {
+				continue // tolerate junk header lines; only a few headers matter
+			}
+			if strings.EqualFold(strings.TrimSpace(name), "Proxy-Authenticate") && len(resp.AuthSchemes) < 8 {
+				scheme, _, _ := strings.Cut(strings.TrimSpace(value), " ")
+				resp.AuthSchemes = append(resp.AuthSchemes, knownScheme(scheme))
+			}
 		}
+		if code >= 100 && code < 200 && code != 101 {
+			continue // interim response; the final one follows
+		}
+		resp.HeaderByteLen = total
+		return resp, nil
 	}
-	resp.HeaderByteLen = total
-	return resp, nil
 }
 
 // knownScheme names an authentication scheme for messages. Anything else the
@@ -189,7 +199,7 @@ func connectStatusError(resp connectResponse, sentCreds bool) error {
 		return newErr(CodeProtocol, fmt.Sprintf("proxy does not support CONNECT (HTTP %d)", s), nil)
 	case s == 502 || s == 503 || s == 504:
 		return newErr(CodeTargetUnreachable, fmt.Sprintf("proxy could not reach the destination (HTTP %d)", s), nil)
-	case s >= 300 && s < 400, s == 400:
+	case s >= 300 && s < 400, s == 400, s == 101:
 		return newErr(CodeProtocol, fmt.Sprintf("unexpected HTTP %d to CONNECT", s), nil)
 	}
 	return newErr(CodeProxyGeneralFailed, fmt.Sprintf("proxy answered HTTP %d", s), nil)

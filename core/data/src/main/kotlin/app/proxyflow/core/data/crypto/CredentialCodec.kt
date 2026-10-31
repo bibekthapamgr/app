@@ -1,8 +1,6 @@
 package app.proxyflow.core.data.crypto
 
-import java.nio.ByteBuffer
-import java.nio.CharBuffer
-import java.nio.charset.CharacterCodingException
+import app.proxyflow.core.model.SecretText
 
 /**
  * The plaintext inside [SealedCredentials]: a version byte, then the username
@@ -16,8 +14,13 @@ object CredentialCodec {
     private const val MAX_FIELD_BYTES = 0xFFFF
 
     fun encode(username: CharArray, password: CharArray): ByteArray {
-        val user = utf8(username)
-        val pass = utf8(password)
+        val user = SecretText.utf8(username)
+        val pass = try {
+            SecretText.utf8(password)
+        } catch (e: IllegalArgumentException) {
+            user.fill(0)
+            throw e
+        }
         try {
             require(user.size <= MAX_FIELD_BYTES && pass.size <= MAX_FIELD_BYTES) { "credential too long" }
             val out = ByteArray(1 + 2 + user.size + 2 + pass.size)
@@ -38,7 +41,14 @@ object CredentialCodec {
         val (userStart, userLength) = field(bytes, 1)
         val (passStart, passLength) = field(bytes, userStart + userLength)
         require(passStart + passLength == bytes.size) { "trailing bytes" }
-        return chars(bytes, userStart, userLength) to chars(bytes, passStart, passLength)
+        val user = SecretText.chars(bytes, userStart, userLength)
+        val pass = try {
+            SecretText.chars(bytes, passStart, passLength)
+        } catch (e: IllegalArgumentException) {
+            user.fill('\u0000')
+            throw e
+        }
+        return user to pass
     }
 
     private fun putField(out: ByteArray, at: Int, value: ByteArray): Int {
@@ -53,29 +63,5 @@ object CredentialCodec {
         val length = ((bytes[at].toInt() and 0xFF) shl 8) or (bytes[at + 1].toInt() and 0xFF)
         require(at + 2 + length <= bytes.size) { "truncated" }
         return (at + 2) to length
-    }
-
-    private fun utf8(chars: CharArray): ByteArray {
-        val buffer = try {
-            Charsets.UTF_8.newEncoder().encode(CharBuffer.wrap(chars))
-        } catch (e: CharacterCodingException) {
-            throw IllegalArgumentException("not valid text", e)
-        }
-        val out = ByteArray(buffer.remaining())
-        buffer.get(out)
-        if (buffer.hasArray()) buffer.array().fill(0)
-        return out
-    }
-
-    private fun chars(bytes: ByteArray, offset: Int, length: Int): CharArray {
-        val decoded = try {
-            Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes, offset, length))
-        } catch (e: CharacterCodingException) {
-            throw IllegalArgumentException("not valid UTF-8", e)
-        }
-        val out = CharArray(decoded.remaining())
-        decoded.get(out)
-        if (decoded.hasArray()) decoded.array().fill('\u0000')
-        return out
     }
 }

@@ -24,10 +24,24 @@ import (
 	"sync"
 	"time"
 
+	glog "gvisor.dev/gvisor/pkg/log"
+
 	"github.com/bibekthapamgr/app/engine/adapters"
 	"github.com/bibekthapamgr/app/engine/fakedns"
 	"github.com/bibekthapamgr/app/engine/tunnel"
 )
+
+// The netstack logs a few packet details (addresses, ports) on errors, by
+// default to stderr, which gomobile forwards to logcat. The engine reports
+// through status, stats and events only, so the library discards them.
+type discardLog struct{}
+
+func (discardLog) Emit(int, glog.Level, time.Time, string, ...any) {}
+
+func init() {
+	glog.SetTarget(discardLog{})
+	glog.SetLevel(glog.Warning) // skip formatting Info and Debug messages
+}
 
 // Platform is implemented by the app (Kotlin). gomobile may call its methods
 // from any goroutine, concurrently.
@@ -40,9 +54,10 @@ type Platform interface {
 	ResolveProxyHost(host string) (string, error)
 	// VerifyChain checks the proxy's certificate chain with the platform
 	// X509TrustManager. derChain is each certificate as a 4-byte big-endian
-	// length then its DER bytes, leaf first. It returns "" when trusted, else
-	// "TLS_UNTRUSTED" or "TLS_EXPIRED", optionally followed by ": detail".
-	// The hostname has already been checked by the engine.
+	// length then its DER bytes, leaf first. It returns exactly "OK" when
+	// trusted, else "TLS_UNTRUSTED" or "TLS_EXPIRED", optionally followed by
+	// ": detail". Anything else, including "" (what a Java null becomes), is
+	// treated as untrusted. The hostname has already been checked.
 	VerifyChain(derChain []byte, host string) string
 	// OnEvent receives one log-safe event as JSON. It runs on one engine
 	// goroutine; a slow receiver loses events, never traffic.
@@ -57,7 +72,21 @@ const (
 	FakeIPPrefix = "198.18.0.0/15"
 	fakeReserved = 256 // 198.18.0.0-198.18.0.255: TUN, DNS and spare addresses
 	fakeDNSTTL   = 5   // seconds (ADR-0003)
+	// fakeMaxEntries bounds the fake-DNS mappings (a few MiB at most) and
+	// leaves most of the 130 815 addresses free, so a freed address waits for
+	// a full allocation cycle before another name gets it.
+	fakeMaxEntries = 16384
+	// verdictTrusted is the only VerifyChain answer that means "trusted".
+	verdictTrusted = "OK"
 )
+
+// fakePool is shared by every engine this process runs (the VPN's and the
+// self-test's), so a mapping outlives a reconnect: an app that kept an
+// address from an earlier answer reaches the same name, never another one.
+// Mappings are dropped only after fakedns.DefaultReuseAfter without use.
+var fakePool = sync.OnceValues(func() (*fakedns.Pool, error) {
+	return fakedns.NewPool(netip.MustParsePrefix(FakeIPPrefix), fakeReserved, fakeMaxEntries)
+})
 
 // config is the profile part of the JSON passed to Start, Probe and SelfTest
 // (snake_case keys; unknown keys are rejected). It never contains the
@@ -92,13 +121,17 @@ func parseConfig(configJSON string) (config, error) {
 // session is one running engine with what it owns.
 type session struct {
 	engine *tunnel.Engine
+	dialer *adapters.Dialer
 	creds  *adapters.Credentials
 }
 
 var (
 	lifeMu  sync.Mutex // serialises Start, Stop and ResetFlows
-	stateMu sync.Mutex // guards current
+	stateMu sync.Mutex // guards current and startErr
 	current *session
+	// startErr is why the last Start failed, for Status; a successful Start
+	// or a Stop clears it.
+	startErr *tunnel.ErrorInfo
 )
 
 func getCurrent() *session {
@@ -121,33 +154,42 @@ func Start(tunFD int64, configJSON string, secret []byte, p Platform) error {
 		}
 		stopSession(s)
 	}
+	s, err := newSession(tunFD, configJSON, secret, p)
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	if err != nil {
+		startErr = &tunnel.ErrorInfo{Code: string(adapters.CodeInternal), Detail: err.Error(), Time: time.Now()}
+		return codeErr(adapters.CodeInternal, err.Error())
+	}
+	current, startErr = s, nil
+	return nil
+}
+
+// newSession builds and starts an engine; its errors are log-safe.
+func newSession(tunFD int64, configJSON string, secret []byte, p Platform) (*session, error) {
 	if p == nil {
-		return codeErr(adapters.CodeInternal, "no platform callbacks")
+		return nil, errors.New("no platform callbacks")
 	}
 	if tunFD < 0 || tunFD > 1<<30 {
-		return codeErr(adapters.CodeInternal, "invalid TUN descriptor")
+		return nil, errors.New("invalid TUN descriptor")
 	}
 	cfg, err := parseConfig(configJSON)
 	if err != nil {
-		return codeErr(adapters.CodeInternal, err.Error())
+		return nil, err
 	}
 	dialer, creds, err := newDialer(cfg, secret, p)
 	if err != nil {
-		return codeErr(adapters.CodeInternal, err.Error())
+		return nil, err
 	}
 	engine, err := newEngine(int(tunFD), cfg, dialer, p)
+	if err == nil {
+		err = engine.Start()
+	}
 	if err != nil {
 		creds.Wipe()
-		return codeErr(adapters.CodeInternal, err.Error())
+		return nil, err
 	}
-	if err := engine.Start(); err != nil {
-		creds.Wipe()
-		return codeErr(adapters.CodeInternal, err.Error())
-	}
-	stateMu.Lock()
-	current = &session{engine: engine, creds: creds}
-	stateMu.Unlock()
-	return nil
+	return &session{engine: engine, dialer: dialer, creds: creds}, nil
 }
 
 // Stop ends every flow, stops the engine, waits for its goroutines and wipes
@@ -158,6 +200,9 @@ func Stop() {
 	if s := getCurrent(); s != nil {
 		stopSession(s)
 	}
+	stateMu.Lock()
+	startErr = nil
+	stateMu.Unlock()
 }
 
 func stopSession(s *session) {
@@ -171,22 +216,28 @@ func stopSession(s *session) {
 }
 
 // ResetFlows aborts every connection (apps reconnect), keeping the engine
-// running; for underlying-network changes. Returns the number aborted.
+// running; for underlying-network changes. It also forgets the proxy's
+// resolved addresses, so the next connection resolves them on the new
+// network. Returns the number aborted.
 func ResetFlows() int64 {
 	lifeMu.Lock()
 	defer lifeMu.Unlock()
 	if s := getCurrent(); s != nil {
+		s.dialer.ForgetProxyAddrs()
 		return int64(s.engine.ResetFlows())
 	}
 	return 0
 }
 
-// Status returns tunnel.Status as JSON; state "stopped" when no engine runs.
+// Status returns tunnel.Status as JSON. When no engine runs, the state is
+// "stopped" and last_error says why the last Start failed, if it did.
 func Status() string {
 	if s := getCurrent(); s != nil {
 		return toJSON(s.engine.Status())
 	}
-	return toJSON(tunnel.Status{State: tunnel.StateStopped.String()})
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	return toJSON(tunnel.Status{State: tunnel.StateStopped.String(), LastError: startErr})
 }
 
 // Stats returns tunnel.Snapshot as JSON, or "{}" when no engine runs.
@@ -257,7 +308,7 @@ func newDialer(cfg config, secret []byte, p Platform) (*adapters.Dialer, *adapte
 }
 
 func newEngine(fd int, cfg config, dialer tunnel.TunnelDialer, p Platform) (*tunnel.Engine, error) {
-	pool, err := fakedns.NewPool(netip.MustParsePrefix(FakeIPPrefix), fakeReserved, 0)
+	pool, err := fakePool()
 	if err != nil {
 		return nil, err
 	}
@@ -337,8 +388,11 @@ func encodeChain(ders [][]byte) []byte {
 }
 
 func parseVerdict(verdict string) error {
-	if verdict == "" {
+	if verdict == verdictTrusted {
 		return nil
+	}
+	if verdict == "" {
+		return &adapters.Error{Code: adapters.CodeTLSUntrusted, Detail: "the phone gave no verdict on the proxy certificate"}
 	}
 	code, detail, _ := strings.Cut(verdict, ":")
 	detail = strings.TrimSpace(detail)

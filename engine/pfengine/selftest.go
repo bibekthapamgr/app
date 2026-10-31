@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"runtime"
+	"strings"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -31,31 +32,42 @@ const maxSelfTestReply = 4096
 // selfTestResult is SelfTest's JSON report.
 type selfTestResult struct {
 	probeResult
-	DNSAnswer        string `json:"dns_answer,omitempty"` // fake address the engine's DNS gave the target name
-	Connected        bool   `json:"connected"`            // the client's TCP handshake completed through the engine
-	BytesSent        int    `json:"bytes_sent"`
-	BytesReceived    int    `json:"bytes_received"`
-	ReplyB64         string `json:"reply_b64,omitempty"` // first bytes of the reply
-	UDPRejected      bool   `json:"udp_rejected"`        // a UDP datagram to the target was refused, not forwarded
-	TCPOpened        int64  `json:"tcp_opened"`
-	EngineBytesUp    int64  `json:"engine_bytes_up"`
-	EngineBytesDown  int64  `json:"engine_bytes_down"`
-	StopMs           int64  `json:"stop_ms"`
-	GoroutinesBefore int    `json:"goroutines_before"`
-	GoroutinesAfter  int    `json:"goroutines_after"`
+	DNSAnswer       string `json:"dns_answer,omitempty"` // fake address the engine's DNS gave the target name
+	Connected       bool   `json:"connected"`            // the client's TCP handshake completed through the engine
+	BytesSent       int    `json:"bytes_sent"`
+	BytesReceived   int    `json:"bytes_received"`
+	ReplyB64        string `json:"reply_b64,omitempty"` // first bytes of the reply
+	UDPRejected     bool   `json:"udp_rejected"`        // a UDP datagram to the target was refused, not forwarded
+	TCPOpened       int64  `json:"tcp_opened"`
+	EngineBytesUp   int64  `json:"engine_bytes_up"`
+	EngineBytesDown int64  `json:"engine_bytes_down"`
+	StopMs          int64  `json:"stop_ms"`
+	// Goroutines in the whole process before and after (informational: the
+	// Go runtime and gomobile run some of their own, e.g. finalizers that
+	// release Java references).
+	GoroutinesBefore int `json:"goroutines_before"`
+	GoroutinesAfter  int `json:"goroutines_after"`
+	// EngineGoroutinesLeft counts goroutines running engine or netstack code
+	// after everything was released, beyond those alive before the test (an
+	// engine may be running in the same process): it must be 0.
+	EngineGoroutinesLeft int `json:"engine_goroutines_left"`
+	// GoroutinesNew names, by the function that started each, goroutines
+	// alive after the test that were not before (function names only).
+	GoroutinesNew []string `json:"goroutines_new,omitempty"`
 }
 
 // SelfTest runs the whole packet engine without a VPN. The engine reads one
 // end of a socketpair instead of a TUN; an in-process client network stack on
 // the other end plays the apps. It resolves target's hostname through the
 // engine's fake DNS, connects to it through the engine and the proxy, sends
-// payload, reads until expect bytes arrived (expect <= 0: until the reply
-// ends or 4 KiB), checks that UDP to the target is refused, stops the engine
+// payload, reads until expect bytes arrived (at most 4 KiB; expect <= 0:
+// until the reply ends or 4 KiB), checks that UDP to the target is refused, stops the engine
 // and reports what happened as JSON. It proves the packet path on a device
 // before the VpnService exists, and stays useful as a diagnostic. secret is
 // zeroed before SelfTest returns.
 func SelfTest(configJSON string, secret []byte, target string, payload []byte, expect int64, timeoutMs int64, p Platform) string {
 	defer wipe(secret)
+	originsBefore, engineBefore := goroutineOrigins()
 	res := selfTestResult{GoroutinesBefore: runtime.NumGoroutine()}
 	// Everything SelfTest creates is released, newest first, before the
 	// report counts goroutines.
@@ -69,7 +81,10 @@ func SelfTest(configJSON string, secret []byte, target string, payload []byte, e
 	defer release()
 	report := func() string {
 		release()
-		res.GoroutinesAfter = settledGoroutines(res.GoroutinesBefore)
+		res.EngineGoroutinesLeft = settledEngineGoroutines(engineBefore)
+		res.GoroutinesAfter = runtime.NumGoroutine()
+		originsAfter, _ := goroutineOrigins()
+		res.GoroutinesNew = newOrigins(originsBefore, originsAfter)
 		return toJSON(res)
 	}
 	if p == nil {
@@ -84,6 +99,10 @@ func SelfTest(configJSON string, secret []byte, target string, payload []byte, e
 	t, err := splitTarget(target)
 	if err != nil {
 		res.probeResult = failed(err)
+		return report()
+	}
+	if expect > maxSelfTestReply {
+		res.probeResult = failed(fmt.Errorf("expect must be at most %d bytes", maxSelfTestReply))
 		return report()
 	}
 	timeout := defaultProbeTimeout
@@ -311,13 +330,77 @@ func readReply(c net.Conn, expect int) []byte {
 
 // settledGoroutines waits up to 2 s for the goroutine count to fall back to
 // before, and returns the count it settled at.
-func settledGoroutines(before int) int {
-	n := runtime.NumGoroutine()
+// settledEngineGoroutines waits up to 2 s for the goroutines running engine
+// or netstack code to fall back to the count before the test, and returns
+// how many more are left.
+func settledEngineGoroutines(before int) int {
+	_, n := goroutineOrigins()
 	for i := 0; i < 100 && n > before; i++ {
 		time.Sleep(20 * time.Millisecond)
-		n = runtime.NumGoroutine()
+		_, n = goroutineOrigins()
 	}
-	return n
+	return max(n-before, 0)
+}
+
+// enginePackages are the code a leftover goroutine of the engine would run.
+var enginePackages = []string{
+	"gvisor.dev/gvisor/",
+	"github.com/bibekthapamgr/app/engine/adapters.",
+	"github.com/bibekthapamgr/app/engine/fakedns.",
+	"github.com/bibekthapamgr/app/engine/pfengine.",
+	"github.com/bibekthapamgr/app/engine/tunnel.",
+}
+
+// goroutineOrigins lists, for every goroutine but the caller, the function
+// that started it (the "created by" line of a stack dump), and counts those
+// running engine or netstack code. Only function names are read.
+func goroutineOrigins() (origins []string, engine int) {
+	buf := make([]byte, 64<<10)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+	for i, g := range strings.Split(string(buf), "\n\n") {
+		if i == 0 {
+			continue // runtime.Stack puts the caller first
+		}
+		origin := "unknown"
+		if j := strings.LastIndex(g, "\ncreated by "); j >= 0 {
+			origin = strings.TrimPrefix(g[j+1:], "created by ")
+			if k := strings.IndexAny(origin, " \n"); k >= 0 {
+				origin = origin[:k]
+			}
+		}
+		origins = append(origins, origin)
+		for _, p := range enginePackages {
+			if strings.Contains(g, p) {
+				engine++
+				break
+			}
+		}
+	}
+	return origins, engine
+}
+
+// newOrigins returns the origins in after that are not matched in before.
+func newOrigins(before, after []string) []string {
+	seen := map[string]int{}
+	for _, o := range before {
+		seen[o]++
+	}
+	var out []string
+	for _, o := range after {
+		if seen[o] > 0 {
+			seen[o]--
+			continue
+		}
+		out = append(out, o)
+	}
+	return out
 }
 
 func minTime(a, b time.Time) time.Time {

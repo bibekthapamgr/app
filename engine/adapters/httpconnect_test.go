@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 )
 
 func readRequestHead(c net.Conn) string {
@@ -79,6 +80,9 @@ func TestHTTPConnectStatusMapping(t *testing.T) {
 		{"HTTP/1.1 301 Moved\r\nLocation: x\r\n\r\n", false, CodeProtocol},
 		{"SSH-2.0-OpenSSH_9.6\r\n\r\n", false, CodeProtocol},
 		{"HTTP/1.1 2000 OK\r\n\r\n", false, CodeProtocol},
+		{"HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\n\r\n", false, CodeProtocol},
+		{"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 407 x\r\n\r\n", false, CodeAuthRequired},
+		{"HTTP/1.1 103 Early Hints\r\nLink: x\r\n\r\nHTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 403 x\r\n\r\n", false, CodeTargetNotAllowed},
 	}
 	for _, tc := range cases {
 		var c *Credentials
@@ -129,6 +133,42 @@ func TestHTTPConnectOversizedHeaders(t *testing.T) {
 	_, err = readConnectResponse(bufio.NewReader(strings.NewReader(many)))
 	if CodeOf(err) != CodeProtocol {
 		t.Fatalf("more than 100 header lines must be rejected, got %v", err)
+	}
+}
+
+// Interim 1xx responses before the 200 are skipped; the tunnel starts after
+// the final response, and bytes sent with it still reach the app.
+func TestHTTPConnectSkipsInterimResponses(t *testing.T) {
+	cli := scriptedServer(t, func(c net.Conn) {
+		readRequestHead(c)
+		c.Write([]byte("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 102 Processing\r\nX: y\r\n\r\nHTTP/1.1 200 Connection established\r\n\r\nhello"))
+		io.Copy(io.Discard, c)
+	})
+	conn, err := httpConnectHandshake(cli, nil, Target{Host: "a.test", Port: 443})
+	if err != nil {
+		t.Fatalf("interim responses must be skipped: %v", err)
+	}
+	buf := make([]byte, 5)
+	_ = conn.SetReadDeadline(time.Now().Add(testTimeout))
+	if _, err := io.ReadFull(conn, buf); err != nil || string(buf) != "hello" {
+		t.Fatalf("tunnel bytes after the final response: %q %v", buf, err)
+	}
+}
+
+// The budgets cover every response together: 1xx responses cannot be used
+// to make the client read without bound.
+func TestHTTPConnectInterimResponsesShareTheBudget(t *testing.T) {
+	many := strings.Repeat("HTTP/1.1 100 Continue\r\n\r\n", 101) + "HTTP/1.1 200 OK\r\n\r\n"
+	if _, err := readConnectResponse(bufio.NewReader(strings.NewReader(many))); CodeOf(err) != CodeProtocol {
+		t.Fatalf("101 interim responses must exceed the line budget, got %v", err)
+	}
+	big := strings.Repeat("HTTP/1.1 103 Early Hints\r\nLink: "+strings.Repeat("a", 1000)+"\r\n\r\n", 20) + "HTTP/1.1 200 OK\r\n\r\n"
+	if _, err := readConnectResponse(bufio.NewReader(strings.NewReader(big))); CodeOf(err) != CodeProtocol {
+		t.Fatalf("20 KiB of interim responses must exceed the size budget, got %v", err)
+	}
+	few := strings.Repeat("HTTP/1.1 100 Continue\r\n\r\n", 3) + "HTTP/1.1 200 OK\r\n\r\n"
+	if resp, err := readConnectResponse(bufio.NewReader(strings.NewReader(few))); err != nil || resp.Status != 200 {
+		t.Fatalf("a few interim responses: %+v %v", resp, err)
 	}
 }
 

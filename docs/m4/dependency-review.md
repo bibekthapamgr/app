@@ -33,7 +33,7 @@ Why this commit and not the newest (`1977704`, 11 Oct 2026): the newest asks for
 | Tool | Version | Licence | Notes |
 |---|---|---|---|
 | Android NDK | r28c (`28.2.13676358`), installed with `sdkmanager` when the runner lacks it | Apache-2.0 and others (LLVM) | clang/lld link `libgojni.so` against the system's `libc`, `libm`, `libdl` and `liblog` only. r28 links with 16 KB page alignment, which Google Play requires for 64-bit libraries of apps targeting Android 15+; the script also passes `-z max-page-size=16384` and checks every `LOAD` segment of the arm64-v8a and x86_64 libraries |
-| `govulncheck` | `golang.org/x/vuln` v1.9.0 | BSD-3-Clause | CI, every run |
+| `govulncheck` | `golang.org/x/vuln` v1.9.0 | BSD-3-Clause | CI, every run, inside `build-aar.sh` (§6) |
 | `actions/setup-go` | v7.0.0, pinned to commit `b7ad1dad31e0` | MIT | CI |
 
 ## 4. Android side
@@ -46,13 +46,13 @@ No new test libraries: the instrumented tests use AndroidX Test and JUnit 4 from
 
 ## 5. Integrity
 
-- **Go modules.** `go.sum` was produced from an offline mirror in M1. Every CI run now downloads every module from `proxy.golang.org`, checks each hash against `sum.golang.org` (`go mod download`, with the checksum database on by default), runs `go mod verify`, and fails if `go.mod`/`go.sum` are not tidy (`go mod tidy -diff`). The first M4 run passed all three, which closes the open M1 item "the public check has not run yet".
-- **The AAR.** Built in CI from the commit under test (`engine/build-aar.sh`, `-trimpath`, empty build id); its size, SHA-256, per-ABI library sizes and segment alignment, and the linked module list are emitted as notices in every run (§7 of the acceptance report quotes one). The Android jobs use that artifact, never a committed binary.
+- **Go modules.** `go.sum` was produced from an offline mirror in M1. Every CI run downloads every module from `proxy.golang.org`, checks the module cache against `go.sum` (`go mod verify`) and that `go.mod`/`go.sum` are tidy (`go mod tidy -diff`), then **rebuilds `go.sum` from nothing**: with no hash to trust, the go command takes every hash from `sum.golang.org`, and the step fails unless the result is the committed file. That last part was added after the review: while a hash is in `go.sum`, the go command never asks the checksum database, so the first M4 runs had not compared `go.sum` with it, as this document then claimed. The rebuilt file was identical in the M4 runs, which closes the open M1 item "the public check has not run yet". The AAR is built only after this step passed.
+- **The AAR.** Built in CI from the commit under test (`engine/build-aar.sh`, `-trimpath`, empty build id) once the module checks and the vulnerability scan passed; its size, SHA-256, per-ABI library sizes and segment alignment, and the linked module list are emitted as notices in every run (the acceptance report quotes one). Two runs of the same commit produced byte-identical AARs. The Android jobs use that artifact, never a committed binary.
 - **GitHub Actions** stay pinned to commit SHAs.
 
 ## 6. Vulnerabilities
 
-`govulncheck ./...` runs on every CI run against the Go vulnerability database for the standard library (Go 1.27.3) and every module above; a finding fails the engine job. Result for the verified commit: see the acceptance report (§ evidence). gVisor's published CVEs (CVE-2024-10603, CVE-2024-10026) were fixed in 2024, long before the pinned commit (M1 review).
+`govulncheck` runs on every CI run against the Go vulnerability database, inside `build-aar.sh` after gomobile's bind runtime has been added: over the engine (`./...`: the standard library of Go 1.27.3 and every module above) **and** `golang.org/x/mobile/bind` and `bind/seq`, which are in `go.mod` only during that build — so it scans exactly what the library links. A finding fails the AAR build, so no library with a known vulnerability reaches the Android jobs. (Until the review it ran as a separate step over `./...` only, which missed the bind runtime.) Result for the verified commit: see the acceptance report. gVisor's published CVEs (CVE-2024-10603, CVE-2024-10026) were fixed in 2024, long before the pinned commit (M1 review).
 
 ## 7. Licence obligations
 

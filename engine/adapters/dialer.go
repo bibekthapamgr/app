@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -154,6 +155,32 @@ type Dialer struct {
 	protect  Protector
 	resolve  Resolver
 	sessions tls.ClientSessionCache
+	addrs    addrCache
+	now      func() time.Time // tests
+}
+
+// Proxy host lookups are cached: every tunnel connects to the proxy, and a
+// burst of app connections must not become a burst of lookups. Concurrent
+// dials share one lookup. Failures are cached briefly, so a burst fails fast.
+const (
+	proxyAddrTTL         = 60 * time.Second
+	proxyAddrNegativeTTL = 5 * time.Second
+)
+
+type addrCache struct {
+	mu      sync.Mutex
+	addrs   []netip.Addr
+	err     error
+	expires time.Time
+	gen     uint64    // bumped by ForgetProxyAddrs; older lookups are not cached
+	call    *addrCall // the lookup in flight
+}
+
+type addrCall struct {
+	done     chan struct{}
+	addrs    []netip.Addr
+	err      error
+	canceled bool // the dial that ran the lookup ended first; waiters retry
 }
 
 // NewDialer validates cfg and creds. creds may be nil when the proxy needs no
@@ -182,7 +209,7 @@ func NewDialer(cfg ProxyConfig, creds *Credentials, protect Protector, resolve R
 	if cfg.HandshakeTimeout == 0 {
 		cfg.HandshakeTimeout = DefaultHandshakeTimeout
 	}
-	d := &Dialer{cfg: cfg, creds: creds, protect: protect, resolve: resolve}
+	d := &Dialer{cfg: cfg, creds: creds, protect: protect, resolve: resolve, now: time.Now}
 	if cfg.TLS != nil {
 		// Resumed sessions are verified again (VerifyConnection runs on every
 		// handshake); the cache only saves round trips and CPU per connection.
@@ -313,6 +340,9 @@ func (d *Dialer) connectProxy(ctx context.Context) (net.Conn, error) {
 		c, err := d.netDialer().DialContext(actx, "tcp", netip.AddrPortFrom(a, d.cfg.Port).String())
 		acancel()
 		if err == nil {
+			if i > 0 {
+				d.preferAddr(a)
+			}
 			return c, nil
 		}
 		lastErr = err
@@ -326,10 +356,95 @@ func (d *Dialer) connectProxy(ctx context.Context) (net.Conn, error) {
 	return nil, classifyConnectError(lastErr)
 }
 
+// proxyAddrs returns the proxy's addresses: the configured IP, or the cached
+// or shared result of looking up its name.
 func (d *Dialer) proxyAddrs(ctx context.Context) ([]netip.Addr, error) {
 	if a, err := netip.ParseAddr(d.cfg.Host); err == nil {
 		return []netip.Addr{a.Unmap()}, nil
 	}
+	c := &d.addrs
+	for {
+		c.mu.Lock()
+		if d.now().Before(c.expires) {
+			addrs, err := c.addrs, c.err
+			c.mu.Unlock()
+			return addrs, err
+		}
+		if call := c.call; call != nil {
+			c.mu.Unlock()
+			select {
+			case <-call.done:
+				if call.canceled {
+					continue // the dial that looked up gave up; look up for this one
+				}
+				return call.addrs, call.err
+			case <-ctx.Done():
+				return nil, newErr(CodeProxyDNS, "looking up the proxy host timed out", ctx.Err())
+			}
+		}
+		call := &addrCall{done: make(chan struct{})}
+		c.call = call
+		gen := c.gen
+		c.mu.Unlock()
+		return d.lead(ctx, call, gen)
+	}
+}
+
+// lead runs the lookup that concurrent dials share and publishes its result,
+// also if the lookup panics (then the waiters look up for themselves).
+func (d *Dialer) lead(ctx context.Context, call *addrCall, gen uint64) (addrs []netip.Addr, err error) {
+	c := &d.addrs
+	defer func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		call.addrs, call.err = addrs, err
+		// A lookup that ended with its own dial, or never returned, is no
+		// answer for anyone else.
+		call.canceled = (err != nil && ctx.Err() != nil) || (err == nil && len(addrs) == 0)
+		if c.call == call {
+			c.call = nil
+		}
+		if gen == c.gen && !call.canceled {
+			c.addrs, c.err = addrs, err
+			ttl := proxyAddrTTL
+			if err != nil {
+				ttl = proxyAddrNegativeTTL
+			}
+			c.expires = d.now().Add(ttl)
+		}
+		close(call.done)
+	}()
+	return d.lookupProxy(ctx)
+}
+
+// ForgetProxyAddrs drops the cached proxy addresses, for a change of the
+// underlying network: the next dial looks the proxy host up again.
+func (d *Dialer) ForgetProxyAddrs() {
+	c := &d.addrs
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.gen++
+	c.addrs, c.err, c.expires = nil, nil, time.Time{}
+}
+
+// preferAddr moves a reachable address to the front of the cached list, so
+// later dials do not wait for the unreachable ones first.
+func (d *Dialer) preferAddr(a netip.Addr) {
+	c := &d.addrs
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, x := range c.addrs {
+		if x == a && i > 0 {
+			addrs := make([]netip.Addr, 0, len(c.addrs))
+			addrs = append(addrs, a)
+			addrs = append(addrs, c.addrs[:i]...)
+			c.addrs = append(addrs, c.addrs[i+1:]...)
+			return
+		}
+	}
+}
+
+func (d *Dialer) lookupProxy(ctx context.Context) ([]netip.Addr, error) {
 	ips, err := d.resolve(ctx, d.cfg.Host)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -411,8 +526,20 @@ func (d *Dialer) handshake(ctx context.Context, raw net.Conn, target Target) (ne
 	if err := raw.SetDeadline(time.Time{}); err != nil {
 		return nil, newErr(CodeProtocol, "the proxy closed the connection", err)
 	}
+	if tc, ok := conn.(*tls.Conn); ok && tc.ConnectionState().Version < tls.VersionTLS13 {
+		tunnel = noHalfClose{tunnel}
+	}
 	return tunnel, nil
 }
+
+// noHalfClose hides CloseWrite. TLS 1.2 cannot half-close: close_notify ends
+// the whole connection (RFC 5246 §7.2.1), so passing an app's half-close on as
+// one would make the proxy drop the rest of the reply. Over TLS 1.2 the upload
+// direction just stops. TLS 1.3's close_notify closes only the writing side
+// (RFC 8446 §6.1), so it is passed on.
+type noHalfClose struct{ net.Conn }
+
+func (noHalfClose) CloseWrite() error { return nil }
 
 // connectCtxErr reports why ctx ended while connecting to the proxy.
 func connectCtxErr(ctx context.Context) error {

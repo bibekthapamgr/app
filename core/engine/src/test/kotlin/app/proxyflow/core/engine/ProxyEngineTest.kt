@@ -16,7 +16,7 @@ class ProxyEngineTest {
     private val platform = object : Platform {
         override fun protect(fd: Long) = true
         override fun resolveProxyHost(host: String) = "192.0.2.1"
-        override fun verifyChain(derChain: ByteArray, host: String) = ""
+        override fun verifyChain(derChain: ByteArray, host: String) = "OK"
         override fun onEvent(json: String) = Unit
     }
 
@@ -122,9 +122,12 @@ class ProxyEngineTest {
         assertTrue(native.secretPassed!!.all { it == 0.toByte() })
 
         native.selfTestJson = """{"ok":true,"latency_ms":12,"dns_answer":"198.18.1.0","connected":true,"bytes_sent":5,""" +
-            """"bytes_received":5,"reply_b64":"aGVsbG8=","udp_rejected":true,"tcp_opened":1,"goroutines_before":7,"goroutines_after":7}"""
+            """"bytes_received":5,"reply_b64":"aGVsbG8=","udp_rejected":true,"tcp_opened":1,"goroutines_before":7,"goroutines_after":8,""" +
+            """"engine_goroutines_left":0,"goroutines_new":["runtime.createfing"]}"""
         val self = engine.selfTest(profile, null, "echo.test:7", "hello".toByteArray(), 5, 1000, platform)
         assertTrue(self.ok && self.connected && self.udpRejected)
+        assertEquals(0, self.engineGoroutinesLeft)
+        assertEquals(listOf("runtime.createfing"), self.goroutinesNew)
         assertEquals("198.18.1.0", self.dnsAnswer)
         assertEquals(5L, native.lastExpect)
     }
