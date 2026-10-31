@@ -12,7 +12,7 @@ What it promises, and where that ends (the single source for these claims is `do
 
 - **M1 — requirements, feasibility, UI/UX:** delivered (`docs/m1/M1-acceptance-report.md`). The owner chose minSdk 29 (D3).
 - **M2 — Android foundation:** delivered and merged (`docs/m2/M2-acceptance-report.md`).
-- **M3 — proxy profiles and secure storage:** profiles are stored in Room; usernames and passwords are encrypted with a separate Android Keystore key per profile (ADR-0006, ADR-0009); see `docs/m3/M3-acceptance-report.md`. The app still cannot connect: the engine arrives in M4 and the VPN service in M5, so "Test connection" says that testing isn't available yet, and the app says so too.
+- **M3 — proxy profiles and secure storage:** every acceptance criterion passes in CI, including the Keystore tests on Android 10 and 15 emulators; awaiting the owner's review (`docs/m3/M3-acceptance-report.md`). Profiles are stored in Room; usernames and passwords are encrypted under an Android Keystore key made for each set of credentials (ADR-0006, ADR-0009). The app still cannot connect: the engine arrives in M4 and the VPN service in M5, so "Test connection" says that testing isn't available yet, and the app says so too.
 
 ## Repository
 
