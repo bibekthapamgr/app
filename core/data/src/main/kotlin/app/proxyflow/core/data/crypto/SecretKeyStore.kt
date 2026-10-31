@@ -4,8 +4,8 @@ import javax.crypto.SecretKey
 
 /** Where the credential keys live. Production uses the Android Keystore; JVM tests use software keys. */
 interface SecretKeyStore {
-    /** The key stored under [alias], creating a new AES-256 key when there is none. */
-    fun getOrCreate(alias: String): SecretKey
+    /** A new AES-256 key stored under [alias], replacing any key already there. */
+    fun create(alias: String): SecretKey
 
     /** The key stored under [alias], or null when there is none. */
     fun get(alias: String): SecretKey?

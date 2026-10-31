@@ -66,6 +66,9 @@ interface ProfileStore {
 
     suspend fun ids(): Set<String>
 
+    /** The keys the stored credentials are sealed under. */
+    suspend fun credentialKeyIds(): Set<String>
+
     suspend fun insert(record: ProfileRecord)
 
     /** @return false when there is no record with that id. */
@@ -82,6 +85,8 @@ class RoomProfileStore(private val dao: ProfileDao) : ProfileStore {
 
     override suspend fun ids(): Set<String> = dao.ids().toSet()
 
+    override suspend fun credentialKeyIds(): Set<String> = dao.credentialKeyIds().toSet()
+
     override suspend fun insert(record: ProfileRecord) = dao.insert(record.toEntity())
 
     override suspend fun update(record: ProfileRecord): Boolean = dao.update(record.toEntity()) == 1
@@ -94,6 +99,7 @@ class RoomProfileStore(private val dao: ProfileDao) : ProfileStore {
         val ciphertext = credentialsCiphertext
         val iv = credentialsIv
         val format = credentialsFormat
+        val key = credentialsKey
         return ProfileRecord(
             id = id,
             name = name,
@@ -104,7 +110,11 @@ class RoomProfileStore(private val dao: ProfileDao) : ProfileStore {
             tlsServerName = tlsServerName,
             requiresSignIn = requiresSignIn,
             // A row with only part of the encrypted fields can't be decrypted; it reads as unreadable.
-            credentials = if (ciphertext != null && iv != null && format != null) SealedCredentials(format, iv, ciphertext) else null,
+            credentials = if (ciphertext != null && iv != null && format != null && key != null) {
+                SealedCredentials(format, key, iv, ciphertext)
+            } else {
+                null
+            },
             createdAtMillis = createdAtMillis,
             updatedAtMillis = updatedAtMillis,
         )
@@ -122,6 +132,7 @@ class RoomProfileStore(private val dao: ProfileDao) : ProfileStore {
         credentialsCiphertext = credentials?.ciphertext,
         credentialsIv = credentials?.iv,
         credentialsFormat = credentials?.formatVersion,
+        credentialsKey = credentials?.keyId,
         createdAtMillis = createdAtMillis,
         updatedAtMillis = updatedAtMillis,
     )

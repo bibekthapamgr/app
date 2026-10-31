@@ -37,7 +37,9 @@ import app.proxyflow.core.designsystem.component.BannerTone
 import app.proxyflow.core.designsystem.component.PfBanner
 import app.proxyflow.core.designsystem.component.PfChoiceChips
 import app.proxyflow.core.designsystem.component.PfConfirmDialog
+import app.proxyflow.core.designsystem.component.PfErrorState
 import app.proxyflow.core.designsystem.component.PfLoadingIndicator
+import app.proxyflow.core.designsystem.component.PfLoadingScreen
 import app.proxyflow.core.designsystem.component.PfPasswordField
 import app.proxyflow.core.designsystem.component.PfPrimaryButton
 import app.proxyflow.core.designsystem.component.PfSecondaryButton
@@ -115,10 +117,28 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
             PfTopAppBar(
                 title = title,
                 onBack = back,
-                actions = { PfTextButton(text = stringResource(R.string.edit_save), onClick = actions.onSave, enabled = !state.saving) },
+                actions = {
+                    PfTextButton(
+                        text = stringResource(R.string.edit_save),
+                        onClick = actions.onSave,
+                        enabled = !state.saving && !state.loading && !state.loadFailed,
+                    )
+                },
             )
         },
     ) { padding ->
+        if (state.loading) {
+            PfLoadingScreen(Modifier.padding(padding))
+            return@Scaffold
+        }
+        if (state.loadFailed) {
+            PfErrorState(
+                title = stringResource(R.string.edit_load_failed_title),
+                body = stringResource(R.string.edit_load_failed_body),
+                modifier = Modifier.padding(padding),
+            )
+            return@Scaffold
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -182,7 +202,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
         value = input.name,
         onValueChange = actions.onNameChange,
         label = stringResource(R.string.edit_name),
-        errorText = errors[ProfileField.Name]?.let { errorText(it) },
+        errorText = errors[ProfileField.Name]?.let { errorText(it, input.protocol) },
     )
     Text(stringResource(R.string.edit_protocol), style = MaterialTheme.typography.labelLarge)
     PfChoiceChips(
@@ -196,7 +216,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
             value = input.server,
             onValueChange = actions.onServerChange,
             label = stringResource(R.string.edit_server),
-            errorText = errors[ProfileField.Server]?.let { errorText(it) },
+            errorText = errors[ProfileField.Server]?.let { errorText(it, input.protocol) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
             modifier = Modifier.weight(0.64f),
         )
@@ -205,7 +225,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
             onValueChange = actions.onPortChange,
             label = stringResource(R.string.edit_port),
             supportingText = stringResource(R.string.edit_port_hint),
-            errorText = errors[ProfileField.Port]?.let { errorText(it) },
+            errorText = errors[ProfileField.Port]?.let { errorText(it, input.protocol) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.weight(0.36f),
         )
@@ -221,7 +241,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
             value = input.username,
             onValueChange = actions.onUsernameChange,
             label = stringResource(R.string.edit_username),
-            errorText = errors[ProfileField.Username]?.let { errorText(it) },
+            errorText = errors[ProfileField.Username]?.let { errorText(it, input.protocol) },
             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
             secret = true,
         )
@@ -239,7 +259,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
                 if (error == ProfileError.PasswordRequired && state.hasSavedPassword) {
                     stringResource(R.string.edit_password_reenter)
                 } else {
-                    errorText(error)
+                    errorText(error, input.protocol)
                 }
             },
         )
@@ -256,7 +276,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
             onValueChange = actions.onTlsServerNameChange,
             label = stringResource(R.string.edit_tls_server_name),
             supportingText = stringResource(R.string.edit_tls_server_name_hint),
-            errorText = errors[ProfileField.TlsServerName]?.let { errorText(it) },
+            errorText = errors[ProfileField.TlsServerName]?.let { errorText(it, input.protocol) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
         )
     } else {
@@ -270,7 +290,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
 }
 
 @Composable
-private fun errorText(error: ProfileError): String = stringResource(
+private fun errorText(error: ProfileError, protocol: ProxyProtocol): String = stringResource(
     when (error) {
         ProfileError.NameTooLong -> R.string.error_name_too_long
         ProfileError.ControlCharacters -> R.string.error_control_characters
@@ -278,10 +298,12 @@ private fun errorText(error: ProfileError): String = stringResource(
         ProfileError.PortOutOfRange -> R.string.error_port_range
         ProfileError.UsernameRequired -> R.string.error_username_required
         ProfileError.UsernameHasColon -> R.string.error_username_colon
-        ProfileError.UsernameTooLong -> R.string.error_username_too_long
+        ProfileError.UsernameTooLong ->
+            if (protocol == ProxyProtocol.SOCKS5) R.string.error_username_too_long else R.string.error_username_too_long_http
         ProfileError.PasswordWithoutUsername -> R.string.error_password_without_username
         ProfileError.PasswordRequired -> R.string.error_password_required
-        ProfileError.PasswordTooLong -> R.string.error_password_too_long
+        ProfileError.PasswordTooLong ->
+            if (protocol == ProxyProtocol.SOCKS5) R.string.error_password_too_long else R.string.error_password_too_long_http
         ProfileError.TlsServerNameInvalid -> R.string.error_tls_server_name
     },
 )

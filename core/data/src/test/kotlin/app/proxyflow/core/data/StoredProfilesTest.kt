@@ -125,7 +125,7 @@ class StoredProfilesTest {
                 }
             }
         }
-        assertTrue("the export has the profile", "203.0.113.10" in export)
+        assertTrue("the export has the profile, so the search below can find text", "203.0.113.10" in export)
         assertFalse(username in export)
         assertFalse(password in export)
         // Kept as evidence for the acceptance report (CI prints it with the build facts).
@@ -133,11 +133,11 @@ class StoredProfilesTest {
             "Test credentials, generated for this run only: username $username, password $password\n$sample",
         )
 
-        // The files themselves, including the write-ahead log, in the encodings SQLite and Java use.
+        // The files themselves, in the encodings SQLite and Java use: first while the database is open,
+        // when recent writes are still in the write-ahead log, then after closing folds them into the main file.
+        assertFilesHoldNoSecret(expectWal = true)
         opened.forEach { it.close() }
-        val files = context.getDatabasePath(dbName).parentFile!!.listFiles { f -> f.name.startsWith(dbName) }!!.toList()
-        assertTrue(files.isNotEmpty())
-        files.forEach { file -> assertNoSecret(file) }
+        assertFilesHoldNoSecret(expectWal = false)
     }
 
     @Test
@@ -149,7 +149,7 @@ class StoredProfilesTest {
 
         repository.delete(id)
         assertNull(repository.get(id))
-        assertFalse(AesGcmCredentialCipher.aliasFor(id) in keys.aliases())
+        assertFalse(AesGcmCredentialCipher.aliasFor(sealed.keyId) in keys.aliases())
         assertTrue(runCatching { AesGcmCredentialCipher(keys).open(id, sealed) }.isFailure)
         assertEquals("other-pw", String((repository.readCredentials(kept) as CredentialsRead.Available).password))
     }
@@ -166,11 +166,17 @@ class StoredProfilesTest {
         assertTrue(file.exists())
     }
 
-    private fun assertNoSecret(file: File) {
-        val bytes = file.readBytes()
-        for (secret in listOf(username, password)) {
-            for (charset in listOf(Charsets.UTF_8, Charsets.UTF_16LE, Charsets.UTF_16BE)) {
-                assertFalse("$secret in ${file.name} ($charset)", bytes.contains(secret.toByteArray(charset)))
+    /** No database file holds the username or password; together they do hold the server, so the search works. */
+    private fun assertFilesHoldNoSecret(expectWal: Boolean) {
+        val files = context.getDatabasePath(dbName).parentFile!!.listFiles { f -> f.name.startsWith(dbName) }!!.toList()
+        if (expectWal) assertTrue("write-ahead log present", files.any { it.name.endsWith("-wal") && it.length() > 0 })
+        val contents = files.associate { it.name to it.readBytes() }
+        assertTrue("the server is found", contents.values.any { it.contains("203.0.113.10".toByteArray()) })
+        for ((name, bytes) in contents) {
+            for (secret in listOf(username, password)) {
+                for (charset in listOf(Charsets.UTF_8, Charsets.UTF_16LE, Charsets.UTF_16BE)) {
+                    assertFalse("$secret in $name ($charset)", bytes.contains(secret.toByteArray(charset)))
+                }
             }
         }
     }
@@ -178,5 +184,5 @@ class StoredProfilesTest {
     private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
 
     private fun ByteArray.contains(slice: ByteArray): Boolean =
-        (0..size - slice.size).any { start -> slice.indices.all { this[start + it] == slice[it] } }
+        slice.size <= size && (0..size - slice.size).any { start -> slice.indices.all { this[start + it] == slice[it] } }
 }

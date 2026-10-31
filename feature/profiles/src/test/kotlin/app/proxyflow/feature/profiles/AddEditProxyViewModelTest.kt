@@ -2,6 +2,8 @@ package app.proxyflow.feature.profiles
 
 import androidx.lifecycle.SavedStateHandle
 import app.proxyflow.core.data.CredentialsRead
+import app.proxyflow.core.data.CredentialsUnavailableException
+import app.proxyflow.core.data.ProfileForEditing
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.data.crypto.AesGcmCredentialCipher
 import app.proxyflow.core.model.ConnectionTestResult
@@ -294,7 +296,7 @@ class AddEditProxyViewModelTest {
     @Test
     fun credentialsThatCantBeReadAreAskedForAgain() = runTest {
         val saved = repository.save(null, signIn)
-        profiles.keys.delete(AesGcmCredentialCipher.aliasFor(saved.id))
+        profiles.keys.delete(AesGcmCredentialCipher.aliasFor(profiles.store.get(saved.id)!!.credentials!!.keyId))
 
         val vm = viewModel(editing(saved.id))
         val state = vm.uiState.value
@@ -404,5 +406,63 @@ class AddEditProxyViewModelTest {
         vm.onPortChange("1080")
         vm.testConnection()
         assertEquals(ConnectionTestState.Done(ConnectionTestResult.Failed(AddEditProxyViewModel.INTERNAL_ERROR)), vm.uiState.value.test)
+    }
+
+    @Test
+    fun theFormWaitsForTheProfileAndIgnoresInputUntilThen() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        val gate = CompletableDeferred<Unit>()
+        val slow = object : ProfileRepository by repository {
+            override suspend fun loadForEditing(id: String): ProfileForEditing? {
+                gate.await()
+                return repository.loadForEditing(id)
+            }
+        }
+        val vm = viewModel(editing(saved.id), slow)
+        assertTrue(vm.uiState.value.loading)
+        vm.onServerChange("typed-too-early.example.com")
+        vm.save()
+        vm.testConnection()
+        assertTrue(tester.requests.isEmpty())
+
+        gate.complete(Unit)
+        val state = vm.uiState.value
+        assertFalse(state.loading)
+        assertEquals("the stored profile, not the form defaults", "proxy.example.com", state.input.server)
+        assertTrue(state.input.requiresSignIn)
+        assertEquals("user", state.input.username)
+        assertFalse(state.dirty)
+        assertFalse(state.saved)
+    }
+
+    @Test
+    fun aProfileThatCantBeReadIsShownAsSuchAndNeverSavedOver() = runTest {
+        val saved = repository.save(null, signIn)
+        val failing = object : ProfileRepository by repository {
+            override suspend fun loadForEditing(id: String): ProfileForEditing? = throw CredentialsUnavailableException()
+        }
+        val vm = viewModel(editing(saved.id), failing)
+        assertTrue(vm.uiState.value.loadFailed)
+        assertFalse(vm.uiState.value.loading)
+
+        vm.onRequiresSignInChange(false)
+        vm.save()
+        assertFalse(vm.uiState.value.saved)
+        assertTrue("sign-in and its key are untouched", repository.get(saved.id)!!.requiresSignIn)
+        assertEquals("secret", savedPassword(saved.id))
+    }
+
+    @Test
+    fun namesAreCutWithoutBreakingAnEmoji() {
+        val vm = viewModel()
+        vm.onNameChange("x".repeat(39) + "\uD83D\uDE00")
+        assertEquals("x".repeat(39), vm.uiState.value.input.name)
+    }
+
+    @Test
+    fun thePortTakesOnlyTheDigits0To9() {
+        val vm = viewModel()
+        vm.onPortChange("\u0661\u0660\u0668\u06601080")
+        assertEquals("1080", vm.uiState.value.input.port)
     }
 }

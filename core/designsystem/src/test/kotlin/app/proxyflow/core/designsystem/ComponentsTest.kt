@@ -74,8 +74,12 @@ class ComponentsTest {
         password.assert(SemanticsMatcher.keyNotDefined(SemanticsActions.CopyText))
         password.assert(SemanticsMatcher.keyNotDefined(SemanticsActions.CutText))
 
-        // The username field offers Copy, as someone would use it from the text toolbar, but nothing reaches the clipboard.
+        // The username field offers Copy and Cut, as the text toolbar does, but neither reaches the clipboard
+        // (Cut still removes the selected text).
         copyAll("Username", "office-user")
+        val username = compose.onNode(hasText("Username") and hasSetTextAction())
+        username.performTextInputSelection(TextRange(0, "office-user".length))
+        username.performSemanticsAction(SemanticsActions.CutText)
         compose.waitForIdle()
         assertFalse("nothing copied", clipboard.hasPrimaryClip() && clipboard.primaryClip?.getItemAt(0)?.text?.isNotEmpty() == true)
 

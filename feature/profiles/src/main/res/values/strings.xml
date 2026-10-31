@@ -40,6 +40,8 @@
     <string name="edit_password">Password</string>
     <string name="edit_password_keep">Leave empty to keep the saved password</string>
     <string name="edit_save_failed">Couldn\'t save this proxy. Try again.</string>
+    <string name="edit_load_failed_title">Couldn\'t open this proxy</string>
+    <string name="edit_load_failed_body">Its saved settings or sign-in couldn\'t be read just now. Nothing was changed. Go back and open it again.</string>
     <string name="edit_credentials_unreadable_title">Re-enter your username and password</string>
     <string name="edit_credentials_unreadable_body">The saved sign-in can\'t be read on this phone any more, so it isn\'t used. Enter it again.</string>
     <string name="edit_test">Test connection</string>
@@ -47,7 +49,7 @@
     <string name="edit_test_unavailable_title">Testing isn\'t available yet</string>
     <string name="edit_test_unavailable_body">Testing needs the connection engine, which comes in a later version. Nothing was sent to your proxy.</string>
     <string name="edit_test_passed_title">Test passed</string>
-    <string name="edit_test_passed_body">Your proxy accepted the sign-in and opened a test connection in %1$d ms.</string>
+    <string name="edit_test_passed_body">Your proxy opened a test connection in %1$d ms.</string>
     <string name="edit_test_failed_title">Test failed</string>
     <string name="edit_test_failed_body">The test stopped with %1$s.</string>
     <string name="edit_password_reenter">Enter the password again: the server, port, protocol, username or TLS setting changed</string>
@@ -68,15 +70,17 @@
     <string name="edit_discard">Discard</string>
 
     <!-- Validation messages (docs/m1/04 §5) -->
-    <string name="error_control_characters">Remove line breaks and other invisible characters</string>
+    <string name="error_control_characters">Remove line breaks and other invisible or broken characters</string>
     <string name="error_name_too_long">Use 40 characters or fewer</string>
     <string name="error_server_invalid">Enter a hostname or IP address (no spaces)</string>
     <string name="error_port_range">Port must be between 1 and 65535</string>
     <string name="error_username_required">Enter the username from your provider</string>
     <string name="error_username_colon">Usernames can\'t contain \":\" for HTTP proxies</string>
     <string name="error_username_too_long">Usernames can be at most 255 bytes for SOCKS5</string>
+    <string name="error_username_too_long_http">Usernames can be at most 1,024 bytes</string>
     <string name="error_password_without_username">Add a username for this password</string>
     <string name="error_password_required">Enter the password</string>
     <string name="error_password_too_long">Passwords can be at most 255 bytes for SOCKS5</string>
+    <string name="error_password_too_long_http">Passwords can be at most 1,024 bytes</string>
     <string name="error_tls_server_name">Enter a valid server name or leave empty</string>
 </resources>

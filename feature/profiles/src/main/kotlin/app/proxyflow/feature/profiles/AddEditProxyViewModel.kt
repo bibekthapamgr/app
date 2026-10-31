@@ -10,6 +10,7 @@ import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.CredentialState
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
+import app.proxyflow.core.model.ProfileNames
 import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
@@ -33,6 +34,10 @@ sealed interface ConnectionTestState {
 
 data class AddEditUiState(
     val isEdit: Boolean = false,
+    /** The profile being edited is still being read (from Room and the Keystore); the form is not shown yet. */
+    val loading: Boolean = false,
+    /** The profile could not be read (storage or Keystore failure); nothing can be edited or saved. */
+    val loadFailed: Boolean = false,
     val input: ProxyProfileInput = ProxyProfileInput(),
     /** Shown only after the first Save or Test attempt, then kept live while the user fixes them. */
     val errors: Map<ProfileField, ProfileError> = emptyMap(),
@@ -72,7 +77,12 @@ class AddEditProxyViewModel(
     /** Navigation argument (AddEditProxyDestination.profileId); null when adding. */
     private val profileId: String? = savedState[ARG_PROFILE_ID]
 
-    private val state = MutableStateFlow(AddEditUiState(isEdit = profileId != null, input = restore() ?: ProxyProfileInput()))
+    /** Whether this ViewModel restores a form from before process death; decided before any keystroke can change it. */
+    private val restored: Boolean = savedState.contains(KEY_SERVER)
+
+    private val state = MutableStateFlow(
+        AddEditUiState(isEdit = profileId != null, loading = profileId != null, input = restore() ?: ProxyProfileInput()),
+    )
     val uiState: StateFlow<AddEditUiState> = state.asStateFlow()
 
     private var initial: ProxyProfileInput = ProxyProfileInput()
@@ -82,10 +92,18 @@ class AddEditProxyViewModel(
     init {
         if (profileId != null) {
             viewModelScope.launch {
-                val editing = repository.loadForEditing(profileId)
+                val editing = try {
+                    repository.loadForEditing(profileId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Storage or Keystore failure: show it instead of a form that would save over the profile.
+                    state.update { it.copy(loading = false, loadFailed = true) }
+                    return@launch
+                }
                 if (editing == null) {
                     // Deleted meanwhile: offer what was restored as a new profile, and let Back ask before discarding it.
-                    state.update { it.copy(isEdit = false) }
+                    state.update { it.copy(isEdit = false, loading = false) }
                     refresh()
                     return@launch
                 }
@@ -93,8 +111,9 @@ class AddEditProxyViewModel(
                 state.update { s ->
                     // After rotation or process death the restored fields win over the stored profile,
                     // except the username, which is not kept in saved state.
-                    val input = if (savedState.contains(KEY_SERVER)) s.input.copy(username = initial.username) else initial
+                    val input = if (restored) s.input.copy(username = initial.username) else initial
                     s.copy(
+                        loading = false,
                         input = input,
                         hasSavedPassword = editing.credentials == CredentialState.Saved,
                         credentialsUnreadable = editing.credentials == CredentialState.Unreadable,
@@ -108,13 +127,13 @@ class AddEditProxyViewModel(
         }
     }
 
-    fun onNameChange(value: String) = edit { it.copy(name = value.take(ProfileValidator.MAX_NAME_LENGTH)) }
+    fun onNameChange(value: String) = edit { it.copy(name = ProfileNames.truncate(value, ProfileValidator.MAX_NAME_LENGTH)) }
 
     fun onProtocolChange(value: ProxyProtocol) = edit { it.copy(protocol = value) }
 
     fun onServerChange(value: String) = edit { it.copy(server = value) }
 
-    fun onPortChange(value: String) = edit { it.copy(port = value.filter(Char::isDigit).take(5)) }
+    fun onPortChange(value: String) = edit { it.copy(port = value.filter { c -> c in '0'..'9' }.take(5)) }
 
     fun onRequiresSignInChange(value: Boolean) = edit { it.copy(requiresSignIn = value) }
 
@@ -128,7 +147,7 @@ class AddEditProxyViewModel(
 
     fun save() {
         val current = state.value
-        if (current.saving || current.saved || !passesValidation()) return
+        if (current.loading || current.loadFailed || current.saving || current.saved || !passesValidation()) return
         state.update { it.copy(saving = true, saveFailed = false) }
         // A profile that no longer exists is saved as a new one, under a new id.
         val id = profileId.takeIf { current.isEdit }
@@ -149,7 +168,8 @@ class AddEditProxyViewModel(
 
     /** Tests the form as it is now. Only the tester's own answer is shown; nothing else ever reports success. */
     fun testConnection() {
-        if (state.value.test == ConnectionTestState.Testing || !passesValidation()) return
+        val current = state.value
+        if (current.loading || current.loadFailed || current.test == ConnectionTestState.Testing || !passesValidation()) return
         val input = state.value.input
         val id = profileId.takeIf { state.value.isEdit }
         state.update { it.copy(test = ConnectionTestState.Testing) }
@@ -178,6 +198,8 @@ class AddEditProxyViewModel(
     }
 
     private fun edit(transform: (ProxyProfileInput) -> ProxyProfileInput) {
+        // Nothing to edit until the profile is read; the screen shows no fields meanwhile.
+        if (state.value.loading || state.value.loadFailed) return
         testJob?.cancel()
         state.update { it.copy(input = transform(it.input), test = ConnectionTestState.Idle, saveFailed = false) }
         persist(state.value.input)

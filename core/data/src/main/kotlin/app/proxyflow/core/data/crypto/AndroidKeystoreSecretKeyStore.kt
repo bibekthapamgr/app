@@ -16,8 +16,9 @@ import javax.crypto.SecretKey
 class AndroidKeystoreSecretKeyStore : SecretKeyStore {
     private val keyStore: KeyStore by lazy { KeyStore.getInstance(PROVIDER).apply { load(null) } }
 
+    /** Generating under an alias that exists replaces that key. */
     @Synchronized
-    override fun getOrCreate(alias: String): SecretKey = get(alias) ?: generate(alias)
+    override fun create(alias: String): SecretKey = generate(alias)
 
     @Synchronized
     override fun get(alias: String): SecretKey? = keyStore.getKey(alias, null) as SecretKey?

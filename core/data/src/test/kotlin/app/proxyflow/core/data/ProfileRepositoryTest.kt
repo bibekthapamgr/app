@@ -14,11 +14,13 @@ import app.proxyflow.core.testing.InMemoryActiveProfileStore
 import app.proxyflow.core.testing.InMemoryProfileStore
 import app.proxyflow.core.testing.SoftwareSecretKeyStore
 import app.proxyflow.core.testing.TestProfiles
+import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -39,6 +41,11 @@ class ProfileRepositoryTest {
         password = "office-pass",
     )
     private val home = ProxyProfileInput(name = "Home", server = "socks.example.net", port = "1080")
+
+    /** The Keystore alias of the key [profileId]'s credentials are sealed under now. */
+    private suspend fun keyAliasOf(profileId: String) = AesGcmCredentialCipher.aliasFor(profiles.store.get(profileId)!!.credentials!!.keyId)
+
+    private suspend fun password(profileId: String) = String((repo.readCredentials(profileId) as CredentialsRead.Available).password)
 
     @Test
     fun invalidFormsAreNeverSaved() = runTest {
@@ -77,7 +84,8 @@ class ProfileRepositoryTest {
         val stored = sealed.ciphertext.decodeToString(throwOnInvalidSequence = false)
         assertFalse("office-user" in stored)
         assertFalse("office-pass" in stored)
-        assertEquals(setOf(AesGcmCredentialCipher.aliasFor("p1")), profiles.keys.aliases())
+        assertEquals("k1", sealed.keyId)
+        assertEquals(setOf(AesGcmCredentialCipher.aliasFor("k1")), profiles.keys.aliases())
 
         val read = repo.readCredentials("p1") as CredentialsRead.Available
         assertEquals("office-user", String(read.username))
@@ -122,15 +130,17 @@ class ProfileRepositoryTest {
         repo.save(null, home)
         repo.save(null, office.copy(name = "Backup", username = "backup-user", password = "backup-pass"))
         val othersBefore = profiles.store.records.value.filter { it.id != "p1" }
-        val keysBefore = listOf("p2", "p3").associateWith { profiles.keys.get(AesGcmCredentialCipher.aliasFor(it)) }
+        val otherKeys = othersBefore.mapNotNull { it.credentials?.keyId }.map(AesGcmCredentialCipher::aliasFor)
+        val keysBefore = otherKeys.associateWith { profiles.keys.get(it) }
+        assertEquals(1, keysBefore.size)
 
         repo.save("p1", office.copy(name = "Office (moved)", server = "198.51.100.7", password = "changed"))
         repo.duplicate("p1", "Office copy")
         repo.delete("p4")
 
         assertEquals(othersBefore, profiles.store.records.value.filter { it.id != "p1" })
-        assertEquals(keysBefore, listOf("p2", "p3").associateWith { profiles.keys.get(AesGcmCredentialCipher.aliasFor(it)) })
-        assertEquals("backup-pass", String((repo.readCredentials("p3") as CredentialsRead.Available).password))
+        assertEquals(keysBefore, otherKeys.associateWith { profiles.keys.get(it) })
+        assertEquals("backup-pass", password("p3"))
     }
 
     @Test
@@ -145,6 +155,84 @@ class ProfileRepositoryTest {
         val leftover = runCatching { AesGcmCredentialCipher(profiles.keys).open("p1", sealed) }.exceptionOrNull()
         assertTrue(leftover is CredentialUnreadableException)
         assertEquals(CredentialsRead.NoSuchProfile, repo.readCredentials("p1"))
+    }
+
+    @Test
+    fun changingTheCredentialsMakesTheOldCiphertextUnreadable() = runTest {
+        repo.save(null, office.copy(password = "old-pass"))
+        val old = profiles.store.get("p1")!!.credentials!!
+
+        repo.save("p1", office.copy(password = "new-pass"))
+        val new = profiles.store.get("p1")!!.credentials!!
+        assertNotEquals("sealed under a new key", old.keyId, new.keyId)
+        assertEquals("only the new key is left", setOf(AesGcmCredentialCipher.aliasFor(new.keyId)), profiles.keys.aliases())
+        // A copy of the old ciphertext (say, left in a free database page) can't be decrypted any more.
+        assertTrue(runCatching { profiles.cipher.open("p1", old) }.exceptionOrNull() is CredentialUnreadableException)
+        assertEquals("new-pass", password("p1"))
+
+        repo.save("p1", office.copy(name = "Renamed", password = ""))
+        assertEquals("kept for a rename: no new key", new, profiles.store.get("p1")!!.credentials)
+    }
+
+    @Test
+    fun aKeyAndroidRejectsIsReplacedWhenTheSignInIsEnteredAgain() = runTest {
+        repo.save(null, office)
+        val broken = keyAliasOf("p1")
+        // An invalidated Keystore key: it is still there, but the cipher refuses it.
+        profiles.keys.put(broken, SecretKeySpec(ByteArray(5), "AES"))
+
+        assertEquals(CredentialState.Unreadable, repo.loadForEditing("p1")!!.credentials)
+        assertEquals(CredentialsRead.Unreadable, repo.readCredentials("p1"))
+
+        repo.save("p1", office.copy(password = "typed-again"))
+        assertEquals("typed-again", password("p1"))
+        assertFalse("the rejected key is deleted", broken in profiles.keys.aliases())
+        assertEquals(setOf(keyAliasOf("p1")), profiles.keys.aliases())
+    }
+
+    @Test
+    fun aFailedWriteLeavesTheStoredCredentialsAndNoNewKey() = runTest {
+        repo.save(null, office)
+        val before = profiles.store.get("p1")!!.credentials
+        val failing = object : ProfileStore by profiles.store {
+            override suspend fun update(record: ProfileRecord): Boolean = throw IllegalStateException("disk full")
+        }
+        val repository = DefaultProfileRepository(failing, profiles.cipher, profiles.active, cryptoDispatcher = UnconfinedTestDispatcher())
+
+        assertTrue(runCatching { repository.save("p1", office.copy(password = "new-pass")) }.isFailure)
+        assertEquals(before, profiles.store.get("p1")!!.credentials)
+        assertEquals("the new key is gone again", setOf(keyAliasOf("p1")), profiles.keys.aliases())
+        assertEquals("office-pass", password("p1"))
+    }
+
+    @Test
+    fun aTemporaryKeystoreFailureNeverCopiesOrDropsCredentials() = runTest {
+        repo.save(null, office)
+        val busy = object : CredentialCipher by profiles.cipher {
+            override fun open(profileId: String, sealed: SealedCredentials): ByteArray =
+                throw CredentialUnreadableException(permanent = false, "busy")
+        }
+        val repository =
+            DefaultProfileRepository(profiles.store, busy, profiles.active, newId = {
+                "copy"
+            }, cryptoDispatcher = UnconfinedTestDispatcher())
+        val keysBefore = profiles.keys.aliases()
+
+        assertTrue(runCatching { repository.duplicate("p1", "Office (copy)") }.exceptionOrNull() is CredentialsUnavailableException)
+        assertTrue(runCatching { repository.loadForEditing("p1") }.exceptionOrNull() is CredentialsUnavailableException)
+        assertEquals(CredentialsRead.TemporarilyUnavailable, repository.readCredentials("p1"))
+        // A rename can't tell whether the saved password may be kept: it fails instead of asking for the password.
+        assertTrue(
+            runCatching {
+                repository.save("p1", office.copy(name = "Renamed", password = ""))
+            }.exceptionOrNull() is CredentialsUnavailableException,
+        )
+        assertEquals(listOf("Office"), profiles.store.records.value.map { it.name })
+        assertEquals(keysBefore, profiles.keys.aliases())
+
+        // A newly typed password does not need the old one.
+        repository.save("p1", office.copy(password = "typed-again"))
+        assertEquals("typed-again", password("p1"))
     }
 
     @Test
@@ -177,9 +265,19 @@ class ProfileRepositoryTest {
     }
 
     @Test
+    fun aCopyNameIsValidatedLikeATypedOne() = runTest {
+        repo.save(null, office)
+        val error = runCatching { repo.duplicate("p1", "Office\ncopy") }.exceptionOrNull() as InvalidProfileException
+        assertEquals(ProfileError.ControlCharacters, error.errors[ProfileField.Name])
+        val tooLong = repo.duplicate("p1", "x".repeat(39) + "\uD83D\uDE00")!!
+        assertEquals("cut before the emoji, never inside it", "x".repeat(39), tooLong.name)
+        assertEquals(2, profiles.store.records.value.size)
+    }
+
+    @Test
     fun lostKeysMakeCredentialsUnreadableNeverEmptyOrWrong() = runTest {
         repo.save(null, office)
-        profiles.keys.delete(AesGcmCredentialCipher.aliasFor("p1"))
+        profiles.keys.delete(keyAliasOf("p1"))
 
         val editing = repo.loadForEditing("p1")!!
         assertEquals(CredentialState.Unreadable, editing.credentials)
@@ -192,7 +290,7 @@ class ProfileRepositoryTest {
         assertEquals("typed-again", String((repo.readCredentials("p1") as CredentialsRead.Available).password))
 
         val copy = repo.duplicate("p1", "copy")!!
-        profiles.keys.delete(AesGcmCredentialCipher.aliasFor("p1"))
+        profiles.keys.delete(keyAliasOf("p1"))
         val copyOfUnreadable = repo.duplicate("p1", "copy 2")!!
         assertTrue(copyOfUnreadable.requiresSignIn)
         assertEquals(CredentialState.Unreadable, repo.loadForEditing(copyOfUnreadable.id)!!.credentials)
@@ -213,7 +311,11 @@ class ProfileRepositoryTest {
         assertTrue(repository.readCredentials("p1") is CredentialsRead.Available)
 
         failures = 2
-        assertEquals("then gives up: H3", CredentialsRead.Unreadable, repository.readCredentials("p1"))
+        assertEquals(
+            "twice: reported as temporary, never as unreadable (H3)",
+            CredentialsRead.TemporarilyUnavailable,
+            repository.readCredentials("p1"),
+        )
     }
 
     @Test
@@ -236,7 +338,21 @@ class ProfileRepositoryTest {
     }
 
     @Test
-    fun keysWithoutAProfileAreDeletedAtStart() = runTest {
+    fun onlyAnExplicitChoiceIsReportedAsChosen() = runTest {
+        repo.save(null, office)
+        repo.save(null, home)
+        assertEquals("p1", repo.activeProfileId.first())
+        assertNull("shown as active, but never chosen", repo.chosenProfileId.first())
+
+        repo.setActive("p2")
+        assertEquals("p2", repo.chosenProfileId.first())
+        repo.delete("p2")
+        assertNull("no fallback for a connection started without the user", repo.chosenProfileId.first())
+        assertEquals("p1", repo.activeProfileId.first())
+    }
+
+    @Test
+    fun keysNoCredentialsUseAreDeletedAtStart() = runTest {
         val keys = SoftwareSecretKeyStore()
         val store = InMemoryProfileStore()
         val repository = DefaultProfileRepository(
@@ -247,11 +363,15 @@ class ProfileRepositoryTest {
             cryptoDispatcher = UnconfinedTestDispatcher(),
         )
         repository.save(null, office)
+        val used = AesGcmCredentialCipher.aliasFor(store.get("kept")!!.credentials!!.keyId)
+        // Left behind by a delete or a password change interrupted before the old key was deleted.
         AesGcmCredentialCipher(keys).seal("deleted-profile", byteArrayOf(1))
+        AesGcmCredentialCipher(keys).seal("kept", byteArrayOf(2))
 
-        assertEquals(1, repository.deleteOrphanedKeys())
-        assertEquals(setOf(AesGcmCredentialCipher.aliasFor("kept")), keys.aliases())
+        assertEquals(2, repository.deleteOrphanedKeys())
+        assertEquals(setOf(used), keys.aliases())
         assertEquals(0, repository.deleteOrphanedKeys())
+        assertEquals("office-pass", String((repository.readCredentials("kept") as CredentialsRead.Available).password))
     }
 
     @Test

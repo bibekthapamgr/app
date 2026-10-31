@@ -7,6 +7,7 @@ import app.proxyflow.core.data.crypto.SealedCredentials
 import app.proxyflow.core.model.CredentialState
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
+import app.proxyflow.core.model.ProfileNames
 import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
@@ -27,31 +28,54 @@ interface ProfileRepository {
     /** Every profile, oldest first. */
     val profiles: Flow<List<ProxyProfile>>
 
-    /** The profile the user chose, or the oldest one when that one is gone; null when there are none. */
+    /**
+     * The profile the screens show as active: the one the user chose, or the
+     * oldest one when there is no choice; null when there are no profiles.
+     */
     val activeProfileId: Flow<String?>
+
+    /**
+     * Only the profile the user explicitly chose ("Use this proxy"), while it
+     * exists; never a fallback. A connection started without the user present
+     * (Always-on VPN, M5) uses this, so it never goes through a proxy the user
+     * did not pick.
+     */
+    val chosenProfileId: Flow<String?>
 
     suspend fun get(id: String): ProxyProfile?
 
-    /** [id]'s settings and decrypted username for the edit form, never its password; null when it is gone. */
+    /**
+     * [id]'s settings and decrypted username for the edit form, never its password; null when it is gone.
+     * @throws CredentialsUnavailableException when the Keystore failed twice in a row; nothing changed.
+     */
     suspend fun loadForEditing(id: String): ProfileForEditing?
 
     /**
      * Validates [input] and saves it under [id], or as a new profile when [id] is
-     * null or no longer exists. A non-empty password replaces the saved one. An
-     * empty password keeps the saved one only while protocol, server, port,
-     * username and TLS settings are unchanged
+     * null or no longer exists. A non-empty password replaces the saved one and is
+     * sealed under a new key; the old key is then deleted, so the old credentials
+     * can never be decrypted again. An empty password keeps the saved one only
+     * while protocol, server, port, username and TLS settings are unchanged
      * ([ProxyProfileInput.sameCredentialTargetAs]), so a password is never sent
-     * to a proxy it was not saved for. Turning sign-in off deletes the profile's
-     * key, which makes its old credentials unreadable.
+     * to a proxy it was not saved for. Turning sign-in off deletes the key.
      *
      * @throws InvalidProfileException when [input] does not pass [ProfileValidator]; nothing is saved.
+     * @throws CredentialsUnavailableException when the password was left empty and the Keystore
+     *   failed twice in a row, so whether the saved one may be kept can't be decided; nothing is saved.
      */
     suspend fun save(id: String?, input: ProxyProfileInput): ProxyProfile
 
-    /** Copies [id] (settings, username and password) as a new profile named [name]; null when [id] is gone. */
+    /**
+     * Copies [id] (settings, username and password) as a new profile named [name],
+     * its credentials sealed under a key of its own; null when [id] is gone.
+     * Credentials that can't be read are not copied: the copy asks for them, like the original.
+     *
+     * @throws InvalidProfileException when [name] is not a valid profile name.
+     * @throws CredentialsUnavailableException when the Keystore failed twice in a row; nothing is saved.
+     */
     suspend fun duplicate(id: String, name: String): ProxyProfile?
 
-    /** Deletes the profile, its encrypted credentials and its Keystore key. */
+    /** Deletes the profile, its encrypted credentials and their Keystore key. */
     suspend fun delete(id: String)
 
     suspend fun setActive(id: String)
@@ -71,6 +95,9 @@ sealed interface CredentialsRead {
     /** They can't be decrypted (ADR-0006); connecting reports `CREDENTIAL_UNREADABLE` (board H3). */
     data object Unreadable : CredentialsRead
 
+    /** The Keystore failed twice in a row; the credentials may well be fine. Try again later. */
+    data object TemporarilyUnavailable : CredentialsRead
+
     class Available(val username: CharArray, val password: CharArray) : CredentialsRead {
         fun wipe() {
             username.fill('\u0000')
@@ -84,12 +111,15 @@ sealed interface CredentialsRead {
 /** [ProfileRepository.save] was given a form that does not pass [ProfileValidator]. */
 class InvalidProfileException(val errors: Map<ProfileField, ProfileError>) : IllegalArgumentException("invalid profile: ${errors.keys}")
 
+/** The Android Keystore failed twice in a row, so the saved credentials could not be read just now. Nothing was changed. */
+class CredentialsUnavailableException : IllegalStateException("the Keystore is not available right now")
+
 /**
  * Profiles in a [ProfileStore] (Room in the app), credentials encrypted with
- * [CredentialCipher] (one Android Keystore key per profile, ADR-0006), the
- * chosen profile in [ActiveProfileStore] (DataStore). Writes are serialized,
- * and every decryption and key operation runs on [cryptoDispatcher], never
- * on the main thread.
+ * [CredentialCipher] (a new Android Keystore key for every set of credentials,
+ * ADR-0006), the chosen profile in [ActiveProfileStore] (DataStore). Writes are
+ * serialized, and every decryption and key operation runs on [cryptoDispatcher],
+ * never on the main thread.
  */
 class DefaultProfileRepository(
     private val store: ProfileStore,
@@ -103,6 +133,10 @@ class DefaultProfileRepository(
 
     override val profiles: Flow<List<ProxyProfile>> = store.observeAll().map { records -> records.map { it.toProfile() } }
 
+    override val chosenProfileId: Flow<String?> = combine(store.observeAll(), active.activeId) { records, chosen ->
+        chosen?.takeIf { id -> records.any { it.id == id } }
+    }.distinctUntilChanged()
+
     override val activeProfileId: Flow<String?> = combine(store.observeAll(), active.activeId) { records, chosen ->
         chosen?.takeIf { id -> records.any { it.id == id } } ?: records.firstOrNull()?.id
     }.distinctUntilChanged()
@@ -113,71 +147,77 @@ class DefaultProfileRepository(
         val record = store.get(id) ?: return null
         val profile = record.toProfile()
         if (!record.requiresSignIn) return ProfileForEditing(profile, ProxyProfileInput.from(profile), CredentialState.NotRequired)
-        val opened = open(record) ?: return ProfileForEditing(profile, ProxyProfileInput.from(profile), CredentialState.Unreadable)
-        val (username, password) = opened
-        password.fill('\u0000')
-        val input = ProxyProfileInput.from(profile, String(username))
-        username.fill('\u0000')
-        return ProfileForEditing(profile, input, CredentialState.Saved)
+        return when (val opened = open(record)) {
+            is Opened.Available -> {
+                val input = ProxyProfileInput.from(profile, String(opened.username))
+                opened.wipe()
+                ProfileForEditing(profile, input, CredentialState.Saved)
+            }
+            Opened.Unreadable -> ProfileForEditing(profile, ProxyProfileInput.from(profile), CredentialState.Unreadable)
+            Opened.Unavailable -> throw CredentialsUnavailableException()
+        }
     }
 
     override suspend fun save(id: String?, input: ProxyProfileInput): ProxyProfile = writes.withLock {
         val existing = id?.let { store.get(it) }
-        val saved = existing?.takeIf { it.requiresSignIn }?.let { open(it) }
+        val saved = if (existing != null && existing.requiresSignIn) open(existing) else null
         try {
+            val savedUsername = (saved as? Opened.Available)?.username
             val keepsSavedPassword = existing != null &&
-                saved != null &&
+                savedUsername != null &&
                 input.password.isEmpty() &&
-                input.sameCredentialTargetAs(ProxyProfileInput.from(existing.toProfile(), String(saved.first)))
+                input.sameCredentialTargetAs(ProxyProfileInput.from(existing.toProfile(), String(savedUsername)))
+            // Whether the saved password may be kept can't be decided without reading it: never guess.
+            if (saved == Opened.Unavailable && input.requiresSignIn && input.password.isEmpty()) throw CredentialsUnavailableException()
+
             val errors = ProfileValidator.validate(input, savedPasswordKept = keepsSavedPassword)
             if (errors.isNotEmpty()) throw InvalidProfileException(errors)
 
             val profileId = existing?.id ?: newId()
             val now = clock()
             val profile = input.toProfile(profileId, createdAtMillis = existing?.createdAtMillis ?: now, updatedAtMillis = now)
+            val previous = existing?.credentials
             val credentials = when {
                 !input.requiresSignIn -> null
-                keepsSavedPassword -> existing?.credentials
+                keepsSavedPassword -> previous
                 else -> seal(profileId, input.username.toCharArray(), input.password.toCharArray())
             }
-            val record = ProfileRecord.of(profile, credentials)
-            if (existing == null) store.insert(record) else check(store.update(record)) { "profile disappeared while saving" }
-            // Sign-in turned off: without its key, the old ciphertext can never be read again.
-            if (!input.requiresSignIn) deleteKeyQuietly(profileId)
+            writeSealed(credentials, previous) {
+                val record = ProfileRecord.of(profile, credentials)
+                if (existing == null) store.insert(record) else check(store.update(record)) { "profile disappeared while saving" }
+            }
             profile
         } finally {
-            saved?.let { (username, password) ->
-                username.fill('\u0000')
-                password.fill('\u0000')
-            }
+            (saved as? Opened.Available)?.wipe()
         }
     }
 
     override suspend fun duplicate(id: String, name: String): ProxyProfile? = writes.withLock {
         val source = store.get(id) ?: return@withLock null
+        val copyName = ProfileNames.truncate(name.trim(), ProfileValidator.MAX_NAME_LENGTH)
+        ProfileValidator.nameError(copyName)?.let { throw InvalidProfileException(mapOf(ProfileField.Name to it)) }
         val copyId = newId()
         val now = clock()
-        // Unreadable credentials are not copied; the copy then asks for them like the original does.
-        val credentials = if (source.requiresSignIn) {
-            open(source)?.let { (username, password) ->
-                seal(copyId, username, password)
-            }
-        } else {
+        val credentials = if (!source.requiresSignIn) {
             null
+        } else {
+            when (val opened = open(source)) {
+                // seal() wipes the decrypted arrays.
+                is Opened.Available -> seal(copyId, opened.username, opened.password)
+                // Not copied: the copy asks for them again, like the original does.
+                Opened.Unreadable -> null
+                Opened.Unavailable -> throw CredentialsUnavailableException()
+            }
         }
-        val copy = source.toProfile().copy(
-            id = copyId,
-            name = name.trim().take(ProfileValidator.MAX_NAME_LENGTH),
-            createdAtMillis = now,
-            updatedAtMillis = now,
-        )
-        store.insert(ProfileRecord.of(copy, credentials))
+        val copy = source.toProfile().copy(id = copyId, name = copyName, createdAtMillis = now, updatedAtMillis = now)
+        writeSealed(credentials, previous = null) { store.insert(ProfileRecord.of(copy, credentials)) }
         copy
     }
 
     override suspend fun delete(id: String) = writes.withLock {
+        val record = store.get(id)
         store.delete(id)
-        deleteKeyQuietly(id)
+        record?.credentials?.let { deleteKeyQuietly(it.keyId) }
         if (active.activeId.first() == id) active.set(null)
     }
 
@@ -188,22 +228,42 @@ class DefaultProfileRepository(
     override suspend fun readCredentials(id: String): CredentialsRead {
         val record = store.get(id) ?: return CredentialsRead.NoSuchProfile
         if (!record.requiresSignIn) return CredentialsRead.NotRequired
-        val (username, password) = open(record) ?: return CredentialsRead.Unreadable
-        return CredentialsRead.Available(username, password)
+        return when (val opened = open(record)) {
+            is Opened.Available -> CredentialsRead.Available(opened.username, opened.password)
+            Opened.Unreadable -> CredentialsRead.Unreadable
+            Opened.Unavailable -> CredentialsRead.TemporarilyUnavailable
+        }
     }
 
     /**
-     * Deletes keys whose profile no longer exists, left behind when the app
-     * stopped between deleting a profile and deleting its key. Run at start.
+     * Deletes keys no stored credentials use: left behind when the app stopped
+     * between replacing or deleting credentials and deleting their old key, or
+     * keys Android could not delete at the time. Run at start.
      * @return how many keys were deleted.
      */
     suspend fun deleteOrphanedKeys(): Int = writes.withLock {
-        val orphans = withContext(cryptoDispatcher) { cipher.profilesWithKeys() } - store.ids()
+        val orphans = withContext(cryptoDispatcher) { cipher.keyIds() } - store.credentialKeyIds()
         orphans.forEach { deleteKeyQuietly(it) }
         orphans.size
     }
 
-    /** Encrypts and wipes [username] and [password]. */
+    /**
+     * Runs [write], which stores [credentials] in place of [previous], then deletes
+     * the key [previous] was sealed under. If [write] fails, the new key is deleted
+     * instead and the stored data is as it was.
+     */
+    private suspend fun writeSealed(credentials: SealedCredentials?, previous: SealedCredentials?, write: suspend () -> Unit) {
+        val newKey = credentials?.keyId?.takeIf { it != previous?.keyId }
+        try {
+            write()
+        } catch (e: Exception) {
+            newKey?.let { deleteKeyQuietly(it) }
+            throw e
+        }
+        previous?.keyId?.takeIf { it != credentials?.keyId }?.let { deleteKeyQuietly(it) }
+    }
+
+    /** Encrypts under a new key, and wipes [username] and [password]. */
     private suspend fun seal(profileId: String, username: CharArray, password: CharArray): SealedCredentials =
         withContext(cryptoDispatcher) {
             val plaintext = CredentialCodec.encode(username, password)
@@ -216,37 +276,49 @@ class DefaultProfileRepository(
             }
         }
 
-    /**
-     * The decrypted username and password, or null when they can't be read.
-     * A failure that may be temporary is tried once more (ADR-0006).
-     */
-    private suspend fun open(record: ProfileRecord): Pair<CharArray, CharArray>? {
-        val sealed = record.credentials ?: return null
+    /** Decrypted credentials, or why there are none. A failure that may be temporary is tried once more (ADR-0006). */
+    private sealed interface Opened {
+        class Available(val username: CharArray, val password: CharArray) : Opened {
+            fun wipe() {
+                username.fill('\u0000')
+                password.fill('\u0000')
+            }
+        }
+
+        /** Can never be decrypted: a missing or invalidated key, changed data, an unknown format. */
+        data object Unreadable : Opened
+
+        /** The Keystore failed twice in a row in a way that may pass; nothing is known about the data. */
+        data object Unavailable : Opened
+    }
+
+    private suspend fun open(record: ProfileRecord): Opened {
+        val sealed = record.credentials ?: return Opened.Unreadable
         return withContext(cryptoDispatcher) {
-            var result: Pair<CharArray, CharArray>? = null
             for (attempt in 1..2) {
                 val plaintext = try {
                     cipher.open(record.id, sealed)
                 } catch (e: CredentialUnreadableException) {
-                    if (e.permanent) break else continue
+                    if (e.permanent) return@withContext Opened.Unreadable
+                    continue
                 }
-                result = try {
-                    CredentialCodec.decode(plaintext)
+                return@withContext try {
+                    val (username, password) = CredentialCodec.decode(plaintext)
+                    Opened.Available(username, password)
                 } catch (e: IllegalArgumentException) {
-                    null
+                    Opened.Unreadable
                 } finally {
                     plaintext.fill(0)
                 }
-                break
             }
-            result
+            Opened.Unavailable
         }
     }
 
-    private suspend fun deleteKeyQuietly(profileId: String) {
+    private suspend fun deleteKeyQuietly(keyId: String) {
         withContext(cryptoDispatcher) {
             // A key that can't be deleted now is deleted by deleteOrphanedKeys() at the next start.
-            runCatching { cipher.deleteKey(profileId) }
+            runCatching { cipher.deleteKey(keyId) }
         }
     }
 }

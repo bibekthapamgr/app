@@ -162,6 +162,15 @@ class AddEditProxyScreenTest {
         compose.onNodeWithText("87 ms", substring = true).performScrollTo().assertIsDisplayed()
     }
 
+    @Test
+    fun aProfileThatCantBeReadOffersNoFormAndNoSave() {
+        showForm(AddEditUiState(isEdit = true, loadFailed = true))
+        compose.onNodeWithText("Couldn't open this proxy").assertIsDisplayed()
+        compose.onNodeWithText("Nothing was changed", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Server").assertDoesNotExist()
+        compose.onNodeWithText("Save").assertIsNotEnabled()
+    }
+
     private companion object {
         const val REENTER = "Enter the password again: the server, port, protocol, username or TLS setting changed"
     }

@@ -27,6 +27,8 @@ class InMemoryProfileStore : ProfileStore {
 
     override suspend fun ids(): Set<String> = records.value.map { it.id }.toSet()
 
+    override suspend fun credentialKeyIds(): Set<String> = records.value.mapNotNull { it.credentials?.keyId }.toSet()
+
     override suspend fun insert(record: ProfileRecord) = records.update { list ->
         require(list.none { it.id == record.id }) { "duplicate id" }
         (list + record).sortedWith(compareBy({ it.createdAtMillis }, { it.id }))
@@ -52,8 +54,15 @@ class SoftwareSecretKeyStore : SecretKeyStore {
     private val keys = mutableMapOf<String, SecretKey>()
 
     @Synchronized
-    override fun getOrCreate(alias: String): SecretKey = keys.getOrPut(alias) {
-        KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+    override fun create(alias: String): SecretKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey().also {
+        keys[alias] =
+            it
+    }
+
+    /** Puts [key] under [alias], for example a key the cipher will reject, as Android does with an invalidated one. */
+    @Synchronized
+    fun put(alias: String, key: SecretKey) {
+        keys[alias] = key
     }
 
     @Synchronized
@@ -79,8 +88,8 @@ class InMemoryActiveProfileStore(initial: String? = null) : ActiveProfileStore {
 
 /**
  * The app's real repository rules on in-memory storage and software keys, for
- * ViewModel and UI tests. Ids are "p1", "p2"…; time starts at 1 000 and moves
- * one second per write.
+ * ViewModel and UI tests. Profile ids are "p1", "p2"…, key ids "k1", "k2"…; time
+ * starts at 1 000 and moves one second per write.
  */
 class TestProfiles(
     val store: InMemoryProfileStore = InMemoryProfileStore(),
@@ -89,11 +98,14 @@ class TestProfiles(
     dispatcher: CoroutineDispatcher = UnconfinedTestDispatcher(),
 ) {
     private var nextId = 0
+    private var nextKey = 0
     private var now = 0L
+
+    val cipher = AesGcmCredentialCipher(keys, newKeyId = { "k${++nextKey}" })
 
     val repository = DefaultProfileRepository(
         store = store,
-        cipher = AesGcmCredentialCipher(keys),
+        cipher = cipher,
         active = active,
         clock = { 1_000L * ++now },
         newId = { "p${++nextId}" },
