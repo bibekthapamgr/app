@@ -233,13 +233,19 @@ timeout 30 adb logcat -c || true
 # Logcat streamed to the runner as the tests run: it survives a device or a step that hangs later.
 adb logcat -v threadtime -v UTC > "$OUT/logcat-live.txt" 2>&1 & # UTC, like the captures: the evidence lines them up
 LIVE_LOGCAT=$!
-# Every half second, the phone's TCP sockets still connecting (SYN-SENT) with their owner's uid, from the kernel's own
-# tables: which app sent a connection that the evidence finds on the uplink while connected.
+# About four times a second, the phone's sockets with their owner's uid, from the kernel's own tables: every TCP socket
+# held open (not listening, not TIME-WAIT, which keeps no owner) and every connected UDP socket, so the evidence can name
+# who sent a connection, datagram or lookup it finds on the uplink while connected; and every few seconds the phone's
+# addresses (a temporary IPv6 address can appear during the tests). The shell's EPOCHREALTIME gives sub-second times.
 cat > "$RUNNER_TEMP/pf-connecting.sh" <<'SAMPLER'
+n=0
 while true; do
-    echo "T $(date +%s)"
-    grep -h ' 02 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null
-    sleep 0.5
+    echo "T ${EPOCHREALTIME:-$(date +%s)}"
+    for f in tcp tcp6; do grep -v -e ' 0A ' -e ' 06 ' /proc/net/$f 2>/dev/null | sed "s/^/$f /"; done
+    for f in udp udp6; do grep ' 01 ' /proc/net/$f 2>/dev/null | sed "s/^/$f /"; done
+    if [ $((n % 20)) = 0 ]; then ip -o addr show 2>/dev/null | sed 's/^/A /'; fi
+    n=$((n + 1))
+    sleep 0.25
 done
 SAMPLER
 timeout 30 adb push "$RUNNER_TEMP/pf-connecting.sh" /data/local/tmp/pf-connecting.sh >/dev/null 2>&1 || true
@@ -264,11 +270,16 @@ kill "$LIVE_LOGCAT" 2>/dev/null || true
 timeout 30 adb shell 'pkill -f pf-connecting.sh' >/dev/null 2>&1 || true
 timeout 120 adb pull /data/local/tmp/pf-connecting.txt "$OUT/phone-connecting.txt" >/dev/null 2>&1 || echo "no socket samples" > "$OUT/phone-connecting.txt"
 timeout 60 adb shell pm list packages -U 2>/dev/null | tr -d '\r' > "$OUT/packages-uids.txt" || true
-timeout 60 adb shell pm list packages -s -U 2>/dev/null | tr -d '\r' > "$OUT/packages-system.txt" || true # preinstalled ones
+# Which apps Android lets leave a VPN (netd's system permission): each package's and shared user's uid and the network
+# permissions granted to it. Gradle has removed ProxyFlow's packages by now; its tests log its uid.
+timeout 120 adb shell dumpsys package 2>/dev/null | tr -d '\r' |
+    grep -E '(Package|SharedUser) \[|(userId|appId)=[0-9]|android\.permission\.[A-Z_]*(NETWORK|CONNECTIVITY)[A-Z_]*: granted=true' \
+    > "$OUT/packages-network-permissions.txt" || true
 # The phone's network after the tests: the same uplink as before them, or what changed.
 {
     echo "after the tests: $(uplink_name)"
     echo "addresses after the tests: $(timeout 30 adb shell ip -o -4 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
+    echo "IPv6 addresses after the tests: $(timeout 30 adb shell ip -o -6 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
 } >> "$OUT/guest-network.txt"
 if [ "$GUEST_CAPTURE" = 1 ]; then
     restart_adbd root || true

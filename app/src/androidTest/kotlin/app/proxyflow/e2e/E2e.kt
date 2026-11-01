@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import android.system.Os
 import android.util.Log
 import androidx.test.core.app.ApplicationProvider
@@ -323,7 +324,24 @@ class App {
             Log.i(TAG, "uplink dropped: connecting again (retry $retries; the proxy answered this process again after $waited ms)")
             ended = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
         }
+        logAndroidsView()
         return ended
+    }
+
+    /**
+     * Android's own account of ProxyFlow's VPN, for the evidence (scripts/m6_evidence.py): which uids it routes into the
+     * VPN, whether it lets apps bypass it (Android 13 and later say) and its DNS servers, from dumpsys connectivity as
+     * the shell reads it, with ProxyFlow's own uid. Logged only: the evidence checks it.
+     */
+    private fun logAndroidsView() {
+        val lines = runCatching { Shell.run("dumpsys connectivity").lines() }.getOrElse { listOf("unreadable: $it") }
+        val candidates = lines.filter { "Transports: VPN" in it }
+        val vpn = candidates.firstOrNull { "Uids:" in it } ?: candidates.firstOrNull()
+        val view = when (vpn) {
+            null -> "no VPN network in dumpsys connectivity"
+            else -> VIEW_FIELDS.mapNotNull { it.find(vpn)?.value }.joinToString(" | ").ifEmpty { vpn.trim().take(VIEW_CHARS) }
+        }
+        Log.i(TAG, "android's view of the VPN (own uid ${Process.myUid()}): $view")
     }
 
     /** Waits until [host]:[port] accepts a connection from this process, which ProxyFlow's VPN leaves out; the time taken. */
@@ -383,6 +401,15 @@ class App {
 }
 
 private const val TAG = "ProxyFlowE2E"
+
+/** The parts of the VPN's NetworkAgentInfo line in dumpsys connectivity the evidence reads. */
+private val VIEW_FIELDS = listOf(
+    Regex("Uids: <[^>]*>"),
+    Regex("OwnerUid: \\d+"),
+    Regex("VpnTransportInfo\\{[^}]*\\}"),
+    Regex("DnsAddresses: \\[[^\\]]*\\]"),
+)
+private const val VIEW_CHARS = 600
 
 /** What the engine reports when the phone has no route to the proxy at all: its own uplink is down. */
 private val UPLINK_DROPPED = ConnectionError("PROXY_UNREACHABLE", "no route to the proxy")

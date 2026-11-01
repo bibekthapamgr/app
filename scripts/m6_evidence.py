@@ -25,6 +25,17 @@ connection to the LAN destination. It also prints what the captures show the pho
 proxies for (SOCKS5 targets by name or address, HTTP CONNECT targets), for the packet capture
 report (docs/m6/packet-capture-report.md), and writes the same as m6-capture-summary.md.
 
+For the periods ProxyFlow was connected (from the VPN log in logcat; each covering capture lined
+up with logcat by the phone's own connections to its proxy), every lookup and every new
+connection, datagram or ping that left the phone on its own network must be accounted for: to
+its proxy, its network's resolver or Android's network and time checks; or owned, by the
+phone's socket samples (e2e_device.sh), by an app Android lets leave a VPN (a system uid, or an
+app granted a network bypass permission), which is reported. The shell, ProxyFlow or any other
+owner fails the run; what no sample caught passes as such an app's only when Android's own view
+of the VPN (logged by the tests after each connection) routed every uid but ProxyFlow's into it
+and ProxyFlow's own sockets reached nothing but its proxy. Both of those are checked on their own
+too. See docs/m6/routing-and-limitations.md section 7.
+
 Usage: m6_evidence.py --api N --pf DIR --out DIR [--host-pcap FILE]
 """
 
@@ -55,7 +66,11 @@ TLS_PORTS = (3129, 1443, 3130, 3131, 3132)
 # Every port the app reaches on the runner as a proxy (with the M5 tests' silent and closed ones), and the gate's control
 # port, which the tests themselves use from ProxyFlow's own process (outside its VPN, by design).
 PROXY_SIDE_PORTS = SOCKS_PORTS + (HTTP_PORT,) + TLS_PORTS + (1081, 1082, 1091)
-NETWORK_RESOLVER = "10.0.2.3"  # the emulator network's own DNS server (it forwards to the lab's uplink resolver)
+# The emulator network's own DNS servers: 10.0.2.3 forwards to the lab's uplink resolver (its log is checked below),
+# fec0::3 is its IPv6 counterpart.
+NETWORK_RESOLVERS = ("10.0.2.3", "fec0::3")
+# The emulator network's router and resolvers: never the phone, whatever prefix they share with it.
+INFRASTRUCTURE = frozenset((GATEWAY, "10.0.2.1", "10.0.2.3", "fec0::2", "fec0::3", "fe80::2"))
 # Android's own traffic outside VPNs while one is up: NetworkMonitor checking the phone's network (its probe hosts, with
 # their fallbacks) and the time service. Lookups of these, and their HTTP(S) and NTP, are expected on the uplink.
 ANDROID_NAMES = frozenset(
@@ -115,8 +130,10 @@ class Capture:
     first_payload_seen: set = field(default_factory=set)
     segments_seen: set = field(default_factory=set)
     # For the connected periods: when each new TCP connection, UDP datagram and echo request left, and each DNS query.
-    events: list = field(default_factory=list)  # (time, src, dst, "TCP"|"UDP"|"ICMP", port, a TCP SYN's source port)
-    dns_queries: list = field(default_factory=list)  # (time, name)
+    # (time, src, dst, "TCP"|"UDP"|"ICMP"|"IP<protocol>", port, source port of a TCP SYN or a UDP datagram)
+    events: list = field(default_factory=list)
+    hops: dict = field(default_factory=dict)  # an event -> the packet's TTL or hop limit, for the report
+    dns_queries: list = field(default_factory=list)  # (time, name, src, source port, dst, "UDP"|"TCP")
     dns_answers: dict = field(default_factory=lambda: collections.defaultdict(set))  # name -> addresses answered
     dns_streams: dict = field(default_factory=dict)  # DNS over TCP: the client's bytes so far, per connection
 
@@ -169,7 +186,7 @@ def dns_answer_addresses(message: bytes) -> tuple[str | None, list[str]]:
     for _ in range(answers):
         at = skip_name(message, at)
         if at + 10 > len(message):
-            break  # the phone's own captures keep 160 bytes of each packet: later answers may be cut off
+            break  # the phone's own captures keep 400 bytes of each packet: later answers may be cut off
         rtype, _, _, length = struct.unpack("!HHIH", message[at : at + 10])
         at += 10
         if at + length > len(message):
@@ -194,7 +211,7 @@ def dns_over_tcp(capture: "Capture", flow: tuple, payload: bytes, when) -> None:
         name = dns_name(bytes(buffer[2 : 2 + length]))
         if name is not None:
             capture.dns_names[name.rstrip(".")] += 1
-            capture.dns_queries.append((when, name.rstrip(".").lower()))
+            capture.dns_queries.append((when, name.rstrip(".").lower(), flow[0], flow[1], flow[2], "TCP"))
         del buffer[: 2 + length]
 
 
@@ -217,11 +234,11 @@ def inspect(packet: bytes, capture: Capture, when: datetime.datetime | None = No
     version = packet[0] >> 4
     if version == 4 and len(packet) >= 20:
         header = (packet[0] & 0x0F) * 4
-        proto, src, dst, rest = packet[9], ip_of(packet[12:16]), ip_of(packet[16:20]), packet[header:]
+        proto, src, dst, rest, hops = packet[9], ip_of(packet[12:16]), ip_of(packet[16:20]), packet[header:], packet[8]
         if struct.unpack("!H", packet[6:8])[0] & 0x1FFF:  # a later fragment: no upper-layer header
             proto = -1
     elif version == 6 and len(packet) >= 40:
-        src, dst = ip_of(packet[8:24]), ip_of(packet[24:40])
+        src, dst, hops = ip_of(packet[8:24]), ip_of(packet[24:40]), packet[7]
         proto, rest = upper_layer(packet[6], packet[40:])
         capture.ipv6_packets += 1
     else:
@@ -232,6 +249,8 @@ def inspect(packet: bytes, capture: Capture, when: datetime.datetime | None = No
     if (proto == 1 and rest[:1] == b"\x08") or (proto == 58 and rest[:1] == b"\x80"):
         capture.echo_requests[dst] += 1
         capture.events.append((when, src, dst, "ICMP", 0, None))
+    elif proto not in (-1, 1, 6, 17, 58):  # any other protocol (GRE, ESP, SCTP...): nothing ProxyFlow sends itself
+        capture.events.append((when, src, dst, f"IP{proto}", 0, None))
     if proto == 6 and len(rest) >= 20:
         sport, dport, seq = struct.unpack("!HHI", rest[0:8])
         flags = rest[13]
@@ -240,6 +259,7 @@ def inspect(packet: bytes, capture: Capture, when: datetime.datetime | None = No
         if flags & 0x02 and not flags & 0x10:
             capture.syns[(dst, dport)] += 1
             capture.events.append((when, src, dst, "TCP", dport, sport))
+            capture.hops[capture.events[-1]] = hops
             if dst == GATEWAY and dport == LAN_PORT:
                 capture.lan_syns += 1
         if not payload:
@@ -269,14 +289,16 @@ def inspect(packet: bytes, capture: Capture, when: datetime.datetime | None = No
                 capture.plaintext_on_tls.append(f"{dport}: {payload[:8].hex(' ')}")
     elif proto == 17 and len(rest) >= 8:
         sport, dport = struct.unpack("!HH", rest[0:4])
-        capture.events.append((when, src, dst, "UDP", dport, None))
+        capture.events.append((when, src, dst, "UDP", dport, sport))
+        capture.hops[capture.events[-1]] = hops
         if dport == 53:
             name = dns_name(rest[8:])
             if name is not None:
                 capture.dns_names[name.rstrip(".")] += 1
-                capture.dns_queries.append((when, name.rstrip(".").lower()))
+                capture.dns_queries.append((when, name.rstrip(".").lower(), src, sport, dst, "UDP"))
             elif len(rest) > 8 + 12 and not rest[8 + 2] & 0x80:
-                capture.dns_queries.append((when, "<unreadable query>"))  # a long name the capture's length limit cut off
+                # a long name the capture's length limit cut off
+                capture.dns_queries.append((when, "<unreadable query>", src, sport, dst, "UDP"))
         elif sport == 53:
             name, addresses = dns_answer_addresses(rest[8:])
             if name:
@@ -412,11 +434,12 @@ def period_of(when: datetime.datetime | None, windows: list) -> str | None:
     return next((label for start, end, label in windows if start + MARGIN <= when <= end - MARGIN), None)
 
 
-def capture_offset(capture: "Capture", starts: list[datetime.datetime], phone: set) -> tuple[float | None, str]:
+def capture_offset(capture: "Capture", starts: list[datetime.datetime], phone: "Phone") -> tuple[float | None, str]:
     """How far the capture's clock is from logcat's, in seconds, measured on the capture itself: right after each
     connection attempt begins (logcat), the phone opens a connection to its proxy (the capture). Both clocks are UTC
-    and normally agree within a second or two, so each attempt is matched with the phone's nearest SYN to a proxy port
-    within 3 s; with fewer than four in five attempts matched, the capture cannot be lined up."""
+    and agree within a second or two, so each attempt is matched with the phone's nearest SYN to a proxy port within
+    3 s. The capture is lined up only if four in five attempts matched, their gaps agree (half of them within 0.5 s of
+    each other) and the offset is under 2 s: a wrong lock onto other connections would scatter the gaps."""
     syns = sorted(when for (when, src, dst, kind, port, _) in capture.events
                   if when is not None and kind == "TCP" and src in phone and dst == GATEWAY and port in PROXY_SIDE_PORTS)
     gaps = []
@@ -427,23 +450,56 @@ def capture_offset(capture: "Capture", starts: list[datetime.datetime], phone: s
     if not gaps or len(gaps) < 0.8 * len(starts):
         return None, f"only {len(gaps)} of {len(starts)} connection attempts have the phone's SYN to its proxy within 3 s"
     gaps.sort()
-    return gaps[len(gaps) // 2], f"{len(gaps)} of {len(starts)} connection attempts matched"
+    median, spread = gaps[len(gaps) // 2], gaps[(3 * len(gaps)) // 4] - gaps[len(gaps) // 4]
+    if spread > 0.5 or abs(median) > 2:
+        return None, f"{len(gaps)} of {len(starts)} attempts matched, but their gaps spread over {spread:.2f} s around {median:+.2f} s"
+    return median, f"{len(gaps)} of {len(starts)} connection attempts matched, gaps within {spread:.2f} s"
 
 
-def phone_addresses(capture: "Capture", network: list[str]) -> set:
-    """The phone's own addresses on its uplink: where its SYNs to the proxies come from, and every address the device
-    script recorded on the uplink interfaces (IPv4 and IPv6, before and after the tests)."""
-    phone = {src for (_, src, dst, kind, port, _) in capture.events if kind == "TCP" and dst == GATEWAY and port in PROXY_SIDE_PORTS}
+@dataclass
+class Phone:
+    """The phone's own addresses on its uplink, and the networks they are in (IPv4 at most a /24, IPv6 a /64): an
+    address the phone took during the tests (a new temporary IPv6 address) still counts as the phone's."""
+    addresses: set = field(default_factory=set)
+    networks: set = field(default_factory=set)
+
+    def add(self, interface: str) -> None:
+        try:
+            address = ipaddress.ip_interface(interface)
+        except ValueError:
+            return
+        self.addresses.add(str(address.ip))
+        widest = 24 if address.version == 4 else 64
+        self.networks.add(address.network if address.network.prefixlen >= widest else ipaddress.ip_interface(f"{address.ip}/{widest}").network)
+
+    def __contains__(self, address: str) -> bool:
+        if address in self.addresses:
+            return True
+        if address in INFRASTRUCTURE:
+            return False
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            return False
+        return any(ip in network for network in self.networks)
+
+
+def phone_of(capture: "Capture", network: list[str], sockets: "Sockets") -> Phone:
+    """Where the phone's SYNs to the proxies come from, every address the device script recorded on the uplink
+    interfaces (before and after the tests) and every address the socket sampler saw during them."""
+    phone = Phone()
+    for (_, src, dst, kind, port, _) in capture.events:
+        if kind == "TCP" and dst == GATEWAY and port in PROXY_SIDE_PORTS:
+            phone.addresses.add(src)
     for line in network:
         if "addresses" not in line.split(":", 1)[0]:
             continue
         for item in line.split(":", 1)[1].split(";"):
             parts = item.split()
-            if len(parts) == 2 and parts[0] not in ("lo", "dummy0") and "/" in parts[1]:
-                try:
-                    phone.add(str(ipaddress.ip_address(parts[1].split("/")[0])))
-                except ValueError:
-                    pass
+            if len(parts) == 2 and not parts[0].startswith(("lo", "dummy", "tun")) and "/" in parts[1]:
+                phone.add(parts[1])
+    for interface in sockets.addresses:
+        phone.add(interface)
     return phone
 
 
@@ -454,7 +510,7 @@ def explained(dst: str, kind: str, port: int, android_addresses: set) -> bool:
         return True  # the network itself: DHCP, neighbour discovery, multicast
     if dst == GATEWAY and kind == "TCP" and port in PROXY_SIDE_PORTS:
         return True  # ProxyFlow to its proxy (and the tests to the gate's control port)
-    if dst == NETWORK_RESOLVER and (port == 53 or (kind == "TCP" and port == 853)):
+    if dst in NETWORK_RESOLVERS and (port == 53 or (kind == "TCP" and port == 853)):
         return True  # lookups on the phone's network (names checked apart) and Android's Private DNS check of it
     return dst in android_addresses and ((kind == "TCP" and port in (80, 443)) or (kind == "UDP" and port == 123))
 
@@ -464,35 +520,84 @@ def explained(dst: str, kind: str, port: int, android_addresses: set) -> bool:
 PLACEHOLDERS = ipaddress.ip_network("198.18.0.0/15")
 
 
-def connecting_sockets(out: str) -> list[tuple[datetime.datetime, str, int, int]]:
-    """The phone's TCP sockets still connecting (SYN-SENT), sampled every half second: (time, "address:port", uid,
-    local port)."""
-    found, when = [], None
+def endpoint(text: str) -> tuple[str, int]:
+    """An address:port of /proc/net/{tcp,udp}[6]: hex, each 32-bit word little-endian; IPv4-mapped IPv6 as IPv4."""
+    address, port = text.split(":")
+    raw = bytes.fromhex(address)
+    if len(raw) == 4:
+        ip = ipaddress.ip_address(raw[::-1])
+    elif len(raw) == 16:
+        ip = ipaddress.ip_address(b"".join(raw[i : i + 4][::-1] for i in range(0, 16, 4)))
+        ip = ip.ipv4_mapped or ip
+    else:
+        raise ValueError(f"not an address: {address}")
+    return str(ip), int(port, 16)
+
+
+@dataclass
+class Sockets:
+    """The phone's sockets as the device script sampled them, about four times a second: every TCP socket an app or
+    a daemon holds open (not listening; one in TIME-WAIT or closed has no owner left) and every connected UDP
+    socket, with its owner's uid; and the phone's addresses every few seconds."""
+    spans: dict = field(default_factory=dict)  # (proto, local ip, local port, remote ip, remote port, uid) -> [first, last]
+    snapshots: list = field(default_factory=list)
+    addresses: set = field(default_factory=set)  # "address/prefix"
+    fractional: bool = False
+
+    def owners(self, proto: str, src: str, sport: int, dst: str, dport: int, when: datetime.datetime) -> list[int]:
+        """The uids of the sockets with this connection's own ends, seen around [when]."""
+        window = 1.5 if self.fractional else 2.5  # whole-second samples (an older shell) need more slack
+        return sorted({
+            uid for (p, lip, lport, rip, rport, uid), (first, last) in self.spans.items()
+            if p == proto and lport == sport and rip == dst and rport == dport and lip in (src, "0.0.0.0", "::")
+            and (first - when).total_seconds() <= window and (when - last).total_seconds() <= window
+        })
+
+    def near(self, when: datetime.datetime) -> int:
+        return sum(1 for t in self.snapshots if abs((t - when).total_seconds()) <= 1)
+
+    def coverage(self) -> str:
+        if not self.snapshots:
+            return "no samples"
+        gaps = [(b - a).total_seconds() for a, b in zip(self.snapshots, self.snapshots[1:])]
+        return (f"{len(self.snapshots)} snapshots from {self.snapshots[0]:%H:%M:%S} to {self.snapshots[-1]:%H:%M:%S}, "
+                f"the longest gap {max(gaps, default=0):.1f} s")
+
+
+def socket_samples(out: str) -> Sockets:
+    sockets, when = Sockets(), None
     for line in read(os.path.join(out, "phone-connecting.txt")):
         if line.startswith("T "):
+            text = line[2:].strip()
             try:
-                when = datetime.datetime.fromtimestamp(int(line[2:].strip()), datetime.timezone.utc).replace(tzinfo=None)
+                when = datetime.datetime.fromtimestamp(float(text), datetime.timezone.utc).replace(tzinfo=None)
             except ValueError:
                 when = None
+                continue
+            sockets.fractional = sockets.fractional or "." in text
+            sockets.snapshots.append(when)
+            continue
+        if line.startswith("A "):  # ip -o addr: "A 2: eth0    inet 10.0.2.15/24 brd ..."
+            m = re.match(r"A \d+: (\S+)\s+inet6? (\S+)", line)
+            if m and not m.group(1).startswith(("lo", "dummy", "tun")):
+                sockets.addresses.add(m.group(2))
             continue
         parts = line.split()
-        if when is None or len(parts) < 8 or parts[3] != "02" or ":" not in parts[1] or ":" not in parts[2]:
+        proto = "tcp"
+        if parts and parts[0] in ("tcp", "tcp6", "udp", "udp6"):
+            proto, parts = ("udp" if parts[0].startswith("udp") else "tcp"), parts[1:]
+        if when is None or len(parts) < 10 or ":" not in parts[1] or ":" not in parts[2]:
             continue
-        address, port = parts[2].split(":", 1)
+        state, inode = parts[3], parts[9]
+        if inode == "0" or (proto == "tcp" and state in ("0A", "06", "07")) or (proto == "udp" and state != "01"):
+            continue
         try:
-            local_port = int(parts[1].rsplit(":", 1)[1], 16)
-            raw = bytes.fromhex(address)
-            if len(raw) == 4:
-                ip = ipaddress.ip_address(raw[::-1])
-            elif len(raw) == 16:  # four little-endian words
-                ip = ipaddress.ip_address(b"".join(raw[i : i + 4][::-1] for i in range(0, 16, 4)))
-                ip = ip.ipv4_mapped or ip
-            else:
-                continue
-            found.append((when, f"{ip}:{int(port, 16)}", int(parts[7]), local_port))
+            (lip, lport), (rip, rport), uid = endpoint(parts[1]), endpoint(parts[2]), int(parts[7])
         except ValueError:
             continue
-    return found
+        span = sockets.spans.setdefault((proto, lip, lport, rip, rport, uid), [when, when])
+        span[0], span[1] = min(span[0], when), max(span[1], when)
+    return sockets
 
 
 def package_names(out: str) -> dict[int, str]:
@@ -504,46 +609,97 @@ def package_names(out: str) -> dict[int, str]:
     return {uid: ",".join(sorted(packages))[:100] for uid, packages in names.items()}
 
 
-# The tests' own traffic, which the VPN must carry whatever kind of uid it is: adb's shell, and root, which adbd is
-# while the phone's captures start (a failed "adb unroot" would leave the tests running as root).
-TEST_UIDS = (0, 2000)
+# The tests' own traffic, which the VPN must carry whatever kind of uid it is: their commands run as the shell, through
+# UiAutomation, whatever adbd runs as (root sockets are Android's daemons: netd's resolver on Android 10).
+TEST_UIDS = (2000,)
 OWN_PACKAGES = ("app.proxyflow",)  # ProxyFlow (and its test APK): its only direct traffic is to its proxy
+# What lets an app leave a VPN that does not allow bypassing: Android lets it choose another network (netd's system
+# permission) if it holds one of these, as privileged apps such as Google Play services may.
+NETWORK_BYPASS_PERMISSIONS = frozenset(("CONNECTIVITY_USE_RESTRICTED_NETWORKS", "NETWORK_STACK", "MAINLINE_NETWORK_STACK"))
 
 
-def system_uids(out: str) -> set[int]:
-    """The uids of the phone's preinstalled (system) packages, from pm list packages -s -U."""
-    found = set()
-    for line in read(os.path.join(out, "packages-system.txt")):
-        m = re.match(r"package:(\S+) uid:(\d+)", line.strip())
-        if m and not m.group(1).startswith(OWN_PACKAGES):
-            found.add(int(m.group(2)))
-    return found
+def network_grants(out: str) -> dict[int, set[str]]:
+    """The network permissions each uid was granted, from dumpsys package (the device script keeps the package and
+    shared-user headers, their uids and the granted network permissions)."""
+    grants: dict[int, set[str]] = {}
+    uid = None
+    for line in read(os.path.join(out, "packages-network-permissions.txt")):
+        if re.search(r"(?:Package|SharedUser) \[", line):
+            uid = None
+            continue
+        m = re.search(r"\b(?:userId|appId)=(\d+)", line)
+        if m:
+            uid = int(m.group(1))
+            grants.setdefault(uid, set())
+            continue
+        m = re.search(r"android\.permission\.(\w+): granted=true", line)
+        if m and uid is not None:
+            grants[uid].add(m.group(1))
+    return grants
 
 
-def uids_of(target: str, when: datetime.datetime, sockets: list, local_ports: set | None = None) -> list[int]:
-    """The uids that owned a socket connecting to [target] around [when] (within 2 s; the samples' clock has whole
-    seconds), from the kernel's tables; only sockets from [local_ports], the connection's own, when they are known."""
-    return sorted({
-        uid for (at, t, uid, port) in sockets
-        if t == target and (local_ports is None or port in local_ports) and abs((at - when).total_seconds()) <= 2
-    })
+@dataclass
+class Owners:
+    names: dict
+    grants: dict
+    own: set  # ProxyFlow's uids: from its test log, and from its packages if still installed
 
-
-def owners_of(target: str, when: datetime.datetime, sockets: list, names: dict, local_ports: set | None = None) -> str:
-    """Who owned a socket connecting to [target] around [when], as the kernel's tables named it."""
-    uids = uids_of(target, when, sockets, local_ports)
-    return ", ".join(f"uid {uid} ({names.get(uid, 'no package: a system uid')})" for uid in uids) or "owner not sampled"
-
-
-def androids_own(uids: list[int], names: dict, system: set[int]) -> bool:
-    """Whether a connection's owners are all Android itself or its preinstalled apps, which Android lets bypass VPNs
-    (its network checks; privileged apps such as Google Play services): never the shell or root, never ProxyFlow,
-    and never an owner the samples missed."""
-    def system_owner(uid: int) -> bool:
-        if uid in TEST_UIDS or names.get(uid, "").startswith(OWN_PACKAGES):
+    def may_bypass(self, uid: int) -> bool:
+        """Whether Android lets [uid] use another network than the VPN: system uids and apps with a network bypass
+        permission; never the tests (shell, root) or ProxyFlow."""
+        if uid in TEST_UIDS or uid in self.own:
             return False
-        return uid < 10000 or uid in system
-    return bool(uids) and all(system_owner(uid) for uid in uids)
+        return uid < 10000 or bool(self.grants.get(uid, set()) & NETWORK_BYPASS_PERMISSIONS)
+
+    def label(self, uid: int) -> str:
+        name = self.names.get(uid) or ("a system uid" if uid < 10000 else "no package: an app removed after the tests")
+        if uid in self.own:
+            name += "; ProxyFlow"
+        bypass = sorted(self.grants.get(uid, set()) & NETWORK_BYPASS_PERMISSIONS)
+        return f"uid {uid} ({name}{'; ' + ', '.join(bypass) if bypass else ''})"
+
+
+def own_uids(logcat: list[str], names: dict) -> set[int]:
+    found = {int(m.group(1)) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:.*\bown uid (\d+)", line))}
+    return found | {uid for uid, name in names.items() if any(n.startswith(OWN_PACKAGES) for n in name.split(","))}
+
+
+def androids_views(logcat: list[str]) -> tuple[list[str], list[str]]:
+    """What Android said about ProxyFlow's VPN, as the device tests logged it after each connection (from dumpsys
+    connectivity): the uids it routes into the VPN, whether apps may bypass it (Android 13 and later say), and its DNS
+    servers. Returns each readable view's summary and the problems found."""
+    views, problems, unreadable = [], [], []
+    for line in logcat:
+        m = re.search(r"ProxyFlowE2E\s*:\s*android's view of the VPN \(own uid (\d+)\): (.*)$", line)
+        if not m:
+            continue
+        own, text = int(m.group(1)), m.group(2)
+        uids = re.search(r"Uids: <([^>]*)>", text)
+        if not uids:
+            unreadable.append(text[:300])
+            continue
+        ranges = sorted((int(a), int(b)) for a, b in re.findall(r"(\d+)-(\d+)", uids.group(1)))
+        gaps, next_uid = [], 0
+        for first, last in ranges:
+            if first > next_uid and next_uid <= 99999:
+                gaps.append((next_uid, min(first - 1, 99999)))
+            next_uid = max(next_uid, last + 1)
+        if next_uid <= 99999:
+            gaps.append((next_uid, 99999))
+        found = []
+        if gaps != [(own, own)]:
+            found.append(f"Android's VPN leaves out uids {gaps[:4]}, not only ProxyFlow's ({own})")
+        bypass = re.search(r"bypassable=(\w+)", text)
+        if bypass and bypass.group(1) != "false":
+            found.append(f"Android says apps may bypass the VPN (bypassable={bypass.group(1)})")
+        dns = re.search(r"DnsAddresses: \[([^\]]*)\]", text)
+        if dns and "198.18.0.2" not in dns.group(1):
+            found.append(f"the VPN's DNS servers are [{dns.group(1).strip()}]")
+        problems += found
+        views.append(f"every uid but {own}" + (f", bypassable={bypass.group(1)}" if bypass else "") + (", DNS 198.18.0.2" if dns and not found else ""))
+    if unreadable:
+        views.append(f"{len(unreadable)} without the routed uids, the first: {unreadable[0]!r}")
+    return views, problems
 
 
 # --- the checks -----------------------------------------------------------------
@@ -655,16 +811,42 @@ def main(argv: list[str]) -> int:
     queried = uplink_queries(after("dns-uplink.log"), year)
     span = sum((end - start).total_seconds() for start, end, _ in windows)
     network = read(os.path.join(args.out, "guest-network.txt"))
-    sockets, names, system = connecting_sockets(args.out), package_names(args.out), system_uids(args.out)
+    sockets = socket_samples(args.out)
+    names = package_names(args.out)
+    owners = Owners(names, network_grants(args.out), set())
+    owners.own = own_uids(logcat, names)
     to_placeholders = collections.Counter(
-        f"{target} uid {uid} ({names.get(uid, 'no package: a system uid')})"
-        for (_, target, uid, _) in sockets
-        if ipaddress.ip_address(target.rsplit(":", 1)[0]) in PLACEHOLDERS
+        f"{rip}:{rport} {owners.label(uid)}" for (proto, _, _, rip, rport, uid) in sockets.spans
+        if proto == "tcp" and ipaddress.ip_address(rip) in PLACEHOLDERS
     )
     facts.append(
-        f"the phone's sockets connecting to placeholder addresses (its kernel's tables every 0.5 s, {len(sockets)} samples of "
-        f"connecting sockets): {dict(to_placeholders.most_common(8)) or 'none seen'}"
+        f"the phone's sockets (its kernel's tables, {sockets.coverage()}): to placeholder addresses, by owner: "
+        f"{dict(to_placeholders.most_common(8)) or 'none seen'}"
     )
+    # ProxyFlow is outside its own VPN: its sockets may reach nothing but its proxy (and the tests' gate control port).
+    own_sockets = [key for key in sockets.spans if key[5] in owners.own]
+    own_elsewhere = collections.Counter(
+        f"{proto.upper()} {rip}:{rport}" for (proto, _, _, rip, rport, _) in own_sockets
+        if not (proto == "tcp" and rip == GATEWAY and rport in PROXY_SIDE_PORTS) and not ipaddress.ip_address(rip).is_loopback
+    )
+    if not owners.own:
+        facts.append("ProxyFlow's own sockets: not checked, no test logged ProxyFlow's uid")
+    elif own_elsewhere:
+        problems.append(f"ProxyFlow's own sockets reached other places than its proxy: {dict(own_elsewhere.most_common(8))}")
+        facts.append(f"ProxyFlow's own sockets (uid {sorted(owners.own)}): {len(own_sockets)} seen, some elsewhere than its proxy")
+    else:
+        facts.append(f"ProxyFlow's own sockets (uid {sorted(owners.own)}): {len(own_sockets)} seen, every one to its proxy or the gate's control port")
+    views, view_problems = androids_views(logcat)
+    problems += view_problems
+    facts.append(
+        f"Android's view of ProxyFlow's VPN after each connection (dumpsys connectivity): {len([v for v in views if v.startswith('every uid but')])} readable; "
+        f"{dict(collections.Counter(views)) or 'none'}" + (f"; problems: {view_problems[:3]}" if view_problems else "")
+    )
+    # Traffic outside the VPN whose owner no sample named can only have come from an app Android lets leave the VPN,
+    # and is reported as such, when Android's own view of this VPN left out ProxyFlow alone (and, where Android says,
+    # let no app bypass it) and ProxyFlow's own sockets reached nothing but its proxy. Otherwise it fails the run.
+    readable = [view for view in views if view.startswith("every uid but")]
+    excusable = bool(readable) and len(readable) == len(views) and not view_problems and bool(owners.own) and not own_elsewhere
     refused_probes = [int(m.group(1)) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*engine local_refused=(\d+)", line))]
     if refused_probes:
         facts.append(f"TCP to ProxyFlow's own addresses refused on the phone (Android's DNS-over-TLS probe, engine local_refused): {max(refused_probes)}")
@@ -689,14 +871,14 @@ def main(argv: list[str]) -> int:
             else:
                 gate_plain.append(f"{port}: late {m.group(2)}")
             continue
-        m = re.search(r"connection (\d+) from \S+ mode=forward (?:upstream=127\.0\.0\.1:(\d+) )?first=(\S+)(?: \((\w+)\))?", line)
+        m = re.search(r"connection (\d+) from \S+ mode=forward (?:upstream=127\.0\.0\.1:(\d+) )?first=([0-9a-f]{2}(?: [0-9a-f]{2}){0,2}|-)(?: \((\w+)\))?", line)
         if not m:
             continue
         number, upstream, first, why = m.groups()
         port = int(upstream or gate_mode or 0)
         if port not in TLS_PORTS:
             continue
-        if first.startswith("16"):
+        if first == "16" or first.startswith("16 03"):  # a TLS record (the gate read one byte, or more)
             gate_tls += 1
         elif first == "-" and why == "timeout":
             waiting[number] = port
@@ -739,7 +921,15 @@ def main(argv: list[str]) -> int:
         "| Capture | Packets | SOCKS5 targets (by kind) | HTTP CONNECT targets | TLS-port streams | To lab addresses | DNS for lab names |",
         "|---|---|---|---|---|---|---|",
     ]
-    for capture in (read_capture(path) for path in paths):
+    captures = [read_capture(path) for path in paths]
+    # For the report: which captures saw each connection or datagram, by its own ends.
+    seen_by: dict = collections.defaultdict(set)
+    for capture in captures:
+        for (_, src, dst, kind, port, sport) in capture.events:
+            if sport is not None:
+                seen_by[(kind, src, sport, dst, port)].add(os.path.basename(capture.path))
+    reported_lookups: list[tuple[datetime.datetime, str]] = []  # lookups in the captures put down to an app Android lets leave the VPN
+    for capture in captures:
         name = os.path.basename(capture.path)
         if capture.error:
             facts.append(f"capture {name}: unreadable ({capture.error})")
@@ -776,7 +966,7 @@ def main(argv: list[str]) -> int:
         if capture.plaintext_on_tls:
             problems.append(f"capture {name}: plaintext opened a connection to a TLS proxy port: {capture.plaintext_on_tls[:3]}")
         if windows and not partial and capture.covers_uplink:
-            phone = phone_addresses(capture, network)
+            phone = phone_of(capture, network, sockets)
             offset, how = capture_offset(capture, starts, phone)
             if offset is None:
                 problems.append(f"capture {name}: could not be lined up with logcat ({how}), so its connected periods went unchecked")
@@ -785,44 +975,73 @@ def main(argv: list[str]) -> int:
                 if not name.startswith("guest-"):
                     host_offset = offset  # the emulator's own capture runs on the runner's clock, like the DNS log
                 android_addresses = set().union(*(capture.dns_answers.get(n, set()) for n in ANDROID_NAMES))
-                odd_events = [
-                    (when - shift, f"{kind} [{dst}]:{port}" if ":" in dst else f"{kind} {dst}:{port}",
-                     {sport} if sport is not None else set())  # UDP and pings: no owner (the samples list TCP only)
-                    for (when, src, dst, kind, port, sport) in capture.events
-                    if src in phone and inside(when and when - shift, windows) and not explained(dst, kind, port, android_addresses)
-                ]
-                # A new TCP connection Android itself or a preinstalled app made outside the VPN is Android's (it lets them
-                # bypass VPNs, ADR-0011, routing doc section 4): reported with its owner, the socket the phone's kernel
-                # listed with the connection's own source port. Anything else fails the run: UDP and pings (the samples
-                # list TCP only), and connections of any other owner or of none sampled.
-                target_of = lambda key: key.split(" ", 1)[1].replace("[", "").replace("]:", ":")  # noqa: E731
-                androids = [
-                    (when, key, ports) for when, key, ports in odd_events
-                    if ports and androids_own(uids_of(target_of(key), when, sockets, ports), names, system)
-                ]
-                odd_events = [event for event in odd_events if event not in androids]
-                android_direct = collections.Counter(
-                    f"{key} ({owners_of(target_of(key), when, sockets, names, ports)})" for when, key, ports in androids
-                )
-                direct = collections.Counter(key for _, key, _ in odd_events)
-                names_inside = collections.Counter(n for (when, n) in capture.dns_queries if inside(when and when - shift, windows))
-                odd_names = {n: c for n, c in names_inside.items() if n not in ANDROID_NAMES and n != PROXY_NAME}
-                where = [
-                    f"{key} at {when:%H:%M:%S.%f}"[:-3] + f" ({period_of(when, windows)}; {owners_of(target_of(key), when, sockets, names, ports)})"
-                    for when, key, ports in odd_events[:4]
-                ]
+
+                def classify(kind: str, src: str, sport: int | None, dst: str, port: int, local: datetime.datetime) -> tuple[str, list[int]]:
+                    """'bypassing' (owned by apps Android lets leave a VPN), 'unidentified' (no owner sampled, see
+                    excusable) or 'around' (fails the run), and the owners found."""
+                    uids = sockets.owners(kind.lower(), src, sport, dst, port, local) if kind in ("TCP", "UDP") and sport is not None else []
+                    if uids and all(owners.may_bypass(uid) for uid in uids):
+                        return "bypassing", uids
+                    return ("unidentified" if not uids and excusable else "around"), uids
+
+                bypassing, unidentified, around = collections.Counter(), collections.Counter(), collections.Counter()
+                where: list[str] = []
+                connections = set()
+                for event in capture.events:
+                    when, src, dst, kind, port, sport = event
+                    local = when and when - shift
+                    if src not in phone or not inside(local, windows) or explained(dst, kind, port, android_addresses):
+                        continue
+                    if kind == "TCP":
+                        if (src, sport, dst, port) in connections:
+                            continue  # a retransmitted SYN: the same connection
+                        connections.add((src, sport, dst, port))
+                    key = f"{kind} [{dst}]:{port}" if ":" in dst else f"{kind} {dst}:{port}"
+                    verdict, uids = classify(kind, src, sport, dst, port, local)
+                    if verdict == "bypassing":
+                        bypassing[f"{key} ({', '.join(owners.label(uid) for uid in uids)})"] += 1
+                    elif verdict == "unidentified":
+                        unidentified[key] += 1
+                    else:
+                        around[key] += 1
+                        if len(where) < 4:
+                            owner = ", ".join(owners.label(uid) for uid in uids) or f"owner not sampled, {sockets.near(local)} snapshots within 1 s"
+                            seen = sorted(seen_by.get((kind, src, sport, dst, port), {name}))
+                            origin = f"from {src}" + (f" port {sport}" if sport is not None else "") + f", hop limit {capture.hops.get(event, '?')}"
+                            where.append(f"{key} at {local:%H:%M:%S.%f}"[:-3] + f" ({period_of(local, windows)}; {owner}; {origin}; seen by {', '.join(seen)})")
+                names_inside = collections.Counter()
+                lookups_bypassing, lookups_unidentified, lookups_around = collections.Counter(), collections.Counter(), collections.Counter()
+                for (when, n, src, sport, dst, transport) in capture.dns_queries:
+                    local = when and when - shift
+                    if not inside(local, windows):
+                        continue
+                    names_inside[n] += 1
+                    if n in ANDROID_NAMES or n == PROXY_NAME:
+                        continue
+                    verdict, uids = classify(transport, src, sport, dst, 53, local)
+                    if verdict == "bypassing":
+                        lookups_bypassing[f"{n} ({', '.join(owners.label(uid) for uid in uids)})"] += 1
+                        reported_lookups.append((local, n))
+                    elif verdict == "unidentified":
+                        lookups_unidentified[n] += 1
+                        reported_lookups.append((local, n))
+                    else:
+                        lookups_around[n] += 1
                 checked.append(name)
                 facts.append(
                     f"capture {name} while connected ({len(windows)} periods, {span:.0f} s; its clock {offset:+.2f} s from logcat's, {how}; "
-                    f"phone {sorted(phone)}): new connections, datagrams or pings from the phone other than to its proxy, its network's "
-                    f"resolver or Android's own checks: {dict(direct.most_common(12)) or 'none'}{' — ' + '; '.join(where) if where else ''}; "
-                    f"by Android itself or its preinstalled apps, which it lets bypass VPNs: {dict(android_direct.most_common(8)) or 'none'}; "
+                    f"phone {sorted(phone.addresses)}): new connections, datagrams or pings from the phone other than to its proxy, its network's "
+                    f"resolver or Android's own checks: {dict(around.most_common(12)) or 'none'}{' — ' + '; '.join(where) if where else ''}; "
+                    f"by apps Android lets leave a VPN (system uids, network bypass permissions): {dict(bypassing.most_common(8)) or 'none'}; "
+                    f"with no owner sampled, so theirs (Android routes every other app into this VPN): {dict(unidentified.most_common(8)) or 'none'}; "
                     f"DNS queries: {dict(names_inside.most_common(12)) or 'none'}"
+                    + (f"; lookups by apps Android lets leave a VPN: {dict(lookups_bypassing.most_common(8))}" if lookups_bypassing else "")
+                    + (f"; lookups with no owner sampled: {dict(lookups_unidentified.most_common(8))}" if lookups_unidentified else "")
                 )
-                if direct:
-                    problems.append(f"capture {name}: traffic left the phone around the VPN while connected: {dict(direct.most_common(12))}; {'; '.join(where)}")
-                if odd_names:
-                    problems.append(f"capture {name}: the phone looked up names on its own network while connected: {odd_names}")
+                if around:
+                    problems.append(f"capture {name}: traffic left the phone around the VPN while connected: {dict(around.most_common(12))}; {'; '.join(where)}")
+                if lookups_around:
+                    problems.append(f"capture {name}: the phone looked up names on its own network while connected: {dict(lookups_around.most_common(12))}")
         named = [t for t in capture.socks_targets if t.startswith("name proxyflow.test:") or t.startswith("name secure.proxyflow.test:")]
         if capture.covers_uplink and capture.socks_targets and not named:
             problems.append(f"capture {name}: no SOCKS5 request asked for a lab name: the names did not reach the proxy as names")
@@ -843,13 +1062,24 @@ def main(argv: list[str]) -> int:
         if dns_shift is None:
             facts.append(f"lookups on the uplink while connected: not lined up ({how}); the captures above cover those periods")
         else:
-            inside_lookups = collections.Counter(f"{n} {kind}" for when, n, kind in queried if inside(when - dns_shift, windows))
-            own = sum(c for k, c in inside_lookups.items() if k.split(" ")[0] == PROXY_NAME)
-            android = collections.Counter({k: c for k, c in inside_lookups.items() if k.split(" ")[0] in ANDROID_NAMES})
-            unexplained = collections.Counter({k: c for k, c in inside_lookups.items() if k.split(" ")[0] not in ANDROID_NAMES | {PROXY_NAME}})
+            own, android, matched, unexplained = 0, collections.Counter(), collections.Counter(), collections.Counter()
+            for when, n, kind in queried:
+                local = when - dns_shift
+                if not inside(local, windows):
+                    continue
+                if n == PROXY_NAME:
+                    own += 1
+                elif n in ANDROID_NAMES:
+                    android[f"{n} {kind}"] += 1
+                elif any(looked == n and abs((t - local).total_seconds()) <= 2.5 for t, looked in reported_lookups):
+                    matched[f"{n} {kind}"] += 1  # the same lookup a capture put down to an app Android lets leave the VPN
+                else:
+                    unexplained[f"{n} {kind}"] += 1
             facts.append(
                 f"lookups on the uplink while connected ({len(windows)} periods, {span:.0f} s; {how}): {own} of the proxy's own name; "
-                f"Android's network checks and time: {dict(android) or 'none'}; any other: {dict(unexplained.most_common(12)) or 'none'}"
+                f"Android's network checks and time: {dict(android) or 'none'}; "
+                + (f"by apps Android lets leave a VPN (from the captures): {dict(matched.most_common(8))}; " if matched else "")
+                + f"any other: {dict(unexplained.most_common(12)) or 'none'}"
             )
             if unexplained:
                 problems.append(f"the phone looked up names on its own network while connected, around the VPN: {dict(unexplained.most_common(12))}")

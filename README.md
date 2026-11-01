@@ -6,6 +6,7 @@ What it promises, and where that ends (the single source for these claims is `do
 
 - **While connected**, if the proxy stops working, traffic is blocked instead of being sent around the proxy. Site names are resolved by the proxy, not looked up by the phone; an app's own encrypted DNS (or Android's Private DNS set to a provider) goes through the proxy too, which then sees addresses instead of names.
 - **Not carried:** UDP (QUIC, calls, games — refused so apps fall back to TCP), ping and other ICMP, and devices on the local network (printers, casting). IPv6 destinations work only if the proxy has IPv6.
+- **Outside the VPN:** ProxyFlow's own connection to the proxy (by design) and, by Android's rules, some of Android's own traffic and that of privileged preinstalled apps (on Android 15, Google Play services opened connections around the VPN), apps in a work profile, Private space or another user, and tethered devices.
 - **When ProxyFlow is not connected** — before it starts, after the user disconnects, or when Android removes the VPN — apps use the normal network, unless Android's Always-on VPN with "Block connections without VPN" is turned on. The app will guide users to that setting (M8).
 
 **Status**

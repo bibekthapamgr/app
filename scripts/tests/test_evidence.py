@@ -194,6 +194,33 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual({"proxyflow.test": 2}, dict(c.dns_names))
 
 
+class SocketTableTest(unittest.TestCase):
+    def test_addresses_of_the_kernels_tables(self):
+        self.assertEqual(("10.0.2.15", 40040), m6_evidence.endpoint("0F02000A:9C68"))
+        self.assertEqual(("10.0.2.15", 40040), m6_evidence.endpoint("0000000000000000FFFF00000F02000A:9C68"))  # IPv4-mapped (tcp6)
+        self.assertEqual(("fec0::15", 443), m6_evidence.endpoint("0000C0FE000000000000000015000000:01BB"))
+
+    def test_a_socket_explains_a_connection_while_it_was_seen_give_or_take_a_moment(self):
+        with tempfile.TemporaryDirectory() as out:
+            with open(os.path.join(out, "phone-connecting.txt"), "w") as f:
+                base = at("02:00:10").timestamp()
+                for t in (base, base + 0.25, base + 0.5):
+                    f.write(f"T {t:.3f}\ntcp6   1: 0000000000000000FFFF00000F02000A:9C68 0000000000000000FFFF0000DF2913C6:146C 01 0:0 0:0 0 10143 0 77\n")
+                f.write(f"T {base + 0.75:.3f}\ntcp    2: 0F02000A:9C69 DF2913C6:146C 06 0:0 0:0 0 0 0 0\n")  # TIME-WAIT: no owner
+                f.write("A 2: eth0    inet6 fec0::abcd/64 scope global dynamic\n")
+            sockets = m6_evidence.socket_samples(out)
+        owners = lambda seconds, port=40040: sockets.owners("tcp", "10.0.2.15", port, "198.19.41.223", 5228, (at("02:00:10") + datetime.timedelta(seconds=seconds)).replace(tzinfo=None))  # noqa: E731
+        self.assertEqual([10143], owners(-1.4))
+        self.assertEqual([10143], owners(1.9))  # seen until +0.5 s
+        self.assertEqual([], owners(2.1))
+        self.assertEqual([], owners(0.5, port=40041))
+        when = at("02:00:10").replace(tzinfo=None)
+        self.assertEqual([], sockets.owners("tcp", "10.0.2.16", 40040, "198.19.41.223", 5228, when))  # another local address
+        self.assertEqual([], sockets.owners("udp", "10.0.2.15", 40040, "198.19.41.223", 5228, when))  # another protocol
+        self.assertEqual({"fec0::abcd/64"}, sockets.addresses)
+        self.assertEqual(4, len(sockets.snapshots))
+
+
 class AnnotationTest(unittest.TestCase):
     def annotations(self, lines: list[str]) -> list[tuple[str, str]]:
         out = io.StringIO()
@@ -223,7 +250,7 @@ class EvidenceTest(unittest.TestCase):
     """main() over a small run that passes, and over the same run with one fault at a time."""
 
     def run_evidence(self, *, capture_extra=(), gate_first="16 03 01", uplink_dns=(), logcat_extra=(), network=(), gate_log="",
-                     connecting="", packages="", system_packages="") -> tuple[int, str]:
+                     connecting="", packages="", permissions="", host_capture=True) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as pf, tempfile.TemporaryDirectory() as out:
             files = {
                 "log-baseline.properties": "destination.log=0\n",
@@ -248,15 +275,18 @@ class EvidenceTest(unittest.TestCase):
                 f.write(connecting)
             with open(os.path.join(out, "packages-uids.txt"), "w") as f:
                 f.write(packages)
-            with open(os.path.join(out, "packages-system.txt"), "w") as f:
-                f.write(system_packages)
+            with open(os.path.join(out, "packages-network-permissions.txt"), "w") as f:
+                f.write(permissions)
             with open(os.path.join(out, "logcat.txt"), "w") as f:
                 f.write("11-01 02:00:00.000   100   100 I ProxyFlowE2E: sent PF6-a-1 to 10.99.0.2:8080\n" + "".join(logcat_extra))
-            host = os.path.join(out, "uplink.pcap")
+            host = os.path.join(out, "uplink.pcap" if host_capture else "guest-eth0.pcap")
             pcap(host, UPLINK + list(capture_extra))
+            if not host_capture:  # the phone's own capture, which ran through the tests
+                with open(os.path.join(out, "guest-capture.txt"), "w") as f:
+                    f.write("tcpdump at the start on: eth0\ntcpdump at the end: 4000\ntcpdump at the end on: eth0\n")
             printed = io.StringIO()
             with contextlib.redirect_stdout(printed):
-                status = m6_evidence.main(["m6_evidence.py", "--api", "0", "--pf", pf, "--out", out, "--host-pcap", host])
+                status = m6_evidence.main(["m6_evidence.py", "--api", "0", "--pf", pf, "--out", out] + (["--host-pcap", host] if host_capture else []))
             return status, printed.getvalue()
 
     def test_a_clean_run_passes(self):
@@ -379,11 +409,12 @@ class EvidenceTest(unittest.TestCase):
         )
         self.assertEqual(1, status)
         self.assertIn("traffic left the phone around the VPN while connected: {'TCP 142.250.80.46:443': 1}", printed)
-        self.assertIn("TCP 142.250.80.46:443 at 02:00:09.500 (connected at 02:00:01 until 'disconnect'; owner not sampled)", printed)
+        self.assertIn("TCP 142.250.80.46:443 at 02:00:09.500 (connected at 02:00:01 until 'disconnect'; owner not sampled, 0 snapshots "
+                      "within 1 s; from 10.0.2.15 port 40020, hop limit 64; seen by uplink.pcap)", printed)
 
     def test_the_owner_of_a_connection_is_named_from_the_phones_socket_samples(self):
         # /proc/net/tcp: local 10.0.2.15:40020 and remote 142.250.80.46:443 (little-endian hex), SYN-SENT (02), uid 10123.
-        sample = f"T {int(at('02:00:10').timestamp())}\n   5: 0F02000A:9C54 2E50FA8E:01BB 02 00000000:00000000 01:00000064 00000002 10123 0 1\n"
+        sample = f"T {at('02:00:10').timestamp():.3f}\ntcp    5: 0F02000A:9C54 2E50FA8E:01BB 02 00000000:00000000 01:00000064 00000002 10123 0 4711\n"
         status, printed = self.run_connected(
             uplink_dns=[self.PROXY_LOOKUP],
             capture_extra=[(at("02:00:10"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 443, syn=True)))],
@@ -394,79 +425,202 @@ class EvidenceTest(unittest.TestCase):
         self.assertIn("uid 10123 (com.example.leaky)", printed)
 
     SYN_TO_PLACEHOLDER = (at("02:00:10"), ipv4(PHONE4, "198.19.41.223", 6, tcp(40040, 5228, syn=True)))
+    GMS = "package:com.google.android.gms uid:10143\n"
+    GMS_GRANTS = (
+        "  Package [com.google.android.gms] (2b5e1a0):\n    appId=10143\n"
+        "      android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS: granted=true\n"
+        "      android.permission.ACCESS_NETWORK_STATE: granted=true\n"
+    )
 
     @staticmethod
-    def sample(uid: int) -> str:  # /proc/net/tcp: remote 198.19.41.223:5228, SYN-SENT, owned by uid
-        return f"T {int(at('02:00:10').timestamp())}\n   7: 1002000A:9C68 DF2913C6:146C 02 00000000:00000000 01:00000064 00000002 {uid} 0 1\n"
+    def sample(uid: int, proto: str = "tcp", state: str = "02", when: str = "02:00:10") -> str:
+        """The socket sampler's lines: local 10.0.2.15:40040, remote 198.19.41.223:5228, owned by [uid]."""
+        return (f"T {at(when).timestamp():.3f}\n"
+                f"{proto}    7: 0F02000A:9C68 DF2913C6:146C {state} 00000000:00000000 01:00000064 00000002 {uid} 0 4712\n")
 
-    def test_a_preinstalled_app_bypassing_the_vpn_is_reported_as_androids_own(self):
+    # Android's own view of ProxyFlow's VPN, as E2e.connect logs it: every uid but ProxyFlow's 10200, no bypassing.
+    VIEW = ("11-01 02:00:01.500   100   100 I ProxyFlowE2E: android's view of the VPN (own uid 10200): Uids: <{0-10199}, {10201-99999}> | "
+            "OwnerUid: 10200 | VpnTransportInfo{type=1, sessionId=null, bypassable=false} | DnsAddresses: [ /198.18.0.2 ]\n")
+
+    def run_viewed(self, view: str = VIEW, **more):
+        return self.run_evidence(logcat_extra=[*self.VPN, view], **more)
+
+    def test_an_app_android_lets_leave_a_vpn_is_reported_with_its_owner(self):
         status, printed = self.run_connected(
-            uplink_dns=[self.PROXY_LOOKUP],
-            capture_extra=[self.SYN_TO_PLACEHOLDER],
-            connecting=self.sample(10143),
-            packages="package:com.google.android.gms uid:10143\n",
-            system_packages="package:com.google.android.gms uid:10143\n",
+            uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.SYN_TO_PLACEHOLDER], connecting=self.sample(10143),
+            packages=self.GMS, permissions=self.GMS_GRANTS,
         )
         self.assertEqual(0, status, printed)
-        self.assertIn("by Android itself or its preinstalled apps, which it lets bypass VPNs: "
-                      "{'TCP 198.19.41.223:5228 (uid 10143 (com.google.android.gms))': 1}", printed)
+        self.assertIn("by apps Android lets leave a VPN (system uids, network bypass permissions): "
+                      "{'TCP 198.19.41.223:5228 (uid 10143 (com.google.android.gms; CONNECTIVITY_USE_RESTRICTED_NETWORKS))': 1}", printed)
 
-    def test_a_preinstalled_apps_socket_explains_only_its_own_connection(self):
+    def test_a_preinstalled_app_without_a_network_bypass_permission_fails(self):
+        chrome = "  Package [com.android.chrome] (1a2b):\n    userId=10143\n      android.permission.ACCESS_NETWORK_STATE: granted=true\n"
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.SYN_TO_PLACEHOLDER], connecting=self.sample(10143),
+            packages="package:com.android.chrome uid:10143\n", permissions=chrome,
+        )
+        self.assertEqual(1, status, printed)
+        self.assertIn("traffic left the phone around the VPN while connected: {'TCP 198.19.41.223:5228': 1}", printed)
+        self.assertIn("uid 10143 (com.android.chrome)", printed)
+
+    def test_an_owned_socket_explains_only_its_own_connection(self):
         # Google Play services' socket (source port 40040) and, to the same address, another connection (40041) that
         # the samples never saw: that one fails.
         other = (at("02:00:10"), ipv4(PHONE4, "198.19.41.223", 6, tcp(40041, 5228, syn=True)))
         status, printed = self.run_connected(
-            uplink_dns=[self.PROXY_LOOKUP],
-            capture_extra=[self.SYN_TO_PLACEHOLDER, other],
-            connecting=self.sample(10143),
-            packages="package:com.google.android.gms uid:10143\n",
-            system_packages="package:com.google.android.gms uid:10143\n",
+            uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.SYN_TO_PLACEHOLDER, other], connecting=self.sample(10143),
+            packages=self.GMS, permissions=self.GMS_GRANTS,
         )
         self.assertEqual(1, status)
         self.assertIn("traffic left the phone around the VPN while connected: {'TCP 198.19.41.223:5228': 1}", printed)
         self.assertIn("owner not sampled", printed)
 
-    def test_udp_is_never_put_down_to_a_preinstalled_apps_tcp_socket(self):
+    def test_udp_is_never_put_down_to_a_tcp_socket(self):
         datagram = (at("02:00:10"), ipv4(PHONE4, "198.19.41.223", 17, udp(40040, 5228, b"x")))
         status, printed = self.run_connected(
-            uplink_dns=[self.PROXY_LOOKUP],
-            capture_extra=[datagram],
-            connecting=self.sample(10143),
-            packages="package:com.google.android.gms uid:10143\n",
-            system_packages="package:com.google.android.gms uid:10143\n",
+            uplink_dns=[self.PROXY_LOOKUP], capture_extra=[datagram], connecting=self.sample(10143),
+            packages=self.GMS, permissions=self.GMS_GRANTS,
         )
         self.assertEqual(1, status)
         self.assertIn("'UDP 198.19.41.223:5228': 1", printed)
 
-    def test_the_shell_bypassing_the_vpn_fails_even_as_a_system_uid(self):
+    def test_udp_is_put_down_to_its_own_connected_socket(self):
+        datagram = (at("02:00:10"), ipv4(PHONE4, "198.19.41.223", 17, udp(40040, 5228, b"x")))
         status, printed = self.run_connected(
-            uplink_dns=[self.PROXY_LOOKUP],
-            capture_extra=[self.SYN_TO_PLACEHOLDER],
-            connecting=self.sample(2000),
+            uplink_dns=[self.PROXY_LOOKUP], capture_extra=[datagram], connecting=self.sample(10143, proto="udp", state="01"),
+            packages=self.GMS, permissions=self.GMS_GRANTS,
+        )
+        self.assertEqual(0, status, printed)
+        self.assertIn("'UDP 198.19.41.223:5228 (uid 10143 (com.google.android.gms; CONNECTIVITY_USE_RESTRICTED_NETWORKS))': 1", printed)
+
+    def test_a_socket_seen_too_long_before_the_connection_does_not_explain_it(self):
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.SYN_TO_PLACEHOLDER], connecting=self.sample(10143, when="02:00:05"),
+            packages=self.GMS, permissions=self.GMS_GRANTS,
+        )
+        self.assertEqual(1, status)
+        self.assertIn("owner not sampled", printed)
+
+    def test_the_shell_leaving_the_vpn_fails_even_as_a_system_uid(self):
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.SYN_TO_PLACEHOLDER], connecting=self.sample(2000),
             packages="package:com.android.shell uid:2000\n",
-            system_packages="package:com.android.shell uid:2000\n",
         )
         self.assertEqual(1, status)
         self.assertIn("uid 2000 (com.android.shell)", printed)
 
-    def test_root_bypassing_the_vpn_fails(self):  # adbd left as root would run the tests as root
-        status, printed = self.run_connected(
-            uplink_dns=[self.PROXY_LOOKUP],
-            capture_extra=[self.SYN_TO_PLACEHOLDER],
-            connecting=self.sample(0),
-        )
-        self.assertEqual(1, status)
-        self.assertIn("uid 0 (no package: a system uid)", printed)
+    def test_androids_daemons_are_androids_own(self):  # root: netd's resolver on Android 10; the tests run as the shell
+        status, printed = self.run_connected(uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.SYN_TO_PLACEHOLDER], connecting=self.sample(0))
+        self.assertEqual(0, status, printed)
+        self.assertIn("(uid 0 (a system uid))", printed)
 
-    def test_proxyflow_itself_bypassing_the_vpn_elsewhere_than_its_proxy_fails(self):
-        status, printed = self.run_connected(
-            uplink_dns=[self.PROXY_LOOKUP],
-            capture_extra=[self.SYN_TO_PLACEHOLDER],
-            connecting=self.sample(10200),
-            packages="package:app.proxyflow.debug uid:10200\n",
-            system_packages="package:app.proxyflow.debug uid:10200\n",
+    def test_proxyflow_itself_leaving_the_vpn_elsewhere_than_its_proxy_fails(self):
+        status, printed = self.run_viewed(
+            uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.PROXY_SYN, self.SYN_TO_PLACEHOLDER], connecting=self.sample(10200),
         )
         self.assertEqual(1, status)
+        self.assertIn("traffic left the phone around the VPN while connected: {'TCP 198.19.41.223:5228': 1}", printed)
+        self.assertIn("uid 10200 (no package: an app removed after the tests; ProxyFlow)", printed)
+        self.assertIn("ProxyFlow's own sockets reached other places than its proxy: {'TCP 198.19.41.223:5228': 1}", printed)
+
+    def test_proxyflows_own_sockets_to_its_proxy_are_fine(self):
+        to_proxy = f"T {at('02:00:10').timestamp():.3f}\ntcp    3: 0F02000A:9C40 0202000A:0438 01 00000000:00000000 00:00000000 00000000 10200 0 4713\n"
+        status, printed = self.run_viewed(uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.PROXY_SYN], connecting=to_proxy)
+        self.assertEqual(0, status, printed)
+        self.assertIn("ProxyFlow's own sockets (uid [10200]): 1 seen, every one to its proxy or the gate's control port", printed)
+
+    def test_an_unsampled_owner_is_put_down_to_such_apps_when_android_left_out_proxyflow_alone(self):
+        status, printed = self.run_viewed(
+            uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[self.PROXY_SYN, (at("02:00:10"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 5228, syn=True)))],
+        )
+        self.assertEqual(0, status, printed)
+        self.assertIn("Android's view of ProxyFlow's VPN after each connection (dumpsys connectivity): 1 readable; "
+                      "{'every uid but 10200, bypassable=false, DNS 198.18.0.2': 1}", printed)
+        self.assertIn("with no owner sampled, so theirs (Android routes every other app into this VPN): {'TCP 142.250.80.46:5228': 1}", printed)
+
+    def test_an_unsampled_owner_fails_when_android_left_out_more_than_proxyflow(self):
+        view = self.VIEW.replace("Uids: <{0-10199}, {10201-99999}>", "Uids: <{0-10149}, {10151-10199}, {10201-99999}>")
+        status, printed = self.run_viewed(
+            view, uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[self.PROXY_SYN, (at("02:00:10"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 5228, syn=True)))],
+        )
+        self.assertEqual(1, status)
+        self.assertIn("Android's VPN leaves out uids [(10150, 10150), (10200, 10200)], not only ProxyFlow's (10200)", printed)
+        self.assertIn("traffic left the phone around the VPN while connected: {'TCP 142.250.80.46:5228': 1}", printed)
+
+    def test_a_vpn_android_lets_apps_bypass_fails(self):
+        status, printed = self.run_viewed(self.VIEW.replace("bypassable=false", "bypassable=true"), uplink_dns=[self.PROXY_LOOKUP],
+                                          capture_extra=[self.PROXY_SYN])
+        self.assertEqual(1, status)
+        self.assertIn("Android says apps may bypass the VPN (bypassable=true)", printed)
+
+    def test_a_vpn_without_proxyflows_dns_server_fails(self):
+        status, printed = self.run_viewed(self.VIEW.replace("/198.18.0.2", "/10.0.2.3"), uplink_dns=[self.PROXY_LOOKUP],
+                                          capture_extra=[self.PROXY_SYN])
+        self.assertEqual(1, status)
+        self.assertIn("the VPN's DNS servers are [/10.0.2.3]", printed)
+
+    def test_an_unsampled_lookup_and_its_dns_log_entry_are_put_down_to_such_apps_when_android_left_out_proxyflow_alone(self):
+        status, printed = self.run_viewed(
+            uplink_dns=[self.PROXY_LOOKUP, "02:00:12 mtalk.google.com"],
+            capture_extra=[self.PROXY_SYN, (at("02:00:12"), ipv4(PHONE4, "10.0.2.3", 17, udp(40022, 53, dns_query("mtalk.google.com"))))],
+        )
+        self.assertEqual(0, status, printed)
+        self.assertIn("lookups with no owner sampled: {'mtalk.google.com': 1}", printed)
+        self.assertIn("by apps Android lets leave a VPN (from the captures): {'mtalk.google.com A': 1}; any other: none", printed)
+
+    def test_a_dns_log_entry_no_capture_put_down_to_such_apps_fails(self):
+        status, printed = self.run_viewed(uplink_dns=[self.PROXY_LOOKUP, "02:00:12 mtalk.google.com"], capture_extra=[self.PROXY_SYN])
+        self.assertEqual(1, status)
+        self.assertIn("around the VPN: {'mtalk.google.com A': 1}", printed)
+
+    def test_a_new_ipv6_address_of_the_phone_still_counts_as_the_phone(self):
+        network = ["IPv6 addresses: lo ::1/128;eth0 fec0::15/64;eth0 fe80::15/64"]
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP], network=network,
+            capture_extra=[(at("02:00:10"), ipv6("fec0::abcd:1234", "2607:f8b0:4004:c07::64", 6, tcp(40021, 443, syn=True)))],
+        )
+        self.assertEqual(1, status)
+        self.assertIn("'TCP [2607:f8b0:4004:c07::64]:443': 1", printed)
+
+    def test_a_retransmitted_syn_is_one_connection(self):
+        syn = ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 443, syn=True))
+        status, printed = self.run_connected(uplink_dns=[self.PROXY_LOOKUP], capture_extra=[(at("02:00:10"), syn), (at("02:00:11"), syn)])
+        self.assertEqual(1, status)
+        self.assertIn("traffic left the phone around the VPN while connected: {'TCP 142.250.80.46:443': 1}", printed)
+
+    def test_another_protocol_leaving_the_phone_fails(self):
+        gre = (at("02:00:10"), ipv4(PHONE4, "203.0.113.9", 47, b"\x00\x00\x08\x00payload"))
+        status, printed = self.run_connected(uplink_dns=[self.PROXY_LOOKUP], capture_extra=[gre])
+        self.assertEqual(1, status)
+        self.assertIn("'IP47 203.0.113.9:0': 1", printed)
+
+    def test_a_capture_whose_gaps_scatter_is_not_lined_up(self):
+        logcat, syns = [], []
+        for n, gap in enumerate((0, 1, -1, 2)):  # four attempts, the nearest SYN to each anywhere within 2 s
+            minute = f"02:0{n}"
+            logcat += [f"11-01 {minute}:00.000   200   210 I ProxyFlowVpn: connect p{n}\n",
+                       f"11-01 {minute}:01.000   200   210 I ProxyFlowVpn: connected p{n}\n",
+                       f"11-01 {minute}:30.000   200   210 I ProxyFlowVpn: disconnect\n"]
+            syns.append((at(f"{minute}:00") + datetime.timedelta(seconds=gap), ipv4(PHONE4, GATEWAY, 6, tcp(40200 + n, 1080, syn=True))))
+        status, printed = self.run_evidence(uplink_dns=[self.PROXY_LOOKUP], logcat_extra=logcat, capture_extra=syns)
+        self.assertEqual(1, status)
+        self.assertIn("4 of 4 attempts matched, but their gaps spread over 2.00 s around +1.00 s", printed)
+
+    def test_without_the_emulators_capture_the_dns_log_is_lined_up_by_the_proxy_lookups(self):
+        status, printed = self.run_evidence(
+            uplink_dns=[self.PROXY_LOOKUP, "02:00:10 www.youtube.com"], logcat_extra=self.VPN, capture_extra=[self.PROXY_SYN], host_capture=False,
+        )
+        self.assertEqual(1, status)
+        self.assertIn("lookups on the uplink while connected (1 periods, 29 s; clocks agree within 0.5 s)", printed)
+        self.assertIn("around the VPN: {'www.youtube.com A': 1}", printed)
+
+    def test_a_gate_connection_opening_with_16_but_no_tls_record_is_plaintext(self):
+        status, printed = self.run_evidence(gate_first="16 00 05")
+        self.assertEqual(1, status)
+        self.assertIn("plaintext to a TLS proxy through the gate", printed)
 
     def test_a_direct_ipv6_connection_while_connected_fails(self):
         network = ["IPv6 addresses: lo ::1/128;eth0 fec0::15/64;eth0 fe80::15/64"]
@@ -517,8 +671,9 @@ class EvidenceTest(unittest.TestCase):
             ],
         )
         self.assertEqual(0, status, printed)
-        self.assertIn("its network's resolver or Android's own checks: none; by Android itself or its preinstalled apps, which it lets "
-                      "bypass VPNs: none; DNS queries: {'time.android.com': 1}", printed)
+        self.assertIn("its network's resolver or Android's own checks: none; by apps Android lets leave a VPN (system uids, network bypass "
+                      "permissions): none; with no owner sampled, so theirs (Android routes every other app into this VPN): none; DNS queries: "
+                      "{'time.android.com': 1}", printed)
 
 
 if __name__ == "__main__":
