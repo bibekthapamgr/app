@@ -196,7 +196,8 @@ class CaptureTest(unittest.TestCase):
 class EvidenceTest(unittest.TestCase):
     """main() over a small run that passes, and over the same run with one fault at a time."""
 
-    def run_evidence(self, *, capture_extra=(), gate_first="16 03 01", uplink_dns=(), logcat_extra=(), network=(), gate_log="") -> tuple[int, str]:
+    def run_evidence(self, *, capture_extra=(), gate_first="16 03 01", uplink_dns=(), logcat_extra=(), network=(), gate_log="",
+                     connecting="", packages="") -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as pf, tempfile.TemporaryDirectory() as out:
             files = {
                 "log-baseline.properties": "destination.log=0\n",
@@ -217,6 +218,10 @@ class EvidenceTest(unittest.TestCase):
                     f.write(text)
             with open(os.path.join(out, "guest-network.txt"), "w") as f:
                 f.write("".join(line + "\n" for line in network))
+            with open(os.path.join(out, "phone-connecting.txt"), "w") as f:
+                f.write(connecting)
+            with open(os.path.join(out, "packages-uids.txt"), "w") as f:
+                f.write(packages)
             with open(os.path.join(out, "logcat.txt"), "w") as f:
                 f.write("11-01 02:00:00.000   100   100 I ProxyFlowE2E: sent PF6-a-1 to 10.99.0.2:8080\n" + "".join(logcat_extra))
             host = os.path.join(out, "uplink.pcap")
@@ -292,8 +297,8 @@ class EvidenceTest(unittest.TestCase):
     # The phone's connection to its proxy right after "connect": lines the capture up with logcat.
     PROXY_SYN = (at("02:00:00"), ipv4(PHONE4, GATEWAY, 6, tcp(40100, 1080, syn=True)))
 
-    def run_connected(self, uplink_dns=(), capture_extra=()):
-        return self.run_evidence(uplink_dns=uplink_dns, logcat_extra=self.VPN, capture_extra=[self.PROXY_SYN, *capture_extra])
+    def run_connected(self, uplink_dns=(), capture_extra=(), **more):
+        return self.run_evidence(uplink_dns=uplink_dns, logcat_extra=self.VPN, capture_extra=[self.PROXY_SYN, *capture_extra], **more)
 
     def test_lookups_while_connected_are_lined_up_with_the_vpn_log(self):
         lookups = [self.PROXY_LOOKUP, "02:00:10 connectivitycheck.gstatic.com", "02:00:29 www.youtube.com", "02:00:40 dl.google.com"]
@@ -346,7 +351,19 @@ class EvidenceTest(unittest.TestCase):
         )
         self.assertEqual(1, status)
         self.assertIn("traffic left the phone around the VPN while connected: {'TCP 142.250.80.46:443': 1}", printed)
-        self.assertIn("TCP 142.250.80.46:443 at 02:00:09.500 (connected at 02:00:01 until 'disconnect')", printed)  # on logcat's clock
+        self.assertIn("TCP 142.250.80.46:443 at 02:00:09.500 (connected at 02:00:01 until 'disconnect'; owner not sampled)", printed)
+
+    def test_the_owner_of_a_connection_is_named_from_the_phones_socket_samples(self):
+        # /proc/net/tcp: remote 142.250.80.46:443 (little-endian hex), SYN-SENT (02), uid 10123.
+        sample = f"T {int(at('02:00:10').timestamp())}\n   5: 0F02000A:9C40 2E50FA8E:01BB 02 00000000:00000000 01:00000064 00000002 10123 0 1\n"
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[(at("02:00:10"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 443, syn=True)))],
+            connecting=sample,
+            packages="package:com.example.leaky uid:10123\n",
+        )
+        self.assertEqual(1, status)
+        self.assertIn("uid 10123 (com.example.leaky)", printed)
 
     def test_a_direct_ipv6_connection_while_connected_fails(self):
         network = ["IPv6 addresses: lo ::1/128;eth0 fec0::15/64;eth0 fe80::15/64"]

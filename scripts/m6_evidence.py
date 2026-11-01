@@ -459,6 +459,55 @@ def explained(dst: str, kind: str, port: int, android_addresses: set) -> bool:
     return dst in android_addresses and ((kind == "TCP" and port in (80, 443)) or (kind == "UDP" and port == 123))
 
 
+# --- who owned a connection (the phone's kernel tables, sampled by e2e_device.sh) ------
+
+PLACEHOLDERS = ipaddress.ip_network("198.18.0.0/15")
+
+
+def connecting_sockets(out: str) -> list[tuple[datetime.datetime, str, int]]:
+    """The phone's TCP sockets still connecting (SYN-SENT), sampled every half second: (time, "address:port", uid)."""
+    found, when = [], None
+    for line in read(os.path.join(out, "phone-connecting.txt")):
+        if line.startswith("T "):
+            try:
+                when = datetime.datetime.fromtimestamp(int(line[2:].strip()), datetime.timezone.utc).replace(tzinfo=None)
+            except ValueError:
+                when = None
+            continue
+        parts = line.split()
+        if when is None or len(parts) < 8 or parts[3] != "02" or ":" not in parts[2]:
+            continue
+        address, port = parts[2].split(":", 1)
+        try:
+            raw = bytes.fromhex(address)
+            if len(raw) == 4:
+                ip = ipaddress.ip_address(raw[::-1])
+            elif len(raw) == 16:  # four little-endian words
+                ip = ipaddress.ip_address(b"".join(raw[i : i + 4][::-1] for i in range(0, 16, 4)))
+                ip = ip.ipv4_mapped or ip
+            else:
+                continue
+            found.append((when, f"{ip}:{int(port, 16)}", int(parts[7])))
+        except ValueError:
+            continue
+    return found
+
+
+def package_names(out: str) -> dict[int, str]:
+    names: dict[int, list[str]] = {}
+    for line in read(os.path.join(out, "packages-uids.txt")):
+        m = re.match(r"package:(\S+) uid:(\d+)", line.strip())
+        if m:
+            names.setdefault(int(m.group(2)), []).append(m.group(1))
+    return {uid: ",".join(sorted(packages))[:100] for uid, packages in names.items()}
+
+
+def owners_of(target: str, when: datetime.datetime, sockets: list, names: dict) -> str:
+    """Who owned a socket connecting to [target] around [when] (within 2 s), as the kernel's tables named it."""
+    uids = sorted({uid for (at, t, uid) in sockets if t == target and abs((at - when).total_seconds()) <= 2})
+    return ", ".join(f"uid {uid} ({names.get(uid, 'no package: a system uid')})" for uid in uids) or "owner not sampled"
+
+
 # --- the checks -----------------------------------------------------------------
 
 
@@ -568,6 +617,16 @@ def main(argv: list[str]) -> int:
     queried = uplink_queries(after("dns-uplink.log"), year)
     span = sum((end - start).total_seconds() for start, end, _ in windows)
     network = read(os.path.join(args.out, "guest-network.txt"))
+    sockets, names = connecting_sockets(args.out), package_names(args.out)
+    to_placeholders = collections.Counter(
+        f"{target} uid {uid} ({names.get(uid, 'no package: a system uid')})"
+        for (_, target, uid) in sockets
+        if ipaddress.ip_address(target.rsplit(":", 1)[0]) in PLACEHOLDERS
+    )
+    facts.append(
+        f"the phone's sockets connecting to placeholder addresses (its kernel's tables every 0.5 s, {len(sockets)} samples of "
+        f"connecting sockets): {dict(to_placeholders.most_common(8)) or 'none seen'}"
+    )
     refused_probes = [int(m.group(1)) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*engine local_refused=(\d+)", line))]
     if refused_probes:
         facts.append(f"TCP to ProxyFlow's own addresses refused on the phone (Android's DNS-over-TLS probe, engine local_refused): {max(refused_probes)}")
@@ -696,7 +755,10 @@ def main(argv: list[str]) -> int:
                 direct = collections.Counter(key for _, key in odd_events)
                 names_inside = collections.Counter(n for (when, n) in capture.dns_queries if inside(when and when - shift, windows))
                 odd_names = {n: c for n, c in names_inside.items() if n not in ANDROID_NAMES and n != PROXY_NAME}
-                where = [f"{key} at {when:%H:%M:%S.%f}"[:-3] + f" ({period_of(when, windows)})" for when, key in odd_events[:4]]
+                where = [
+                    f"{key} at {when:%H:%M:%S.%f}"[:-3] + f" ({period_of(when, windows)}; {owners_of(key.split(' ', 1)[1].strip('[]').replace(']:', ':'), when, sockets, names)})"
+                    for when, key in odd_events[:4]
+                ]
                 checked.append(name)
                 facts.append(
                     f"capture {name} while connected ({len(windows)} periods, {span:.0f} s; its clock {offset:+.2f} s from logcat's, {how}; "

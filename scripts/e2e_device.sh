@@ -233,6 +233,17 @@ timeout 30 adb logcat -c || true
 # Logcat streamed to the runner as the tests run: it survives a device or a step that hangs later.
 adb logcat -v threadtime -v UTC > "$OUT/logcat-live.txt" 2>&1 & # UTC, like the captures: the evidence lines them up
 LIVE_LOGCAT=$!
+# Every half second, the phone's TCP sockets still connecting (SYN-SENT) with their owner's uid, from the kernel's own
+# tables: which app sent a connection that the evidence finds on the uplink while connected.
+cat > "$RUNNER_TEMP/pf-connecting.sh" <<'SAMPLER'
+while true; do
+    echo "T $(date +%s)"
+    grep -h ' 02 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null
+    sleep 0.5
+done
+SAMPLER
+timeout 30 adb push "$RUNNER_TEMP/pf-connecting.sh" /data/local/tmp/pf-connecting.sh >/dev/null 2>&1 || true
+adb shell "setsid sh /data/local/tmp/pf-connecting.sh > /data/local/tmp/pf-connecting.txt 2>/dev/null </dev/null &" || true
 
 # Bounded well inside the job's own limit, so that logcat, the captures and the evidence are still
 # collected when a test hangs (scripts/m5_evidence.py reads how far the tests got from logcat).
@@ -250,6 +261,9 @@ fi
 
 timeout 120 adb logcat -d -v threadtime -v UTC > "$OUT/logcat.txt" 2>&1 || true
 kill "$LIVE_LOGCAT" 2>/dev/null || true
+timeout 30 adb shell 'pkill -f pf-connecting.sh' >/dev/null 2>&1 || true
+timeout 120 adb pull /data/local/tmp/pf-connecting.txt "$OUT/phone-connecting.txt" >/dev/null 2>&1 || echo "no socket samples" > "$OUT/phone-connecting.txt"
+timeout 60 adb shell pm list packages -U 2>/dev/null | tr -d '\r' > "$OUT/packages-uids.txt" || true
 # The phone's network after the tests: the same uplink as before them, or what changed.
 {
     echo "after the tests: $(uplink_name)"
@@ -267,5 +281,6 @@ if [ "$GUEST_CAPTURE" = 1 ]; then
             echo "pull of pf-$iface.pcap failed or timed out" >> "$OUT/guest-capture.txt"
     done
 fi
-timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties /data/local/tmp/proxyflow-ca.pem /data/local/tmp/pf-client.apk >/dev/null 2>&1 || true
+timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties /data/local/tmp/proxyflow-ca.pem /data/local/tmp/pf-client.apk \
+    /data/local/tmp/pf-connecting.sh /data/local/tmp/pf-connecting.txt >/dev/null 2>&1 || true
 exit "$STATUS"
