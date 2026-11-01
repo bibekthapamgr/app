@@ -104,7 +104,8 @@ class Capture:
 
     @property
     def covers_uplink(self) -> bool:
-        return any(port in SOCKS_PORTS for _, port in self.syns) and any(port == HTTP_PORT for _, port in self.syns)
+        to_proxies = [port for (destination, port) in self.syns if destination == GATEWAY]
+        return any(port in SOCKS_PORTS for port in to_proxies) and HTTP_PORT in to_proxies
 
 
 def socks_connect_target(payload: bytes) -> str | None:
