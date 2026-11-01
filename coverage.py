@@ -16,15 +16,32 @@ import m6_evidence as m6  # noqa: E402
 YEAR = 2026
 
 
+WHERE = {}
+
+
 def state_of(local, windows) -> str:
-    for start, end, _ in windows:
+    for start, end, label in windows:
         if start <= local <= end:
+            WHERE["last"] = (f"+{(local - start).total_seconds():.2f} s after Connected, {(end - local).total_seconds():.2f} s before the end "
+                             f"of a {(end - start).total_seconds():.1f} s period ({label[:60]}; test {TEST_AT(start)})")
             if start + m6.MARGIN <= local <= end - m6.MARGIN:
                 return "checked"
             if (end - start) <= 2 * m6.MARGIN:
                 return "short period"
-            return "period edge"
+            return "start edge" if (local - start) < m6.MARGIN else "end edge"
     return "between"
+
+
+TESTS = []
+
+
+def TEST_AT(when):
+    name = None
+    for t, n in TESTS:
+        if t > when:
+            break
+        name = n
+    return name
 
 
 def main(root: str) -> None:
@@ -34,6 +51,15 @@ def main(root: str) -> None:
         dumped, streamed = m6.read(os.path.join(d, "logcat.txt")), m6.read(os.path.join(d, "logcat-live.txt"))
         logcat = dumped if len(dumped) >= len(streamed) else streamed
         windows, starts = m6.connected_windows(logcat, YEAR)
+        TESTS.clear()
+        current = None
+        for line in logcat:
+            m = re.search(r"TestRunner: started: (\S+)\(([\w.]+)\)", line)
+            if m:
+                current = f"{m.group(2).rsplit('.', 1)[-1]}.{m.group(1)}"
+            when = m6.logcat_time(line, YEAR)
+            if when:
+                TESTS.append((when, current))
         durations = [(end - start).total_seconds() for start, end, _ in windows]
         checked = [max(0.0, x - 2 * margin) for x in durations]
         print(f"API {api}: {len(windows)} periods, {sum(durations):.1f} s connected; checked: {sum(1 for c in checked if c > 0)} periods, "
@@ -58,6 +84,7 @@ def main(root: str) -> None:
             android_addresses = set().union(*(capture.dns_answers.get(n, set()) for n in m6.ANDROID_NAMES))
             tally = collections.defaultdict(collections.Counter)  # (state, verdict) -> items
             connections = set()
+            details = []
             for event in capture.events:
                 when, src, dst, kind, port, sport = event
                 if when is None or src not in phone:
@@ -84,6 +111,8 @@ def main(root: str) -> None:
                     verdict = "OTHER OWNER"
                     key += " " + ", ".join(owners.label(u) for u in uids)
                 tally[(state, verdict)][key] += 1
+                if verdict == "OTHER OWNER":
+                    details.append(f"{key}: {WHERE['last']}")
             lookups = collections.defaultdict(collections.Counter)
             for (when, n, src, sport, dst, transport) in capture.dns_queries:
                 if when is None:
@@ -95,11 +124,15 @@ def main(root: str) -> None:
                 uids = sockets.owners(transport.lower(), src, sport, dst, 53, local) if sport is not None else []
                 who = ", ".join(owners.label(u) for u in uids) or "no owner sampled"
                 lookups[state][f"{n} to {dst} ({who})"] += 1
+                if uids and not all(owners.may_bypass(u) for u in uids):
+                    details.append(f"lookup {n} to {dst} ({who}): {WHERE['last']}")
             print(f"  {os.path.basename(path)} (offset {offset:+.2f} s):")
             for (state, verdict), items in sorted(tally.items()):
                 print(f"    {state} / {verdict}: {sum(items.values())} {dict(items.most_common())}")
             for state, items in sorted(lookups.items()):
                 print(f"    {state} / lookups: {sum(items.values())} {dict(items.most_common())}")
+            for line in details:
+                print(f"    OTHER OWNER at {line}")
 
 
 if __name__ == "__main__":
