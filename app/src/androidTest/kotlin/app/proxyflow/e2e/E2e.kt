@@ -40,7 +40,7 @@ import org.junit.Assume.assumeTrue
 
 /**
  * What the CI runner set up for the end-to-end tests (.github/workflows/android.yml,
- * scripts/m5_device_env.sh): a Dante SOCKS5 proxy and a Squid HTTP proxy, both with
+ * scripts/e2e_env.sh): a Dante SOCKS5 proxy and a Squid HTTP proxy, both with
  * sign-in, a proxy that accepts connections and never answers, a closed port, a
  * destination server reachable only by name through the proxies, and a sink beside it
  * that only lines sent while traffic is held go to. The runner writes it
@@ -65,12 +65,18 @@ data class E2eConfig(
     companion object {
         private const val FILE = "/data/local/tmp/proxyflow-e2e.properties"
 
-        /** The runner's setup, or the test is skipped where there is none (a developer's device). */
-        fun load(): E2eConfig {
+        /** The runner's setup as keys and values, or the test is skipped where there is none (a developer's device). */
+        fun properties(): Map<String, String> {
             val values = Shell.run("cat $FILE").lines().mapNotNull { line ->
                 line.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0].trim() to it[1].trim() }
             }.toMap()
             assumeTrue("no proxy setup on this device ($FILE)", "socks.port" in values)
+            return values
+        }
+
+        /** The runner's setup, or the test is skipped where there is none (a developer's device). */
+        fun load(): E2eConfig {
+            val values = properties()
             fun value(key: String) = checkNotNull(values[key]) { "$FILE has no $key" }
             return E2eConfig(
                 proxyHost = value("proxy.host"),

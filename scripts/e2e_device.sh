@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # Runs inside reactivecircus/android-emulator-runner (one line in the workflow, as
 # the action runs each script line on its own): every module's device tests, with
-# the M5 end-to-end setup pushed to the emulator and the phone's uplink captured
-# from inside it when the image has tcpdump. Afterwards scripts/m5_evidence.py
-# reads what this leaves in $RUNNER_TEMP/m5-api<level>.
+# the end-to-end lab's setup (scripts/e2e_env.sh) and its CA certificate pushed to the
+# emulator and the phone's uplink captured from inside it when the image has tcpdump.
+# Afterwards scripts/m5_evidence.py and scripts/m6_evidence.py read what this leaves in
+# $RUNNER_TEMP/m5-api<level>.
 #
-# Usage: m5_device_e2e.sh <api level>
+# Usage: e2e_device.sh <api level>
 set -uo pipefail
 
 API="$1"
 OUT="$RUNNER_TEMP/m5-api$API"
 mkdir -p "$OUT"
 
-# The tests read the proxies' addresses and the run's passwords from here (as the shell user).
+# The tests read the lab's addresses and the run's passwords from here (as the shell user), and the lab's CA
+# certificate, which the TLS tests trust only where a test says so (ADR-0011).
 adb push /tmp/pf/e2e.properties /data/local/tmp/proxyflow-e2e.properties >/dev/null
 adb shell chmod 644 /data/local/tmp/proxyflow-e2e.properties
+adb push /tmp/pf/pki/ca.crt /data/local/tmp/proxyflow-ca.pem >/dev/null
+adb shell chmod 644 /data/local/tmp/proxyflow-ca.pem
 
 # Every adb call that could wait for a wedged device is bounded, so the logs below are always collected.
 restart_adbd() {
@@ -220,13 +224,13 @@ LIVE_LOGCAT=$!
 # collected when a test hangs (scripts/m5_evidence.py reads how far the tests got from logcat).
 # Into a file, not through tee: a Gradle daemon that outlives a stopped build would hold a pipe open.
 GRADLE_LOG="$RUNNER_TEMP/gradle-2-device.log"
-timeout --kill-after=60s "${DEVICE_TESTS_TIMEOUT:-40m}" \
+timeout --kill-after=60s "${DEVICE_TESTS_TIMEOUT:-55m}" \
     ./gradlew :core:data:connectedDebugAndroidTest :core:engine:connectedDebugAndroidTest :app:connectedDebugAndroidTest \
     --continue > "$GRADLE_LOG" 2>&1
 STATUS=$?
 cat "$GRADLE_LOG"
 if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
-    echo "::error title=Device tests (API $API)::The device tests ran past ${DEVICE_TESTS_TIMEOUT:-40m} and were stopped; the evidence lists from logcat which tests ran, failed or never finished."
+    echo "::error title=Device tests (API $API)::The device tests ran past ${DEVICE_TESTS_TIMEOUT:-55m} and were stopped; the evidence lists from logcat which tests ran, failed or never finished."
     timeout 60 ./gradlew --stop >/dev/null 2>&1 || true # its daemon may still be running them
 fi
 
@@ -248,5 +252,5 @@ if [ "$GUEST_CAPTURE" = 1 ]; then
             echo "pull of pf-$iface.pcap failed or timed out" >> "$OUT/guest-capture.txt"
     done
 fi
-timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties >/dev/null 2>&1 || true
+timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties /data/local/tmp/proxyflow-ca.pem /data/local/tmp/pf-client.apk >/dev/null 2>&1 || true
 exit "$STATUS"

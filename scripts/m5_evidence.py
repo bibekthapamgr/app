@@ -268,8 +268,8 @@ def network_changes(logcat: list[str], last: int = 6) -> list[str]:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", required=True)
-    parser.add_argument("--pf", required=True, help="the runner-side directory of scripts/m5_device_env.sh")
-    parser.add_argument("--out", required=True, help="what scripts/m5_device_e2e.sh pulled from the emulator")
+    parser.add_argument("--pf", required=True, help="the runner-side directory of scripts/e2e_env.sh")
+    parser.add_argument("--out", required=True, help="what scripts/e2e_device.sh pulled from the emulator")
     parser.add_argument("--host-pcap", help="the emulator's own capture (-tcpdump)")
     args = parser.parse_args(argv[1:])
 
