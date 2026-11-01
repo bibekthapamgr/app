@@ -52,6 +52,24 @@ def escape(text: str) -> str:
     return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
+ANNOTATION_CHARS = 3500  # GitHub cuts an annotation's message at 4096 characters (run 41272331602: M6, API 34)
+
+
+def annotate(level: str, title: str, lines: list[str]) -> None:
+    """Prints [lines] as annotations of at most ANNOTATION_CHARS characters each, "title 1/3", "title 2/3"... when they
+    need more than one, so that nothing is cut; a line too long for one is split. GitHub keeps 10 of a kind per step."""
+    pieces = [line[i:i + ANNOTATION_CHARS] for line in lines for i in range(0, max(len(line), 1), ANNOTATION_CHARS)]
+    chunks: list[str] = []
+    for piece in pieces:
+        if chunks and len(chunks[-1]) + 1 + len(piece) <= ANNOTATION_CHARS:
+            chunks[-1] += "\n" + piece
+        else:
+            chunks.append(piece)
+    for n, chunk in enumerate(chunks):
+        suffix = f" {n + 1}/{len(chunks)}" if len(chunks) > 1 else ""
+        print(f"::{level} title={title}{suffix}::{escape(chunk)}")
+
+
 # --- packet captures --------------------------------------------------------
 
 
@@ -451,9 +469,9 @@ def main(argv: list[str]) -> int:
     print(f"::{token}::")
     print(f"::notice title=M5 VPN lifecycle (API {args.api}), last of {len(lifecycle)} lines::{escape(lifecycle_tail or '(none)')}")
     if problems:
-        print(f"::error title=M5 end-to-end evidence (API {args.api})::{escape(chr(10).join(problems + facts))}")
+        annotate("error", f"M5 end-to-end evidence (API {args.api})", problems + facts)
         return 1
-    print(f"::notice title=M5 end-to-end evidence (API {args.api})::{escape(chr(10).join(facts))}")
+    annotate("notice", f"M5 end-to-end evidence (API {args.api})", facts)
     return 0
 
 

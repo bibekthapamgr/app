@@ -78,7 +78,7 @@ A recent example of why TLS settings must be enforced on every code path: CVE-20
 | R2 | Plaintext proxy profiles expose credentials and destinations on the local network | Most consumer proxies offer no TLS; blocking them would make the app unusable for most users | Inline warning (D4); owner decision D2 for the Play build |
 | R3 | The proxy operator sees destinations and unencrypted payload | Inherent to proxies | Onboarding A2 and About G1 |
 | R4 | A netstack bug triggered by crafted packets could crash the engine process | Mature upstream, fuzzing, quick updates | Falls back to R1 behaviour; Always-on restarts the service |
-| R5 | Some Android system traffic is never routed through any VPN (validation probes, carrier services, privileged apps: M6 saw Google Play services' push connection leave outside the VPN on Android 15 over Wi-Fi) and tethered/work-profile traffic is not covered | Platform behaviour | Traffic matrix §3, routing doc §4, About; never claim "all traffic"; the M6 evidence names such connections' owners |
+| R5 | Some Android system traffic is never routed through any VPN (validation probes, carrier services, privileged apps: M6 saw Google Play services' connections, push messages included, leave outside the VPN on Android 15 over Wi-Fi) and tethered/work-profile traffic is not covered | Platform behaviour | Traffic matrix §3, routing doc §4, About; never claim "all traffic"; the M6 evidence names such connections' owners |
 | R6 | Apps and networks can tell a VPN is in use (`TRANSPORT_VPN`, proxy SNI, proxy IP reputation) | Not a V1 goal | Not claimed |
 
 ## 6. Security requirements carried into later milestones

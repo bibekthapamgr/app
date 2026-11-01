@@ -20,6 +20,7 @@ import unittest
 os.environ["TZ"] = "UTC"  # the DNS server logs local time; these tests write it in UTC
 time.tzset()
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import m5_evidence  # noqa: E402
 import m6_evidence  # noqa: E402
 
 PHONE4, PHONE6, GATEWAY = "10.0.2.15", "fec0::15", "10.0.2.2"
@@ -193,6 +194,31 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual({"proxyflow.test": 2}, dict(c.dns_names))
 
 
+class AnnotationTest(unittest.TestCase):
+    def annotations(self, lines: list[str]) -> list[tuple[str, str]]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            m5_evidence.annotate("notice", "M6 end-to-end evidence (API 34)", lines)
+        found = []
+        for printed in out.getvalue().splitlines():
+            head, _, message = printed.partition("::")[2].partition("::")
+            found.append((head, message.replace("%0A", "\n").replace("%0D", "\r").replace("%25", "%")))
+        return found
+
+    def test_a_short_evidence_is_one_annotation(self):
+        self.assertEqual([("notice title=M6 end-to-end evidence (API 34)", "a\nb")], self.annotations(["a", "b"]))
+
+    def test_a_long_evidence_is_split_where_github_would_cut_it(self):
+        lines = [f"fact {n}: " + "x" * 900 for n in range(12)] + ["y" * 8000, "last fact"]
+        found = self.annotations(lines)
+        self.assertGreater(len(found), 1)
+        self.assertEqual([f"notice title=M6 end-to-end evidence (API 34) {n + 1}/{len(found)}" for n in range(len(found))], [h for h, _ in found])
+        self.assertTrue(all(len(message) <= m5_evidence.ANNOTATION_CHARS for _, message in found))
+        # Nothing is lost: every line is there, in order, a line too long for one annotation in consecutive pieces.
+        self.assertEqual("".join(lines), "".join(message.replace("\n", "") for _, message in found))
+        self.assertEqual("last fact", found[-1][1].split("\n")[-1])
+
+
 class EvidenceTest(unittest.TestCase):
     """main() over a small run that passes, and over the same run with one fault at a time."""
 
@@ -356,8 +382,8 @@ class EvidenceTest(unittest.TestCase):
         self.assertIn("TCP 142.250.80.46:443 at 02:00:09.500 (connected at 02:00:01 until 'disconnect'; owner not sampled)", printed)
 
     def test_the_owner_of_a_connection_is_named_from_the_phones_socket_samples(self):
-        # /proc/net/tcp: remote 142.250.80.46:443 (little-endian hex), SYN-SENT (02), uid 10123.
-        sample = f"T {int(at('02:00:10').timestamp())}\n   5: 0F02000A:9C40 2E50FA8E:01BB 02 00000000:00000000 01:00000064 00000002 10123 0 1\n"
+        # /proc/net/tcp: local 10.0.2.15:40020 and remote 142.250.80.46:443 (little-endian hex), SYN-SENT (02), uid 10123.
+        sample = f"T {int(at('02:00:10').timestamp())}\n   5: 0F02000A:9C54 2E50FA8E:01BB 02 00000000:00000000 01:00000064 00000002 10123 0 1\n"
         status, printed = self.run_connected(
             uplink_dns=[self.PROXY_LOOKUP],
             capture_extra=[(at("02:00:10"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 443, syn=True)))],
@@ -384,6 +410,33 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(0, status, printed)
         self.assertIn("by Android itself or its preinstalled apps, which it lets bypass VPNs: "
                       "{'TCP 198.19.41.223:5228 (uid 10143 (com.google.android.gms))': 1}", printed)
+
+    def test_a_preinstalled_apps_socket_explains_only_its_own_connection(self):
+        # Google Play services' socket (source port 40040) and, to the same address, another connection (40041) that
+        # the samples never saw: that one fails.
+        other = (at("02:00:10"), ipv4(PHONE4, "198.19.41.223", 6, tcp(40041, 5228, syn=True)))
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[self.SYN_TO_PLACEHOLDER, other],
+            connecting=self.sample(10143),
+            packages="package:com.google.android.gms uid:10143\n",
+            system_packages="package:com.google.android.gms uid:10143\n",
+        )
+        self.assertEqual(1, status)
+        self.assertIn("traffic left the phone around the VPN while connected: {'TCP 198.19.41.223:5228': 1}", printed)
+        self.assertIn("owner not sampled", printed)
+
+    def test_udp_is_never_put_down_to_a_preinstalled_apps_tcp_socket(self):
+        datagram = (at("02:00:10"), ipv4(PHONE4, "198.19.41.223", 17, udp(40040, 5228, b"x")))
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[datagram],
+            connecting=self.sample(10143),
+            packages="package:com.google.android.gms uid:10143\n",
+            system_packages="package:com.google.android.gms uid:10143\n",
+        )
+        self.assertEqual(1, status)
+        self.assertIn("'UDP 198.19.41.223:5228': 1", printed)
 
     def test_the_shell_bypassing_the_vpn_fails_even_as_a_system_uid(self):
         status, printed = self.run_connected(

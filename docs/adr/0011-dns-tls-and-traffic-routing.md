@@ -37,7 +37,7 @@ Looking at the engine against that list found three gaps:
 - With Android Private DNS in strict mode, the resolver's DNS-over-TLS connection is carried through the proxy like any TCP (by name, resolved by ProxyFlow's placeholder); apps then connect by address, still through the proxy, and the proxy sees addresses. Not automated in CI: it needs a DoT server trusted by the system store (docs/m6/routing-and-limitations.md §4).
 - The trust seam is a constructor parameter in shipped code. It has no runtime source (no setting, intent, file or network input), its default is the platform's trust manager, and a device test proves the shipped default refuses the lab's CA.
 - Home's Connected screen is longer: the routing summary and the diagnostics card scroll below the timer.
-- Android lets privileged system apps bypass a VPN. The evidence found Google Play services doing so on the Android 15 image over Wi-Fi (its push-message connection, port 5228, a few seconds into connected periods); it names such connections' owners from the phone's socket table and reports those of Android and its preinstalled apps, failing on any other owner. The limitation is in the routing doc §4 and in About.
+- Android lets privileged system apps bypass a VPN. The evidence found Google Play services doing so on the Android 15 image over Wi-Fi (connections to ports 5228, its push messages, and 443, a few seconds into connected periods); it names such connections' owners from the phone's socket table and reports those of Android and its preinstalled apps, failing on any other owner. The limitation is in the routing doc §4 and in About.
 
 ## Evidence
 
