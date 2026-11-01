@@ -2,9 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-      No permissions in M2: this build makes no network connections at all.
-      INTERNET and the VPN service declaration arrive in M5 (docs/m1/06-architecture.md).
-      ManifestTest fails if a permission appears here or through a dependency.
+      The permissions and the VPN service come from core/vpn's manifest, merged into this one
+      (ADR-0010): INTERNET, FOREGROUND_SERVICE(_SYSTEM_EXEMPTED) and POST_NOTIFICATIONS.
+      ManifestTest and scripts/check_release_manifest.py fail if any other permission appears,
+      here or through a dependency.
     -->
 
     <application

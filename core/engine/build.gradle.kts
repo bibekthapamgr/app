@@ -2,7 +2,7 @@
 // gomobile AAR that engine/build-aar.sh builds, unpacked here into a classes
 // jar and per-ABI libraries, and a Kotlin API around it (ProxyEngine). The
 // JVM tests use a fake native boundary; the instrumented tests run the real
-// engine on emulators against mock proxies. The app starts using it in M5.
+// engine on emulators against mock proxies. core/vpn runs it on the VPN interface (M5).
 import javax.inject.Inject
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -69,7 +69,8 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    // The app's lint rules (warnings are errors); the app does not use this module before M5.
+    // The app's lint rules (warnings are errors). The app's own lint covers this module too since M5;
+    // this keeps the module checked on its own.
     lint {
         abortOnError = true
         warningsAsErrors = true
@@ -90,7 +91,8 @@ kotlin {
 
 dependencies {
     api(project(":core:model"))
-    implementation(files(unpackEngineAar.flatMap { it.classesJar }))
+    // api: the gomobile types (Platform) appear in ProxyEngine's signatures, which core/vpn calls.
+    api(files(unpackEngineAar.flatMap { it.classesJar }))
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit4)

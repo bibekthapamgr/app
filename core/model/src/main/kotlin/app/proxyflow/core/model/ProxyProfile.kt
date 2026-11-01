@@ -38,6 +38,19 @@ data class ProxyProfile(
 
     /** "host:port", with brackets around IPv6 literals. */
     val endpoint: String get() = if (':' in host) "[$host]:$port" else "$host:$port"
+
+    /**
+     * Whether [other] reaches the same proxy the same way: protocol, server, port, TLS and the
+     * server name it checks, and whether it signs in. Credentials read for a connection are only
+     * used while the stored profile still matches the copy the connection started with, so a
+     * password is never sent to a proxy it was not saved for (ADR-0006, ADR-0010).
+     */
+    fun sameServerAs(other: ProxyProfile): Boolean = protocol == other.protocol &&
+        host.equals(other.host, ignoreCase = true) &&
+        port == other.port &&
+        tlsMode == other.tlsMode &&
+        tlsServerName.orEmpty().equals(other.tlsServerName.orEmpty(), ignoreCase = true) &&
+        requiresSignIn == other.requiresSignIn
 }
 
 /** Whether a profile's saved username and password can be used (ADR-0006). */

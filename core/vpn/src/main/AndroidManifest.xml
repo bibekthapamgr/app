@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- The engine's and the pre-flight check's connections to the user's proxy. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android's view of the VPN network: Connected waits until Android routes apps into the interface (ADR-0010 §3). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- The VPN runs as a foreground service of type systemExempted (ADR-0007, ADR-0010 §8). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <!-- Android 13+: the connection notifications; the VPN works without it. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+        <!--
+          Only Android can bind it (BIND_VPN_SERVICE); the app starts it with explicit intents.
+          The intent filter lets Android start it for Always-on VPN.
+          ForegroundServicePermission: lint knows only one way to qualify for systemExempted
+          (SCHEDULE_EXACT_ALARM or USE_EXACT_ALARM). Android also accepts the ACTIVATE_VPN app
+          op, which the user's VPN consent grants (ForegroundServiceTypePolicy); the session
+          checks consent before going to the foreground, and the device tests start it on
+          Android 14, 15 and 16 (ADR-0007, ADR-0010).
+        -->
+        <service
+            android:name=".ProxyFlowVpnService"
+            android:exported="false"
+            android:foregroundServiceType="systemExempted"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            tools:ignore="ForegroundServicePermission">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+    </application>
+
+</manifest>

@@ -1,11 +1,16 @@
 package app.proxyflow.feature.profiles
 
+import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.CredentialsRead
 import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.model.ConnectionState
+import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -53,6 +58,24 @@ class ProfilesViewModelTest {
     }
 
     @Test
+    fun deletingTheProfileAConnectionUsesDisconnectsFirst() = runTest {
+        val connection = RecordingConnection()
+        val vm = ProfilesViewModel(repository, connection)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
+        repository.save(null, ProxyProfileInput(server = "a.example.com", port = "1080"))
+        repository.save(null, ProxyProfileInput(server = "b.example.com", port = "1080"))
+        connection.current.value = ConnectionState(ConnectionStatus.Blocked, profileId = "p1")
+        assertEquals("p1", vm.uiState.value.connectedProfileId)
+
+        vm.delete("p2")
+        assertEquals("another profile: the connection is left alone", emptyList<String>(), connection.calls)
+
+        vm.delete("p1")
+        assertEquals(listOf("disconnect"), connection.calls)
+        assertTrue(vm.uiState.value.profiles.isEmpty())
+    }
+
+    @Test
     fun duplicateAddsANamedCopyWithTheSameSignIn() = runTest {
         val vm = ProfilesViewModel(repository)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
@@ -92,5 +115,21 @@ class ProfilesViewModelTest {
 
         vm.onFailureShown()
         assertNull(vm.uiState.value.failed)
+    }
+
+    private class RecordingConnection : ConnectionController {
+        val current = MutableStateFlow(ConnectionState.Idle)
+        val calls = mutableListOf<String>()
+        override val state: StateFlow<ConnectionState> = current
+        override val canConnect = true
+
+        override fun connect(profileId: String) {
+            calls += "connect $profileId"
+        }
+
+        override fun disconnect() {
+            calls += "disconnect"
+            current.value = current.value.copy(status = ConnectionStatus.Disconnected)
+        }
     }
 }

@@ -139,10 +139,19 @@ fun ProfilesScreen(
         }
     }
     state.profiles.firstOrNull { it.id == pendingDeleteId }?.let { profile ->
+        // J11: the profile a connection uses is deleted only together with ending that connection.
+        val inUse = profile.id == state.connectedProfileId
         PfConfirmDialog(
-            title = stringResource(R.string.profiles_delete_title, profile.displayName),
-            text = stringResource(R.string.profiles_delete_body),
-            confirmLabel = stringResource(R.string.profiles_delete),
+            title = stringResource(
+                if (inUse) R.string.profiles_disconnect_delete_title else R.string.profiles_delete_title,
+                profile.displayName,
+            ),
+            text = if (inUse) {
+                stringResource(R.string.profiles_disconnect_delete_body) + "\n\n" + stringResource(R.string.profiles_delete_body)
+            } else {
+                stringResource(R.string.profiles_delete_body)
+            },
+            confirmLabel = stringResource(if (inUse) R.string.profiles_disconnect_delete else R.string.profiles_delete),
             dismissLabel = stringResource(R.string.profiles_cancel),
             onConfirm = {
                 onDeleteProxy(profile.id)

@@ -34,8 +34,10 @@ android {
         applicationId = providers.gradleProperty("proxyflow.applicationId").get()
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 5
+        versionName = "0.5.0"
+        // The VPN's end-to-end tests (src/androidTest): the real service, engine and proxies on emulators.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -102,6 +104,7 @@ roborazzi {
 dependencies {
     implementation(project(":core:designsystem"))
     implementation(project(":core:data"))
+    implementation(project(":core:vpn"))
     implementation(project(":feature:home"))
     implementation(project(":feature:profiles"))
     implementation(project(":feature:settings"))
@@ -128,4 +131,13 @@ dependencies {
     testImplementation(libs.roborazzi.compose)
     testImplementation(libs.roborazzi.junit.rule)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(project(":core:engine"))
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.uiautomator)
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.kotlinx.coroutines.android)
 }

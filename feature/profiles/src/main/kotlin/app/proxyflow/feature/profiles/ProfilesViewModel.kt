@@ -2,7 +2,9 @@ package app.proxyflow.feature.profiles
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.data.UnavailableConnectionController
 import app.proxyflow.core.model.ProfileNames
 import app.proxyflow.core.model.ProxyProfile
 import kotlin.coroutines.cancellation.CancellationException
@@ -17,24 +19,47 @@ import kotlinx.coroutines.launch
 /** A list action that did not complete (storage or Android Keystore failure); the screen says so once. */
 enum class ProfileAction { Use, Duplicate, Delete }
 
+/**
+ * @param connectedProfileId the profile a connection uses (connecting, connected, reconnecting or
+ *   blocked); deleting it disconnects first (J11, "Disconnect and delete").
+ */
 data class ProfilesUiState(
     val loading: Boolean = true,
     val profiles: List<ProxyProfile> = emptyList(),
     val activeProfileId: String? = null,
     val failed: ProfileAction? = null,
+    val connectedProfileId: String? = null,
 )
 
-class ProfilesViewModel(private val repository: ProfileRepository) : ViewModel() {
+class ProfilesViewModel(
+    private val repository: ProfileRepository,
+    private val connection: ConnectionController = UnavailableConnectionController(),
+) : ViewModel() {
     private val failed = MutableStateFlow<ProfileAction?>(null)
 
     val uiState: StateFlow<ProfilesUiState> =
-        combine(repository.profiles, repository.activeProfileId, failed) { list, active, failure ->
-            ProfilesUiState(loading = false, profiles = list, activeProfileId = active, failed = failure)
+        combine(repository.profiles, repository.activeProfileId, failed, connection.state) { list, active, failure, current ->
+            ProfilesUiState(
+                loading = false,
+                profiles = list,
+                activeProfileId = active,
+                failed = failure,
+                connectedProfileId = current.profileId?.takeIf { current.active },
+            )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProfilesUiState())
 
     fun setActive(id: String) = perform(ProfileAction.Use) { repository.setActive(id) }
 
-    fun delete(id: String) = perform(ProfileAction.Delete) { repository.delete(id) }
+    /**
+     * Deletes the profile. When a connection uses it, the connection ends first, as the
+     * confirmation said: its credentials are never used again, and apps go back to the
+     * normal network by the user's choice, never because a profile disappeared under them.
+     */
+    fun delete(id: String) = perform(ProfileAction.Delete) {
+        val current = connection.state.value
+        if (current.active && current.profileId == id) connection.disconnect()
+        repository.delete(id)
+    }
 
     /** The screen has told the user about [ProfilesUiState.failed]. */
     fun onFailureShown() {

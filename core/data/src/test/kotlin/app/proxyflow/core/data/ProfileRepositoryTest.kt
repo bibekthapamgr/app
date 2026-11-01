@@ -125,6 +125,36 @@ class ProfileRepositoryTest {
     }
 
     @Test
+    fun aConnectionGetsCredentialsOnlyWhileTheProfileStillReachesTheSameProxy() = runTest {
+        val started = repo.save(null, office)
+
+        // Renamed: still the same proxy, so the connection may use them.
+        repo.save("p1", office.copy(name = "Office renamed", password = ""))
+        val read = repo.readCredentials("p1", started) as CredentialsRead.Available
+        assertEquals("office-pass", String(read.password))
+        read.wipe()
+
+        // Each of these points the saved password at another proxy, or another way of reaching it.
+        val edits = listOf(
+            office.copy(server = "203.0.113.99", password = "new-pass"),
+            office.copy(port = "3129", password = "new-pass"),
+            office.copy(protocol = ProxyProtocol.SOCKS5, password = "new-pass"),
+            office.copy(useTls = true, tlsServerName = "tls.example.com", password = "new-pass"),
+        )
+        for (edit in edits) {
+            repo.save("p1", edit)
+            assertEquals("after $edit", CredentialsRead.ProfileChanged, repo.readCredentials("p1", started))
+        }
+        repo.save("p1", office.copy(requiresSignIn = false, username = "", password = ""))
+        assertEquals("sign-in turned off", CredentialsRead.ProfileChanged, repo.readCredentials("p1", started))
+
+        val current = repo.get("p1")!!
+        assertEquals(CredentialsRead.NotRequired, repo.readCredentials("p1", current))
+        repo.delete("p1")
+        assertEquals(CredentialsRead.NoSuchProfile, repo.readCredentials("p1", current))
+    }
+
+    @Test
     fun editingOneProfileLeavesTheOthersUntouched() = runTest {
         repo.save(null, office)
         repo.save(null, home)

@@ -28,6 +28,8 @@ kotlin {
 dependencies {
     implementation(project(":core:designsystem"))
     implementation(project(":core:data"))
+    implementation(libs.androidx.activity.compose) // the VPN consent and notification permission screens
+    implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)

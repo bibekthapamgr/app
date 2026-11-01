@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The VPN's name in Android's VPN settings and dialogs: the app's, never a profile's. -->
+    <string name="vpn_session_name">ProxyFlow</string>
+
+    <string name="vpn_channel_status">Connection status</string>
+    <string name="vpn_channel_status_description">Shows whether ProxyFlow is connecting, connected or holding traffic back.</string>
+    <string name="vpn_channel_problems">Connection problems</string>
+    <string name="vpn_channel_problems_description">Tells you when ProxyFlow was disconnected without you asking.</string>
+
+    <string name="vpn_notification_connecting">Connecting…</string>
+    <string name="vpn_notification_checking_proxy">Checking proxy — TLS and sign-in</string>
+    <string name="vpn_notification_starting_protection">Starting protection</string>
+    <string name="vpn_notification_reconnecting">Reconnecting… traffic paused</string>
+    <string name="vpn_notification_reconnecting_text">Nothing is sent around your proxy.</string>
+    <string name="vpn_notification_connected">Connected</string>
+    <string name="vpn_notification_connected_text">Traffic is going through your proxy · UDP blocked</string>
+    <string name="vpn_notification_blocked">Traffic blocked</string>
+    <string name="vpn_notification_blocked_engine">Protection stopped unexpectedly. Apps stay offline until you restart it or disconnect.</string>
+    <string name="vpn_notification_blocked_text">ProxyFlow couldn\'t connect to your proxy. Apps stay offline until you try again or disconnect.</string>
+    <string name="vpn_notification_blocked_profile_deleted">The profile this connection used was deleted. Apps stay offline until you disconnect.</string>
+    <string name="vpn_notification_disconnected">Not connected</string>
+    <string name="vpn_notification_disconnected_text">Apps are using your normal network</string>
+    <string name="vpn_notification_revoked">Disconnected by Android</string>
+    <string name="vpn_notification_revoked_text">Another VPN app was turned on or the permission was removed. Your apps now use the normal network.</string>
+
+    <string name="vpn_action_cancel">Cancel</string>
+    <string name="vpn_action_disconnect">Disconnect</string>
+    <string name="vpn_action_restart">Restart</string>
+</resources>

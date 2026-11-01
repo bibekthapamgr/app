@@ -15,5 +15,6 @@ M1 rule: "No full implementation begins until the networking approach is approve
 | [0007](0007-platform-baseline.md) | Platform baseline: SDK levels, service type, modules, engine packaging | Proposed (minSdk 29 chosen by the owner) | D3 |
 | [0008](0008-app-architecture.md) | App architecture: modules, MVVM, manual DI, navigation | Accepted 2026-10-31 (decision delegated by the owner) | — |
 | [0009](0009-local-database.md) | Local storage: Room for profiles, exported schemas, tested migrations | Accepted 2026-10-31 (decision delegated by the owner) | — |
+| [0010](0010-vpn-service-integration.md) | VPN service integration: connect sequence, session ownership, failure handling | Accepted 2026-10-31 (technical decisions delegated; implemented in M5); pre-flight target inside open D6 | D6 |
 
 Template for new records: copy any ADR, keep the headings, add a row here.

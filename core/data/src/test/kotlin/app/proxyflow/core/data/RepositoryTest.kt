@@ -43,7 +43,8 @@ class RepositoryTest {
         val controller = UnavailableConnectionController()
         assertFalse(controller.canConnect)
         controller.connect("any")
-        assertEquals(ConnectionStatus.Disconnected, controller.status.value)
+        assertEquals(ConnectionStatus.Disconnected, controller.state.value.status)
+        assertEquals(null, controller.consentIntent())
         // Test Connection never claims success without an engine to test with (M3 acceptance).
         assertEquals(ConnectionTestResult.Unavailable, UnavailableConnectionTester().test(null, ProxyProfileInput()))
     }
