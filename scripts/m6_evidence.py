@@ -590,7 +590,8 @@ def main(argv: list[str]) -> int:
             f"HTTP CONNECT targets {dict(capture.connect_targets.most_common(8))}; streams to TLS ports {tls_streams}; "
             f"packets to/from lab addresses {dict(capture.lab_packets) or 0}; SYNs to the LAN destination {capture.lan_syns}; "
             f"UDP to lab addresses {dict(capture.udp_to_lab) or 0}; echo requests to lab addresses {lab_echo or 0} "
-            f"(to anywhere: {sum(capture.echo_requests.values())}); IPv6 packets {capture.ipv6_packets}; "
+            f"(to anywhere: {dict(collections.Counter(f'{a} -> {b}' for (_, a, b, kind, _) in capture.events if kind == 'ICMP').most_common(6)) or 0}); "
+            f"IPv6 packets {capture.ipv6_packets}; "
             f"DNS queries for lab names {lab_dns or 0}; DNS names queried {len(capture.dns_names)}"
         )
         summary.append(
