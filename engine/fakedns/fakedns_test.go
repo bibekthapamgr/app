@@ -63,6 +63,25 @@ func TestPoolAllocationAndReverse(t *testing.T) {
 	}
 }
 
+// The TUN's and the DNS server's own addresses, and the last address, are reserved:
+// the engine refuses TCP to them instead of looking for a name (ADR-0011).
+func TestPoolReservedAddresses(t *testing.T) {
+	p := mustPool(t, "198.18.0.0/15", 256, 0)
+	for _, s := range []string{"198.18.0.0", "198.18.0.1", "198.18.0.2", "198.18.0.255", "198.19.255.255", "::ffff:198.18.0.2"} {
+		if a := netip.MustParseAddr(s); !p.Reserved(a) {
+			t.Errorf("%s should be reserved", s)
+		}
+	}
+	for _, s := range []string{"198.18.1.0", "198.19.255.254", "8.8.8.8", "fd00:66::1", "198.20.0.1"} {
+		if a := netip.MustParseAddr(s); p.Reserved(a) {
+			t.Errorf("%s should not be reserved", s)
+		}
+	}
+	if a := mustLookup(t, p, "example.com"); p.Reserved(a) {
+		t.Fatalf("an address handed out (%s) is reported reserved", a)
+	}
+}
+
 func TestPoolRejectsBadPrefixes(t *testing.T) {
 	for _, c := range []struct {
 		cidr     string

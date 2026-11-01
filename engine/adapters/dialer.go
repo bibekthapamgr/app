@@ -547,7 +547,7 @@ func (noHalfClose) CloseWrite() error { return nil }
 // connectCtxErr reports why ctx ended while connecting to the proxy.
 func connectCtxErr(ctx context.Context) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return newErr(CodeProxyUnreachable, "timed out connecting to the proxy", nil)
+		return newTimeoutErr("timed out connecting to the proxy", nil)
 	}
 	return newErr(CodeCanceled, "canceled while connecting to the proxy", nil)
 }
@@ -564,13 +564,13 @@ func classifyConnectError(err error) error {
 	var ne net.Error
 	switch {
 	case err == nil:
-		return newErr(CodeProxyUnreachable, "timed out connecting to the proxy", nil)
+		return newTimeoutErr("timed out connecting to the proxy", nil)
 	case errors.Is(err, errProtect):
 		return newErr(CodeProxyUnreachable, "the proxy connection could not be kept out of the VPN (protect failed)", err)
 	case errors.Is(err, syscall.ECONNREFUSED):
 		return newErr(CodeProxyUnreachable, "the proxy refused the connection (nothing listening on that port?)", err)
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
-		return newErr(CodeProxyUnreachable, "timed out connecting to the proxy", err)
+		return newTimeoutErr("timed out connecting to the proxy", err)
 	case errors.Is(err, syscall.ENETUNREACH), errors.Is(err, syscall.EHOSTUNREACH):
 		return newErr(CodeProxyUnreachable, "no route to the proxy", err)
 	}
