@@ -41,7 +41,18 @@ class CopyClaimsTest {
                 }
             }
         }
-        return out.map { (name, text) -> name to normalized(text.replace("\\'", "'").replace("\\\"", "\"")) }
+        return out.map { (name, text) -> name to normalized(decoded(text)) }
+    }
+
+    /** The text Android shows for a resource string: its escapes decoded (\\', \\", \\n, \\uXXXX…). */
+    private fun decoded(text: String): String = Regex("""\\(u[0-9a-fA-F]{4}|.)""").replace(text) { match ->
+        val escape = match.groupValues[1]
+        when {
+            escape.length == 5 && escape[0] == 'u' -> escape.substring(1).toInt(16).toChar().toString()
+            escape == "n" -> "\n"
+            escape == "t" -> "\t"
+            else -> escape
+        }
     }
 
     private val all get() = strings.flatMap { (file, list) -> list.map { Triple(file, it.first, it.second) } }
@@ -121,14 +132,30 @@ class CopyClaimsTest {
             "Military-grade encryption",
             "Encrypts all your traffic",
             "No-logs policy",
+            "Keeps your traffic protected",
+            "Works with any app",
+            "Supports voice calls",
+            "Great for gaming",
+            "A systemwide tunnel",
+            "Masks your IP",
+            "Conceals your identity",
+            "Military\u2011grade encryption",
+            "No\u2011logs",
+            "A system\u2011wide VPN",
+            "Covers all\u2003traffic",
         )
         val missed = claims.filter { claim -> FORBIDDEN.none { (_, pattern) -> pattern.containsMatchIn(normalized(claim)) } }
         assertEquals("not recognised: $missed", emptyList<String>(), missed)
+        // As a strings.xml file may spell them: Android's escapes are decoded before the rules apply.
+        assertTrue(FORBIDDEN.any { (_, pattern) -> pattern.containsMatchIn(normalized(decoded("Covers all\\u00A0traffic"))) })
     }
 
     private companion object {
-        /** No-break and other special spaces read as spaces, typographic apostrophes as plain ones. */
-        fun normalized(text: String): String = text.replace(Regex("[\\u00a0\\u2007\\u202f\\u2009]"), " ").replace('\u2019', '\'')
+        /** Every Unicode space reads as a space, Unicode hyphens as "-", typographic apostrophes as plain ones. */
+        fun normalized(text: String): String = text
+            .replace(Regex("[\\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000]"), " ")
+            .replace(Regex("[\\u2010-\\u2013\\u2212]"), "-")
+            .replace('\u2019', '\'')
 
         /** Claims ProxyFlow must never make (traffic matrix §5 "Must not say"). */
         val FORBIDDEN: List<Pair<String, Regex>> = listOf(
@@ -137,11 +164,16 @@ class CopyClaimsTest {
                     "(?i)\\ball\\s+(of\\s+)?(your\\s+|the\\s+|this\\s+)?" +
                         "(device's\\s+|device\\s+|phone's\\s+|phone\\s+|apps'\\s+|internet\\s+|network\\s+)?traffic",
                 ),
-            "every app" to Regex("(?i)\\b(all|every)\\s+(of\\s+)?(your\\s+|the\\s+)?(apps?|applications?)\\b"),
+            "every app" to
+                Regex(
+                    "(?i)\\b(all|every)\\s+(of\\s+)?(your\\s+|the\\s+)?(apps?|applications?)\\b" +
+                        "|\\bworks?\\s+with\\s+(any|every)\\s+(apps?|applications?)\\b",
+                ),
             "full VPN" to
-                Regex("(?i)\\b(full|complete|whole)[ -](device\\s+)?(vpn|tunnel|protection|coverage)|\\b(system|device)[ -]wide\\b"),
+                Regex("(?i)\\b(full|complete|whole)[ -](device\\s+)?(vpn|tunnel|protection|coverage)|\\b(system|device)[ -]?wide\\b"),
             "anonymity" to Regex("(?i)\\banonym|\\buntrace|\\buntrack|\\bincognito|\\binvisible online"),
-            "hiding identity" to Regex("(?i)\\bhid(e|es|ing)\\s+(your\\s+)?(real\\s+)?(ip|identity|location|activity)"),
+            "hiding identity" to
+                Regex("(?i)\\b(hid(e|es|ing)|mask(s|ing)?|conceal(s|ing)?)\\s+(your\\s+)?(real\\s+)?(ip|identity|location|activity)"),
             "blanket security" to
                 Regex(
                     "(?i)\\b(military|bank)[ -](grade|level)|\\b100\\s?%|\\bcompletely\\s+(private|secure|safe)" +
@@ -149,12 +181,15 @@ class CopyClaimsTest {
                 ),
             "encrypts everything" to Regex("(?i)\\bencrypt(s|ed)?\\s+(all|everything|your\\s+traffic|all\\s+your)"),
             "protection" to
-                Regex("(?i)\\bprotection\\b|\\bprotect(s|ed|ing)?\\s+(you|your)\\b|\\b(is|are|stays?|keeps?\\s+\\w+)\\s+protected\\b"),
+                Regex(
+                    "(?i)\\bprotection\\b|\\bprotect(s|ed|ing)?\\s+(you|your)\\b" +
+                        "|\\b(is|are|stays?|keeps?(\\s+\\w+){1,3})\\s+protected\\b",
+                ),
             "no logs" to Regex("(?i)\\bno[- ]logs?\\b"),
             "games and calls" to
                 Regex(
-                    "(?i)\\bsupports?\\s+(games|calls|video calls|quic|udp)" +
-                        "|\\bworks?\\s+(with|for)\\s+(games|calls|video calls|voip|quic|udp)",
+                    "(?i)\\bsupports?\\s+(\\w+\\s+)?(games|gaming|calls|quic|udp)" +
+                        "|\\bworks?\\s+(with|for)\\s+(\\w+\\s+)?(games|gaming|calls|voip|quic|udp)|\\bgreat\\s+for\\s+(gaming|games|calls)",
                 ),
         )
 

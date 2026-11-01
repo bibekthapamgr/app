@@ -14,8 +14,11 @@ import os
 import struct
 import sys
 import tempfile
+import time
 import unittest
 
+os.environ["TZ"] = "UTC"  # the DNS server logs local time; these tests write it in UTC
+time.tzset()
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import m6_evidence  # noqa: E402
 
@@ -193,7 +196,7 @@ class CaptureTest(unittest.TestCase):
 class EvidenceTest(unittest.TestCase):
     """main() over a small run that passes, and over the same run with one fault at a time."""
 
-    def run_evidence(self, *, capture_extra=(), gate_first="16 03 01", uplink_dns=(), logcat_extra=()) -> tuple[int, str]:
+    def run_evidence(self, *, capture_extra=(), gate_first="16 03 01", uplink_dns=(), logcat_extra=(), network=(), gate_log="") -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as pf, tempfile.TemporaryDirectory() as out:
             files = {
                 "log-baseline.properties": "destination.log=0\n",
@@ -207,11 +210,13 @@ class EvidenceTest(unittest.TestCase):
                     f"Nov  1 {when} dnsmasq[2]: 1 10.0.2.15/5000 query[A] {name} from 10.0.2.15\n"
                     for when, name in (entry.split(" ", 1) if " " in entry else ("02:00:00", entry) for entry in uplink_dns)
                 ),
-                "gate.log": f"1.0 mode forward 127.0.0.1:3129\n1.1 connection 1 from 127.0.0.1:4000 mode=forward first={gate_first}\n",
+                "gate.log": gate_log or f"1.0 mode forward 127.0.0.1:3129\n1.1 connection 1 from 127.0.0.1:4000 mode=forward first={gate_first}\n",
             }
             for name, text in files.items():
                 with open(os.path.join(pf, name), "w") as f:
                     f.write(text)
+            with open(os.path.join(out, "guest-network.txt"), "w") as f:
+                f.write("".join(line + "\n" for line in network))
             with open(os.path.join(out, "logcat.txt"), "w") as f:
                 f.write("11-01 02:00:00.000   100   100 I ProxyFlowE2E: sent PF6-a-1 to 10.99.0.2:8080\n" + "".join(logcat_extra))
             host = os.path.join(out, "uplink.pcap")
@@ -251,6 +256,28 @@ class EvidenceTest(unittest.TestCase):
         self.assertIn("no connection went through the gate to a TLS front", printed)
         self.assertNotIn("plaintext to a TLS proxy", printed)
 
+    def test_a_plaintext_retry_after_the_gates_wait_fails(self):
+        gate = (
+            "1.0 connection 1 from 127.0.0.1:4000 mode=forward upstream=127.0.0.1:3129 first=16 03 01\n"
+            "2.0 connection 2 from 127.0.0.1:4001 mode=forward upstream=127.0.0.1:3132 first=- (timeout)\n"
+            "17.5 connection 2 late first=05 02 00\n"
+        )
+        status, printed = self.run_evidence(gate_log=gate)
+        self.assertEqual(1, status)
+        self.assertIn("plaintext to a TLS proxy through the gate: ['3132: late 05 02 00']", printed)
+
+    def test_the_gate_tells_each_connection_apart(self):
+        gate = (
+            "1.0 connection 1 from 127.0.0.1:4000 mode=forward upstream=127.0.0.1:3129 first=16 03 01\n"
+            "2.0 connection 2 from 127.0.0.1:4001 mode=forward upstream=127.0.0.1:3132 first=- (closed)\n"
+            "3.0 connection 3 from 127.0.0.1:4002 mode=forward upstream=127.0.0.1:3132 first=- (timeout)\n"
+            "18.0 connection 3 late first=16 03 01\n"
+            "4.0 connection 4 from 127.0.0.1:4003 mode=forward upstream=127.0.0.1:1080 first=05 02 00\n"  # plain SOCKS5: fine
+        )
+        status, printed = self.run_evidence(gate_log=gate)
+        self.assertEqual(0, status, printed)
+        self.assertIn("gate: 2 connections to a TLS front, every one opening with a TLS record (1 more closed before sending anything)", printed)
+
     def test_a_lab_name_looked_up_on_the_uplink_fails(self):
         status, printed = self.run_evidence(uplink_dns=["proxyflow.test"])
         self.assertEqual(1, status)
@@ -261,58 +288,106 @@ class EvidenceTest(unittest.TestCase):
         "11-01 02:00:01.000   200   210 I ProxyFlowVpn: connected p1\n",
         "11-01 02:00:30.000   200   210 I ProxyFlowVpn: disconnect\n",
     ]
-    PROXY_LOOKUP = "02:00:00 proxy.proxyflow.test"  # during the check: lines the two clocks up
+    PROXY_LOOKUP = "02:00:00 proxy.proxyflow.test"  # during the check: lines the DNS log up when no capture can
+    # The phone's connection to its proxy right after "connect": lines the capture up with logcat.
+    PROXY_SYN = (at("02:00:00"), ipv4(PHONE4, GATEWAY, 6, tcp(40100, 1080, syn=True)))
+
+    def run_connected(self, uplink_dns=(), capture_extra=()):
+        return self.run_evidence(uplink_dns=uplink_dns, logcat_extra=self.VPN, capture_extra=[self.PROXY_SYN, *capture_extra])
 
     def test_lookups_while_connected_are_lined_up_with_the_vpn_log(self):
         lookups = [self.PROXY_LOOKUP, "02:00:10 connectivitycheck.gstatic.com", "02:00:29 www.youtube.com", "02:00:40 dl.google.com"]
-        status, printed = self.run_evidence(uplink_dns=lookups, logcat_extra=self.VPN)
+        status, printed = self.run_connected(uplink_dns=lookups)
         # Android's own network check is expected; 02:00:29 is too close to the period's end, 02:00:40 after it.
         self.assertEqual(0, status, printed)
+        self.assertIn("lined up through the emulator's capture", printed)
         self.assertIn("Android's network checks and time: {'connectivitycheck.gstatic.com A': 1}; any other: none", printed)
 
     def test_a_lookup_around_the_vpn_while_connected_fails(self):
-        status, printed = self.run_evidence(uplink_dns=[self.PROXY_LOOKUP, "02:00:10 www.youtube.com"], logcat_extra=self.VPN)
+        status, printed = self.run_connected(uplink_dns=[self.PROXY_LOOKUP, "02:00:10 www.youtube.com"])
         self.assertEqual(1, status)
         self.assertIn("looked up names on its own network while connected, around the VPN: {'www.youtube.com A': 1}", printed)
 
-    def test_clocks_that_cannot_be_lined_up_are_said(self):
+    def test_a_capture_that_cannot_be_lined_up_fails(self):
         vpn = [line.replace("11-01 0", "11-01 1") for line in self.VPN]  # ten hours off
-        status, printed = self.run_evidence(uplink_dns=[self.PROXY_LOOKUP, "02:00:10 www.youtube.com"], logcat_extra=vpn)
-        self.assertEqual(0, status, printed)
-        self.assertIn("while connected: not lined up (the emulator's and the runner's clocks", printed)
+        status, printed = self.run_evidence(uplink_dns=[self.PROXY_LOOKUP, "02:00:10 www.youtube.com"], logcat_extra=vpn,
+                                            capture_extra=[self.PROXY_SYN])
+        self.assertEqual(1, status, printed)
+        self.assertIn("could not be lined up with logcat", printed)
+        self.assertIn("no capture could be checked for the periods ProxyFlow was connected", printed)
 
-    def test_a_direct_connection_while_connected_fails(self):
+    def test_a_period_logcat_never_closed_is_checked_to_its_end(self):
+        open_period = self.VPN[:2] + ["11-01 02:00:40.000   100   100 I ProxyFlowE2E: sent nothing more\n"]
         status, printed = self.run_evidence(
             uplink_dns=[self.PROXY_LOOKUP],
-            logcat_extra=self.VPN,
+            logcat_extra=open_period,
+            capture_extra=[self.PROXY_SYN, (at("02:00:35"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40030, 443, syn=True)))],
+        )
+        self.assertEqual(1, status)
+        self.assertIn("until logcat ends", printed)
+
+    def test_the_period_ends_when_the_test_has_android_revoke_the_vpn(self):
+        revoking = self.VPN[:2] + [
+            "11-01 02:00:10.000   100   100 I ProxyFlowE2E: revoking the VPN: the permission is withdrawn\n",
+            "11-01 02:00:20.000   200   210 I ProxyFlowVpn: revoked by Android\n",
+        ]
+        status, printed = self.run_evidence(
+            uplink_dns=[self.PROXY_LOOKUP],
+            logcat_extra=revoking,
+            # Apps reconnect on the normal network once Android took the VPN away, before ProxyFlow hears of it.
+            capture_extra=[self.PROXY_SYN, (at("02:00:15"), ipv4(PHONE4, "198.19.202.9", 6, tcp(40031, 5228, syn=True)))],
+        )
+        self.assertEqual(0, status, printed)
+
+    def test_a_direct_connection_while_connected_fails(self):
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP],
             capture_extra=[(at("02:00:10"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 443, syn=True)))],
         )
         self.assertEqual(1, status)
         self.assertIn("traffic left the phone around the VPN while connected: {'TCP 142.250.80.46:443': 1}", printed)
+        self.assertIn("TCP 142.250.80.46:443 at 02:00:09.500 (connected at 02:00:01 until 'disconnect')", printed)  # on logcat's clock
 
-    def test_the_same_connection_while_disconnected_is_fine(self):
+    def test_a_direct_ipv6_connection_while_connected_fails(self):
+        network = ["IPv6 addresses: lo ::1/128;eth0 fec0::15/64;eth0 fe80::15/64"]
         status, printed = self.run_evidence(
             uplink_dns=[self.PROXY_LOOKUP],
             logcat_extra=self.VPN,
+            capture_extra=[self.PROXY_SYN, (at("02:00:10"), ipv6(PHONE6, "2607:f8b0:4004:c07::64", 6, tcp(40021, 443, syn=True)))],
+            network=network,
+        )
+        self.assertEqual(1, status)
+        self.assertIn("'TCP [2607:f8b0:4004:c07::64]:443': 1", printed)
+
+    def test_the_same_connection_while_disconnected_is_fine(self):
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP],
             capture_extra=[(at("02:00:40"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40021, 443, syn=True)))],
         )
         self.assertEqual(0, status, printed)
 
     def test_a_dns_query_in_the_capture_while_connected_fails(self):
         query = dns_query("www.youtube.com")
-        status, printed = self.run_evidence(
+        status, printed = self.run_connected(
             uplink_dns=[self.PROXY_LOOKUP],
-            logcat_extra=self.VPN,
             capture_extra=[(at("02:00:12"), ipv4(PHONE4, "10.0.2.3", 17, udp(40022, 53, query)))],
         )
         self.assertEqual(1, status)
         self.assertIn("looked up names on its own network while connected: {'www.youtube.com': 1}", printed)
 
+    def test_a_lookup_cut_off_by_the_capture_length_still_counts(self):
+        cut = dns_query("a-very-long-name-of-the-kind-the-phone-capture-cuts-off.example")[:30]
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[(at("02:00:12"), ipv4(PHONE4, "10.0.2.3", 17, udp(40023, 53, cut)))],
+        )
+        self.assertEqual(1, status)
+        self.assertIn("'<unreadable query>': 1", printed)
+
     def test_androids_own_checks_and_the_gate_control_are_expected(self):
         ntp = "216.239.35.0"
-        status, printed = self.run_evidence(
+        status, printed = self.run_connected(
             uplink_dns=[self.PROXY_LOOKUP],
-            logcat_extra=self.VPN,
             capture_extra=[
                 (at("02:00:05"), ipv4(PHONE4, "10.0.2.3", 17, udp(40023, 53, dns_query("time.android.com")))),
                 (at("02:00:05"), ipv4("10.0.2.3", PHONE4, 17, udp(53, 40023, dns_response("time.android.com", ntp)))),

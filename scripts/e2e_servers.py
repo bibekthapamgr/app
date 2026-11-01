@@ -189,15 +189,25 @@ class Gate:
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self.connections += 1
         number, mode, upstream, peer = self.connections, self.mode, self.upstream, peer_of(writer)
+        # Each connection says where it was relayed to and how its first bytes came: "first=- (closed)" for a client
+        # that sent nothing, "first=- (timeout)" when nothing came in 15 s (anything later is logged as "late first=",
+        # never relayed), so the evidence can tell a cancelled dial from a plaintext retry.
         try:
             first = await asyncio.wait_for(reader.read(3), timeout=15)
-        except (asyncio.TimeoutError, ConnectionError):
-            first = b""
-        self.log.write(f"{stamp()} connection {number} from {peer} mode={mode} first={first.hex(' ') or '-'}\n")
+            why = "" if first else " (closed)"
+        except asyncio.TimeoutError:
+            first, why = b"", " (timeout)"
+        except ConnectionError:
+            first, why = b"", " (reset)"
+        target = upstream if mode == "forward" else "-"
+        self.log.write(f"{stamp()} connection {number} from {peer} mode={mode} upstream={target} first={first.hex(' ') or '-'}{why}\n")
         if mode == "silent" or not first:
+            late = why != " (timeout)"
             try:
-                while await reader.read(4096):
-                    pass
+                while chunk := await reader.read(4096):
+                    if not late:
+                        late = True
+                        self.log.write(f"{stamp()} connection {number} late first={chunk[:3].hex(' ')}\n")
             except ConnectionError:
                 pass
             writer.close()

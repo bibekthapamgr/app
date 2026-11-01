@@ -208,9 +208,10 @@ else
         adb shell ip -o link show > "$OUT/guest-links.txt" 2>&1
         IFACES="$(awk -F': ' '{print $2}' "$OUT/guest-links.txt" | sed 's/@.*//' | tr -d '\r' | grep -E '^(eth|wlan|radio|rmnet)[0-9]+$' || true)"
         for iface in $IFACES; do
-            # Headers only (160 bytes: IP, TCP, and DNS queries in full): over Wi-Fi, Google Play's updates run through
-            # the VPN too, and a full capture grew too large to pull in time (run 41237942120, API 35).
-            adb shell "setsid tcpdump -i $iface -s 160 -U -w /data/local/tmp/pf-$iface.pcap </dev/null >/dev/null 2>&1 &"
+            # The first 400 bytes of each packet (IP, TCP, DNS queries and answers in full, long names included): over
+            # Wi-Fi, Google Play's updates run through the VPN too, and a full capture grew too large to pull in time
+            # (run 41237942120, API 35).
+            adb shell "setsid tcpdump -i $iface -s 400 -U -w /data/local/tmp/pf-$iface.pcap </dev/null >/dev/null 2>&1 &"
         done
         echo "$IFACES" > "$OUT/guest-interfaces.txt"
         GUEST_CAPTURE=1
@@ -230,7 +231,7 @@ fi
 timeout 30 adb logcat -G 16M >/dev/null 2>&1 || true
 timeout 30 adb logcat -c || true
 # Logcat streamed to the runner as the tests run: it survives a device or a step that hangs later.
-adb logcat -v threadtime > "$OUT/logcat-live.txt" 2>&1 &
+adb logcat -v threadtime -v UTC > "$OUT/logcat-live.txt" 2>&1 & # UTC, like the captures: the evidence lines them up
 LIVE_LOGCAT=$!
 
 # Bounded well inside the job's own limit, so that logcat, the captures and the evidence are still
@@ -247,7 +248,7 @@ if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
     timeout 60 ./gradlew --stop >/dev/null 2>&1 || true # its daemon may still be running them
 fi
 
-timeout 120 adb logcat -d > "$OUT/logcat.txt" 2>&1 || true
+timeout 120 adb logcat -d -v threadtime -v UTC > "$OUT/logcat.txt" 2>&1 || true
 kill "$LIVE_LOGCAT" 2>/dev/null || true
 # The phone's network after the tests: the same uplink as before them, or what changed.
 {

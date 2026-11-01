@@ -42,9 +42,10 @@
 # the end, log-baseline.properties records how long each log was, so the evidence counts only
 # what the device tests caused.
 #
-# Meant for a fresh CI runner or a disposable Ubuntu VM: it installs packages, adds the lab's
-# addresses to the loopback, a system account (pfsocks) and a line to /etc/hosts, and enables
-# IPv6 on every interface, and undoes none of it. Each of those steps checks first, so a second
+# Meant for a fresh CI runner or a disposable Ubuntu VM: it installs packages (with its own
+# /usr/sbin/policy-rc.d meanwhile, removed afterwards, and any running squid or danted stopped),
+# adds the lab's addresses to the loopback, a system account (pfsocks) and a line to /etc/hosts,
+# and enables IPv6 on every interface, and undoes none of it. Each of those steps checks first, so a second
 # run on the same host works once the first run's servers are stopped (or the host rebooted).
 set -euo pipefail
 

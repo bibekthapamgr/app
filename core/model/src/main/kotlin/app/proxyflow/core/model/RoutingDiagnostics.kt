@@ -10,8 +10,8 @@ data class RoutingDiagnostics(
     /** TCP connections the proxy opened for apps. */
     val connectionsOpened: Long = 0,
     /**
-     * Different names apps looked up, each answered on the phone with a placeholder so that the proxy resolves it
-     * when an app connects (the engine's live mappings: repeats count once).
+     * Different names apps looked up during this connection, each answered on the phone with a placeholder so that the
+     * proxy resolves it when an app connects (counted once each by the engine, `dns_names`).
      */
     val namesForProxy: Long = 0,
     /** Name lookups answered "no IPv6 address" (AAAA, HTTPS, SVCB): names reach the proxy over IPv4 placeholders. */

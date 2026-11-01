@@ -275,6 +275,8 @@ def inspect(packet: bytes, capture: Capture, when: datetime.datetime | None = No
             if name is not None:
                 capture.dns_names[name.rstrip(".")] += 1
                 capture.dns_queries.append((when, name.rstrip(".").lower()))
+            elif len(rest) > 8 + 12 and not rest[8 + 2] & 0x80:
+                capture.dns_queries.append((when, "<unreadable query>"))  # a long name the capture's length limit cut off
         elif sport == 53:
             name, addresses = dns_answer_addresses(rest[8:])
             if name:
@@ -338,26 +340,40 @@ def dnsmasq_time(line: str, year: int) -> datetime.datetime | None:
     m = re.match(r"([A-Z][a-z]{2}) +(\d{1,2}) (\d\d):(\d\d):(\d\d) ", line)
     if not m or m.group(1) not in MONTHS:
         return None
-    return datetime.datetime(year, MONTHS[m.group(1)], int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)))
+    local = datetime.datetime(year, MONTHS[m.group(1)], int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)))
+    return local.astimezone(datetime.timezone.utc).replace(tzinfo=None)  # dnsmasq logs the runner's local time
 
 
-def connected_windows(logcat: list[str], year: int) -> tuple[list[tuple[datetime.datetime, datetime.datetime]], list[datetime.datetime]]:
+def connected_windows(logcat: list[str], year: int) -> tuple[list[tuple[datetime.datetime, datetime.datetime, str]], list[datetime.datetime]]:
     """From the VPN layer's log: when apps were routed into the VPN (Connected until Disconnect, revocation or the
-    service's end), and when each connection attempt began (the app looks up a proxy's name right then)."""
-    windows, starts, begun = [], [], None
+    service's end; a period still open when logcat ends closes there), and when each connection attempt began (the app
+    connects to its proxy right then). A test about to have Android revoke the VPN logs it first ("ProxyFlowE2E:
+    revoking"), which ends the period: Android may take the VPN away before ProxyFlow hears of it, and apps then use the
+    normal network by design. Each period carries what ended it, for the report."""
+    windows, starts, begun, label, last = [], [], None, "", None
     for line in logcat:
-        m = re.search(r"ProxyFlowVpn\s*:\s*(.*)$", line)
-        when = logcat_time(line, year) if m else None
+        when = logcat_time(line, year)
         if when is None:
+            continue
+        last = when
+        m = re.search(r"ProxyFlowVpn\s*:\s*(.*)$", line)
+        marker = re.search(r"ProxyFlowE2E\s*:\s*revoking", line)
+        if marker and begun is not None:
+            windows.append((begun, when, f"{label} until the test had Android revoke the VPN"))
+            begun = None
+            continue
+        if not m:
             continue
         event = m.group(1)
         if event.startswith("connect ") and "no such profile" not in event:
             starts.append(when)
         elif event.startswith("connected ") and begun is None:
-            begun = when
+            begun, label = when, f"connected at {when:%H:%M:%S}"
         elif begun is not None and event.startswith(("disconnect", "revoked", "service destroyed")):
-            windows.append((begun, when))
+            windows.append((begun, when, f"{label} until {event[:40]!r}"))
             begun = None
+    if begun is not None and last is not None:
+        windows.append((begun, last, f"{label} until logcat ends"))
     return windows, starts
 
 
@@ -386,7 +402,49 @@ def clocks_agree(queries: list, starts: list[datetime.datetime]) -> tuple[bool, 
 
 
 def inside(when: datetime.datetime | None, windows: list) -> bool:
-    return when is not None and any(start + MARGIN <= when <= end - MARGIN for start, end in windows)
+    return period_of(when, windows) is not None
+
+
+def period_of(when: datetime.datetime | None, windows: list) -> str | None:
+    """The connected period [when] falls in, at least MARGIN inside it, or None."""
+    if when is None:
+        return None
+    return next((label for start, end, label in windows if start + MARGIN <= when <= end - MARGIN), None)
+
+
+def capture_offset(capture: "Capture", starts: list[datetime.datetime], phone: set) -> tuple[float | None, str]:
+    """How far the capture's clock is from logcat's, in seconds, measured on the capture itself: right after each
+    connection attempt begins (logcat), the phone opens a connection to its proxy (the capture). Both clocks are UTC
+    and normally agree within a second or two, so each attempt is matched with the phone's nearest SYN to a proxy port
+    within 3 s; with fewer than four in five attempts matched, the capture cannot be lined up."""
+    syns = sorted(when for (when, src, dst, kind, port) in capture.events
+                  if when is not None and kind == "TCP" and src in phone and dst == GATEWAY and port in PROXY_SIDE_PORTS)
+    gaps = []
+    for start in starts:
+        near = [(t - start).total_seconds() for t in syns if abs((t - start).total_seconds()) <= 3]
+        if near:
+            gaps.append(min(near, key=abs))
+    if not gaps or len(gaps) < 0.8 * len(starts):
+        return None, f"only {len(gaps)} of {len(starts)} connection attempts have the phone's SYN to its proxy within 3 s"
+    gaps.sort()
+    return gaps[len(gaps) // 2], f"{len(gaps)} of {len(starts)} connection attempts matched"
+
+
+def phone_addresses(capture: "Capture", network: list[str]) -> set:
+    """The phone's own addresses on its uplink: where its SYNs to the proxies come from, and every address the device
+    script recorded on the uplink interfaces (IPv4 and IPv6, before and after the tests)."""
+    phone = {src for (_, src, dst, kind, port) in capture.events if kind == "TCP" and dst == GATEWAY and port in PROXY_SIDE_PORTS}
+    for line in network:
+        if "addresses" not in line.split(":", 1)[0]:
+            continue
+        for item in line.split(":", 1)[1].split(";"):
+            parts = item.split()
+            if len(parts) == 2 and parts[0] not in ("lo", "dummy0") and "/" in parts[1]:
+                try:
+                    phone.add(str(ipaddress.ip_address(parts[1].split("/")[0])))
+                except ValueError:
+                    pass
+    return phone
 
 
 def explained(dst: str, kind: str, port: int, android_addresses: set) -> bool:
@@ -504,26 +562,12 @@ def main(argv: list[str]) -> int:
     )
     if direct_lab:
         problems.append(f"the phone looked up lab destination names itself, around the proxy: {direct_lab}")
-    # While connected: the periods from the VPN layer's log, once the phone's clock and the runner's line up.
+    # While connected: the periods from the VPN layer's log (checked against the captures and the uplink DNS log below).
     year = datetime.datetime.now(datetime.timezone.utc).year
     windows, starts = connected_windows(logcat, year)
     queried = uplink_queries(after("dns-uplink.log"), year)
-    aligned, how = clocks_agree(queried, starts) if windows else (False, "no connected period in logcat")
-    span = sum((end - start).total_seconds() for start, end in windows)
-    if not aligned:
-        facts.append(f"while connected: not lined up ({how}); the checks below for those periods did not run")
-    else:
-        inside_lookups = collections.Counter(f"{name} {kind}" for when, name, kind in queried if inside(when, windows))
-        own = sum(count for key, count in inside_lookups.items() if key.split(" ")[0] == PROXY_NAME)
-        android = collections.Counter({k: c for k, c in inside_lookups.items() if k.split(" ")[0] in ANDROID_NAMES})
-        unexplained = collections.Counter({k: c for k, c in inside_lookups.items() if k.split(" ")[0] not in ANDROID_NAMES | {PROXY_NAME}})
-        facts.append(
-            f"lookups on the uplink while connected ({len(windows)} connected periods, {span:.0f} s in all; {how}): "
-            f"{own} of the proxy's own name; Android's network checks and time: {dict(android) or 'none'}; "
-            f"any other: {dict(unexplained.most_common(12)) or 'none'}"
-        )
-        if unexplained:
-            problems.append(f"the phone looked up names on its own network while connected, around the VPN: {dict(unexplained.most_common(12))}")
+    span = sum((end - start).total_seconds() for start, end, _ in windows)
+    network = read(os.path.join(args.out, "guest-network.txt"))
     refused_probes = [int(m.group(1)) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*engine local_refused=(\d+)", line))]
     if refused_probes:
         facts.append(f"TCP to ProxyFlow's own addresses refused on the phone (Android's DNS-over-TLS probe, engine local_refused): {max(refused_probes)}")
@@ -534,20 +578,36 @@ def main(argv: list[str]) -> int:
         )
 
     # The gate: a connection forwarded to a TLS port opens with a TLS record.
-    gate_mode, gate_plain, gate_tls, gate_empty = "", [], 0, 0
+    gate_mode, gate_plain, gate_tls, gate_empty, waiting = "", [], 0, 0, {}
     for line in after("gate.log"):
         m = re.search(r"mode forward 127\.0\.0\.1:(\d+)", line)
         if m:
-            gate_mode = m.group(1)
+            gate_mode = m.group(1)  # older gate logs name the upstream only on the mode line
             continue
-        m = re.search(r"connection \d+ from \S+ mode=forward first=(.*)$", line)
-        if m and gate_mode and int(gate_mode) in TLS_PORTS:
-            if m.group(1).startswith("16 03"):
+        m = re.search(r"connection (\d+) late first=(.*)$", line)
+        if m and m.group(1) in waiting:  # the first bytes of a connection that waited past the gate's 15 s
+            port = waiting.pop(m.group(1))
+            if m.group(2).startswith("16 03"):
                 gate_tls += 1
-            elif m.group(1).strip() == "-":
-                gate_empty += 1  # closed before sending anything (a dial cancelled by a disconnect): no plaintext either
             else:
-                gate_plain.append(line[-60:])
+                gate_plain.append(f"{port}: late {m.group(2)}")
+            continue
+        m = re.search(r"connection (\d+) from \S+ mode=forward (?:upstream=127\.0\.0\.1:(\d+) )?first=(\S+)(?: \((\w+)\))?", line)
+        if not m:
+            continue
+        number, upstream, first, why = m.groups()
+        port = int(upstream or gate_mode or 0)
+        if port not in TLS_PORTS:
+            continue
+        if first.startswith("16"):
+            gate_tls += 1
+        elif first == "-" and why == "timeout":
+            waiting[number] = port
+        elif first == "-":
+            gate_empty += 1  # closed or reset before sending anything (a dial cancelled by a disconnect): no plaintext either
+        else:
+            gate_plain.append(line[-60:])
+    gate_empty += len(waiting)  # waited and never sent anything
     if gate_plain:
         facts.append(f"gate: plaintext to a TLS front: {gate_plain[:3]}")
     else:
@@ -576,6 +636,8 @@ def main(argv: list[str]) -> int:
     alive_at_end = next((line.split(":", 1)[1].split() for line in guest if line.startswith("tcpdump at the end on:")), None)
     alive_at_start = next((line.split(":", 1)[1].split() for line in guest if line.startswith("tcpdump at the start on:")), None)
     covering = 0
+    checked: list[str] = []
+    host_offset: float | None = None
     summary += [
         "| Capture | Packets | SOCKS5 targets (by kind) | HTTP CONNECT targets | TLS-port streams | To lab addresses | DNS for lab names |",
         "|---|---|---|---|---|---|---|",
@@ -616,30 +678,66 @@ def main(argv: list[str]) -> int:
                 problems.append(f"capture {name}: {count} {count_name}")
         if capture.plaintext_on_tls:
             problems.append(f"capture {name}: plaintext opened a connection to a TLS proxy port: {capture.plaintext_on_tls[:3]}")
-        if aligned and not partial and capture.covers_uplink:
-            phone = {src for (_, src, dst, kind, port) in capture.events if kind == "TCP" and dst == GATEWAY and port in PROXY_SIDE_PORTS}
-            android_addresses = set().union(*(capture.dns_answers.get(n, set()) for n in ANDROID_NAMES))
-            direct = collections.Counter(
-                f"{kind} [{dst}]:{port}" if ":" in dst else f"{kind} {dst}:{port}"
-                for (when, src, dst, kind, port) in capture.events
-                if src in phone and inside(when, windows) and not explained(dst, kind, port, android_addresses)
-            )
-            names_inside = collections.Counter(n for (when, n) in capture.dns_queries if inside(when, windows))
-            odd_names = {n: c for n, c in names_inside.items() if n not in ANDROID_NAMES and n != PROXY_NAME}
-            facts.append(
-                f"capture {name} while connected: new connections, datagrams or pings from the phone other than to its proxy, "
-                f"its network's resolver or Android's own checks: {dict(direct.most_common(12)) or 'none'}; "
-                f"DNS queries: {dict(names_inside.most_common(12)) or 'none'}"
-            )
-            if direct:
-                problems.append(f"capture {name}: traffic left the phone around the VPN while connected: {dict(direct.most_common(12))}")
-            if odd_names:
-                problems.append(f"capture {name}: the phone looked up names on its own network while connected: {odd_names}")
+        if windows and not partial and capture.covers_uplink:
+            phone = phone_addresses(capture, network)
+            offset, how = capture_offset(capture, starts, phone)
+            if offset is None:
+                problems.append(f"capture {name}: could not be lined up with logcat ({how}), so its connected periods went unchecked")
+            else:
+                shift = datetime.timedelta(seconds=offset)
+                if not name.startswith("guest-"):
+                    host_offset = offset  # the emulator's own capture runs on the runner's clock, like the DNS log
+                android_addresses = set().union(*(capture.dns_answers.get(n, set()) for n in ANDROID_NAMES))
+                odd_events = [
+                    (when - shift, f"{kind} [{dst}]:{port}" if ":" in dst else f"{kind} {dst}:{port}")
+                    for (when, src, dst, kind, port) in capture.events
+                    if src in phone and inside(when and when - shift, windows) and not explained(dst, kind, port, android_addresses)
+                ]
+                direct = collections.Counter(key for _, key in odd_events)
+                names_inside = collections.Counter(n for (when, n) in capture.dns_queries if inside(when and when - shift, windows))
+                odd_names = {n: c for n, c in names_inside.items() if n not in ANDROID_NAMES and n != PROXY_NAME}
+                where = [f"{key} at {when:%H:%M:%S.%f}"[:-3] + f" ({period_of(when, windows)})" for when, key in odd_events[:4]]
+                checked.append(name)
+                facts.append(
+                    f"capture {name} while connected ({len(windows)} periods, {span:.0f} s; its clock {offset:+.2f} s from logcat's, {how}; "
+                    f"phone {sorted(phone)}): new connections, datagrams or pings from the phone other than to its proxy, its network's "
+                    f"resolver or Android's own checks: {dict(direct.most_common(12)) or 'none'}{' — ' + '; '.join(where) if where else ''}; "
+                    f"DNS queries: {dict(names_inside.most_common(12)) or 'none'}"
+                )
+                if direct:
+                    problems.append(f"capture {name}: traffic left the phone around the VPN while connected: {dict(direct.most_common(12))}; {'; '.join(where)}")
+                if odd_names:
+                    problems.append(f"capture {name}: the phone looked up names on its own network while connected: {odd_names}")
         named = [t for t in capture.socks_targets if t.startswith("name proxyflow.test:") or t.startswith("name secure.proxyflow.test:")]
         if capture.covers_uplink and capture.socks_targets and not named:
             problems.append(f"capture {name}: no SOCKS5 request asked for a lab name: the names did not reach the proxy as names")
     if covering == 0:
         problems.append("no packet capture that ran through all the tests saw the app's connections to both proxies")
+    if windows and not checked:
+        problems.append("no capture could be checked for the periods ProxyFlow was connected")
+
+    # The uplink DNS server's log, for the same periods: on the runner's clock, like the emulator's own capture.
+    if not windows:
+        facts.append("lookups on the uplink while connected: no connected period in logcat")
+    else:
+        if host_offset is not None:
+            dns_shift, how = datetime.timedelta(seconds=host_offset), f"lined up through the emulator's capture ({host_offset:+.2f} s)"
+        else:
+            agree, how = clocks_agree(queried, starts)
+            dns_shift = datetime.timedelta(0) if agree else None
+        if dns_shift is None:
+            facts.append(f"lookups on the uplink while connected: not lined up ({how}); the captures above cover those periods")
+        else:
+            inside_lookups = collections.Counter(f"{n} {kind}" for when, n, kind in queried if inside(when - dns_shift, windows))
+            own = sum(c for k, c in inside_lookups.items() if k.split(" ")[0] == PROXY_NAME)
+            android = collections.Counter({k: c for k, c in inside_lookups.items() if k.split(" ")[0] in ANDROID_NAMES})
+            unexplained = collections.Counter({k: c for k, c in inside_lookups.items() if k.split(" ")[0] not in ANDROID_NAMES | {PROXY_NAME}})
+            facts.append(
+                f"lookups on the uplink while connected ({len(windows)} periods, {span:.0f} s; {how}): {own} of the proxy's own name; "
+                f"Android's network checks and time: {dict(android) or 'none'}; any other: {dict(unexplained.most_common(12)) or 'none'}"
+            )
+            if unexplained:
+                problems.append(f"the phone looked up names on its own network while connected, around the VPN: {dict(unexplained.most_common(12))}")
     summary.append("")
 
     token = os.urandom(16).hex()
