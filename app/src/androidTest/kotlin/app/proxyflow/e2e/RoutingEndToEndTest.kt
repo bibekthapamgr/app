@@ -167,7 +167,9 @@ class RoutingEndToEndTest {
         val before = ProxyEngine().stats().icmpEchoRequestsDropped
 
         val v4 = Shell.run("ping -c $PINGS -W 1 ${env.destinationAddress}")
-        val v6 = Shell.run("ping6 -c $PINGS -W 1 ${lab.v6Address}")
+        // Older images have ping6; newer ones may have only ping -6.
+        val ping6 = if (Shell.run("ls /system/bin/ping6").trim() == "/system/bin/ping6") "ping6" else "ping -6"
+        val v6 = Shell.run("$ping6 -c $PINGS -W 1 ${lab.v6Address}")
 
         for ((family, output) in listOf("IPv4" to v4, "IPv6" to v6)) {
             assertTrue("$family: $output", Regex("$PINGS packets transmitted, 0 received").containsMatchIn(output))

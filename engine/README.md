@@ -10,7 +10,7 @@ ADR-0001 to ADR-0005 (`docs/adr/`). Behaviour, API and compatibility:
 | Package | What it does |
 |---|---|
 | `adapters` | One tunnel per destination: protected TCP to the proxy, optional TLS (hostname checked here, chain trusted by the platform), SOCKS5 (RFC 1928/1929) or HTTP CONNECT (Basic). Stable error codes; credentials as wipeable bytes, never formatted. |
-| `tunnel` | The netstack engine: TCP flows dialled through the proxy before the app's handshake completes (fail closed), DNS answered locally, other UDP refused, pings never answered. Lifecycle, flow registry, limits, metrics and a bounded event queue. |
+| `tunnel` | The netstack engine: TCP flows dialled through the proxy before the app's handshake completes (fail closed), DNS answered locally over UDP and TCP port 53 (any address, ADR-0011), TCP to the engine's own addresses refused, other UDP refused, pings never answered. Lifecycle, flow registry, limits, metrics (incl. proxy timeouts and failures of flows to names, for the app's diagnostics) and a bounded event queue. |
 | `fakedns` | Fake-IP DNS: `A` queries answered from `198.18.0.0/15`, mapped back to hostnames on connect. |
 | `pfengine` | The API exported to Kotlin with gomobile (`Start`, `Stop`, `Status`, `Stats`, `Flows`, `ResetFlows`, `Probe`, `SelfTest`). |
 | `internal/proxytest` | Test-only fixtures: mock SOCKS5 and HTTP CONNECT proxies (scripted misbehaviour, TLS), an echo server, a test PKI, goroutine and descriptor leak checks. |

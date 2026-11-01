@@ -13,7 +13,7 @@ Apps resolve hostnames before connecting. If those lookups go to the ISP's resol
 3. When a TCP flow targets a fake address, map it back to the hostname and send **hostname:port** to the proxy (remote DNS). Unknown fake addresses are refused (`STALE_DNS_MAPPING`).
 4. `AAAA`, `HTTPS` and `SVCB` → `NOERROR` with no records (apps use the A answer; the proxy picks the address family when it resolves). Other types → `REFUSED`. Malformed or injection-shaped names → `REFUSED`/`FORMERR`.
 5. The proxy's **own** hostname is resolved on the underlying network by Android (`Network.getAllByName`), from the app that is excluded from the VPN — the only DNS that leaves the phone.
-6. DNS over TCP, DoT and DoH are ordinary TCP flows and are proxied.
+6. DNS over TCP, DoT and DoH are ordinary TCP flows and are proxied. *Amended by ADR-0011 (M6): plain DNS over TCP port 53, to any address, is answered locally like UDP/53; DoT and DoH stay ordinary TCP.*
 
 ## Alternatives considered
 
@@ -26,7 +26,7 @@ Apps resolve hostnames before connecting. If those lookups go to the ISP's resol
 - No DNS leaves the phone except the proxy's own hostname (E07, E16). The proxy sees hostnames, so provider-side geo-resolution works.
 - Apps that need `TXT`/`MX`/`SRV` over UDP (rare in consumer apps) will fail while connected; tracked via the `refused` DNS counter in Logs.
 - Fake addresses can outlive a session in app caches; the 5 s TTL and `STALE_DNS_MAPPING` handling make apps re-resolve. Production adds a minimum reuse delay before an address is recycled (threat model D-2).
-- Android Private DNS in strict mode: queries go to the configured DoT server through the tunnel as TCP; apps then connect by IP, which works but means the proxy sees IPs. Confirmed on devices in M6.
+- Android Private DNS in strict mode: queries go to the configured DoT server through the tunnel as TCP; apps then connect by IP, which works but means the proxy sees IPs. Not automated on devices in M6 (Android validates a strict Private DNS server against the system CA store; `docs/m6/routing-and-limitations.md` §4); "Automatic", the default, runs in every M6 device test.
 
 ## Evidence
 
