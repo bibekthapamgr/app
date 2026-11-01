@@ -208,6 +208,10 @@ class RoutingEndToEndTest {
 
         gate.refuse()
         assertRefused("gate-down", env.destinationName, env.destinationPort)
+        // By address too: the phone could reach these directly (the emulator's own network routes to the runner), so a
+        // fallback that dialled the address would deliver the line, and the evidence would find it at the destination.
+        assertRefused("gate-down-address", lab.addressDestination, lab.addressPort)
+        assertRefused("gate-down-ipv6", lab.v6Address, lab.v6Port)
         assertEquals(DnsAnswer.NOERROR, FromShell.dns(VPN_DNS, env.destinationName, DnsAnswer.A).rcode)
         val down = app.awaitDiagnostics("the failure counted") { it.lastProblem?.code == "PROXY_UNREACHABLE" }
         assertEquals("still connected: traffic is held, not let out", ConnectionStatus.Connected, app.controller.state.value.status)
@@ -225,6 +229,7 @@ class RoutingEndToEndTest {
 
         gate.silent()
         assertRefused("gate-silent", env.destinationName, env.destinationPort, timeoutMillis = HANGING_PROXY_WAIT_MS)
+        assertRefused("gate-silent-address", lab.addressDestination, lab.addressPort, timeoutMillis = HANGING_PROXY_WAIT_MS)
         eventually("the engine counted a proxy timeout") { ProxyEngine().stats().proxyTimeouts >= 1 }
         app.awaitDiagnostics("a proxy timeout") { it.proxyTimeouts >= 1 }
 

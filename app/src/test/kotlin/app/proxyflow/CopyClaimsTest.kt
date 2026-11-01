@@ -41,7 +41,7 @@ class CopyClaimsTest {
                 }
             }
         }
-        return out.map { (name, text) -> name to text.replace("\\'", "'").replace("\\\"", "\"") }
+        return out.map { (name, text) -> name to normalized(text.replace("\\'", "'").replace("\\\"", "\"")) }
     }
 
     private val all get() = strings.flatMap { (file, list) -> list.map { Triple(file, it.first, it.second) } }
@@ -86,7 +86,7 @@ class CopyClaimsTest {
             "about_summary" to listOf("anonymous", "proxy provider sees"),
             "about_carry_blocked" to listOf("UDP is blocked", "ping"),
             "about_carry_ipv6" to listOf("IPv6"),
-            "about_carry_outside" to listOf("don't use the VPN"),
+            "about_carry_outside" to listOf("don't use the VPN", "work profile", "another user", "tethered"),
             "about_carry_tls" to listOf("HTTPS", "end to end", "never decrypts"),
             "home_https_note" to listOf("HTTPS", "end to end", "never decrypts"),
             "home_connected_note" to listOf("TCP"),
@@ -99,25 +99,63 @@ class CopyClaimsTest {
         assertEquals(missing.joinToString("\n"), emptyList<String>(), missing)
     }
 
+    /** Every way of saying one of the claims ProxyFlow must not make is caught, whatever spaces or apostrophes it uses. */
+    @Test
+    fun forbiddenWordingsAreRecognised() {
+        val claims = listOf(
+            "ProxyFlow hides your IP address",
+            "Hiding your real location",
+            "Your traffic is protected",
+            "It protects your privacy",
+            "Every application goes through your proxy",
+            "All of your device traffic is tunnelled",
+            "Covers all traffic",
+            "Untrackable browsing",
+            "Untraceable and incognito",
+            "Secure every connection",
+            "Works with games and video calls",
+            "A system-wide VPN",
+            "100\u00a0% private",
+            "all\u00a0traffic",
+            "Full VPN protection",
+            "Military-grade encryption",
+            "Encrypts all your traffic",
+            "No-logs policy",
+        )
+        val missed = claims.filter { claim -> FORBIDDEN.none { (_, pattern) -> pattern.containsMatchIn(normalized(claim)) } }
+        assertEquals("not recognised: $missed", emptyList<String>(), missed)
+    }
+
     private companion object {
+        /** No-break and other special spaces read as spaces, typographic apostrophes as plain ones. */
+        fun normalized(text: String): String = text.replace(Regex("[\\u00a0\\u2007\\u202f\\u2009]"), " ").replace('\u2019', '\'')
+
         /** Claims ProxyFlow must never make (traffic matrix §5 "Must not say"). */
         val FORBIDDEN: List<Pair<String, Regex>> = listOf(
             "all traffic" to
                 Regex(
-                    "(?i)\\ball\\s+(of\\s+)?(your\\s+|the\\s+|this\\s+)?(device's\\s+|phone's\\s+|apps'\\s+|internet\\s+|network\\s+)?traffic",
+                    "(?i)\\ball\\s+(of\\s+)?(your\\s+|the\\s+|this\\s+)?" +
+                        "(device's\\s+|device\\s+|phone's\\s+|phone\\s+|apps'\\s+|internet\\s+|network\\s+)?traffic",
                 ),
-            "every app" to Regex("(?i)\\b(all|every)\\s+(of\\s+)?(your\\s+)?apps?\\b"),
-            "full VPN" to Regex("(?i)\\b(full|complete|whole)[ -](device\\s+)?(vpn|tunnel|protection|coverage)"),
-            "anonymity" to Regex("(?i)\\banonym|\\buntrace|\\bincognito|\\binvisible online"),
-            "hiding identity" to Regex("(?i)\\bhide\\s+(your\\s+)?(ip|identity|location|activity)"),
+            "every app" to Regex("(?i)\\b(all|every)\\s+(of\\s+)?(your\\s+|the\\s+)?(apps?|applications?)\\b"),
+            "full VPN" to
+                Regex("(?i)\\b(full|complete|whole)[ -](device\\s+)?(vpn|tunnel|protection|coverage)|\\b(system|device)[ -]wide\\b"),
+            "anonymity" to Regex("(?i)\\banonym|\\buntrace|\\buntrack|\\bincognito|\\binvisible online"),
+            "hiding identity" to Regex("(?i)\\bhid(e|es|ing)\\s+(your\\s+)?(real\\s+)?(ip|identity|location|activity)"),
             "blanket security" to
                 Regex(
-                    "(?i)\\b(military|bank)[ -](grade|level)|\\b100\\s?%|\\bcompletely\\s+(private|secure|safe)|\\bfully\\s+(private|secure|encrypted)",
+                    "(?i)\\b(military|bank)[ -](grade|level)|\\b100\\s?%|\\bcompletely\\s+(private|secure|safe)" +
+                        "|\\bfully\\s+(private|secure|encrypted)|\\bsecures?\\s+(every|all)\\b",
                 ),
             "encrypts everything" to Regex("(?i)\\bencrypt(s|ed)?\\s+(all|everything|your\\s+traffic|all\\s+your)"),
-            "protection" to Regex("(?i)\\bprotection\\b|\\bprotects?\\s+(you|your\\s+(privacy|traffic|data))"),
+            "protection" to
+                Regex("(?i)\\bprotection\\b|\\bprotect(s|ed|ing)?\\s+(you|your)\\b|\\b(is|are|stays?|keeps?\\s+\\w+)\\s+protected\\b"),
             "no logs" to Regex("(?i)\\bno[- ]logs?\\b"),
-            "games and calls" to Regex("(?i)\\bsupports?\\s+(games|calls|video calls|quic|udp)"),
+            "games and calls" to
+                Regex(
+                    "(?i)\\bsupports?\\s+(games|calls|video calls|quic|udp)" +
+                        "|\\bworks?\\s+(with|for)\\s+(games|calls|video calls|voip|quic|udp)",
+                ),
         )
 
         /** Strings that may name a forbidden claim only to deny it. */

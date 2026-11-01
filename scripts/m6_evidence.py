@@ -42,7 +42,7 @@ import sys
 from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from m5_evidence import dns_name, escape, ip_of, network_payload  # noqa: E402
+from m5_evidence import dns_name, escape, guest_capture_partial, ip_of, network_payload  # noqa: E402
 
 LAB_NAMES = ("proxyflow.test", "secure.proxyflow.test", "proxyflow6.test", "missing.proxyflow.test")
 PROXY_NAME = "proxy.proxyflow.test"
@@ -52,6 +52,16 @@ LAN_PORT = 8082
 SOCKS_PORTS = (1080, 1090)  # Dante, and the gate in front of it
 HTTP_PORT = 3128
 TLS_PORTS = (3129, 1443, 3130, 3131, 3132)
+# Every port the app reaches on the runner as a proxy (with the M5 tests' silent and closed ones), and the gate's control
+# port, which the tests themselves use from ProxyFlow's own process (outside its VPN, by design).
+PROXY_SIDE_PORTS = SOCKS_PORTS + (HTTP_PORT,) + TLS_PORTS + (1081, 1082, 1091)
+NETWORK_RESOLVER = "10.0.2.3"  # the emulator network's own DNS server (it forwards to the lab's uplink resolver)
+# Android's own traffic outside VPNs while one is up: NetworkMonitor checking the phone's network (its probe hosts, with
+# their fallbacks) and the time service. Lookups of these, and their HTTP(S) and NTP, are expected on the uplink.
+ANDROID_NAMES = frozenset(
+    ("connectivitycheck.gstatic.com", "www.google.com", "play.googleapis.com", "clients1.google.com",
+     "clients3.google.com", "connectivitycheck.android.com", "time.android.com")
+)
 
 # Where each destination logs, and how the proxies name a tunnel to it.
 DESTINATIONS = {
@@ -104,6 +114,11 @@ class Capture:
     plaintext_on_tls: list[str] = field(default_factory=list)
     first_payload_seen: set = field(default_factory=set)
     segments_seen: set = field(default_factory=set)
+    # For the connected periods: when each new TCP connection, UDP datagram and echo request left, and each DNS query.
+    events: list = field(default_factory=list)  # (time, src, dst, "TCP"|"UDP"|"ICMP", port)
+    dns_queries: list = field(default_factory=list)  # (time, name)
+    dns_answers: dict = field(default_factory=lambda: collections.defaultdict(set))  # name -> addresses answered
+    dns_streams: dict = field(default_factory=dict)  # DNS over TCP: the client's bytes so far, per connection
 
     @property
     def covers_uplink(self) -> bool:
@@ -126,6 +141,59 @@ def socks_connect_target(payload: bytes) -> str | None:
     return None
 
 
+def skip_name(m: bytes, at: int) -> int:
+    while at < len(m):
+        length = m[at]
+        if length & 0xC0 == 0xC0:
+            return at + 2
+        if length == 0:
+            return at + 1
+        at += 1 + length
+    raise IndexError("name runs past the message")
+
+
+def dns_answer_addresses(message: bytes) -> tuple[str | None, list[str]]:
+    """The question's name and the A/AAAA addresses of a DNS response."""
+    if len(message) < 12 or not message[2] & 0x80:
+        return None, []
+    questions, answers = struct.unpack("!HH", message[4:8])
+    labels, at = [], 12
+    while questions and at < len(message) and message[at] and not message[at] & 0xC0:
+        labels.append(message[at + 1 : at + 1 + message[at]].decode("ascii", "replace"))
+        at += 1 + message[at]
+    name = ".".join(labels) if labels else None
+    at = 12
+    for _ in range(questions):
+        at = skip_name(message, at) + 4
+    found = []
+    for _ in range(answers):
+        at = skip_name(message, at)
+        rtype, _, _, length = struct.unpack("!HHIH", message[at : at + 10])
+        at += 10
+        if (rtype == 1 and length == 4) or (rtype == 28 and length == 16):
+            found.append(ip_of(message[at : at + length]))
+        at += length
+    return (name.rstrip(".").lower() if name else None), found
+
+
+def dns_over_tcp(capture: "Capture", flow: tuple, payload: bytes, when) -> None:
+    """Reassembles the client's side of a DNS-over-TCP connection (the length and the query often come in two
+    segments) and records each query's name."""
+    buffer = capture.dns_streams.setdefault(flow, bytearray())
+    if len(buffer) > 8192:
+        return
+    buffer += payload
+    while len(buffer) >= 2:
+        length = struct.unpack("!H", buffer[:2])[0]
+        if len(buffer) < 2 + length:
+            return
+        name = dns_name(bytes(buffer[2 : 2 + length]))
+        if name is not None:
+            capture.dns_names[name.rstrip(".")] += 1
+            capture.dns_queries.append((when, name.rstrip(".").lower()))
+        del buffer[: 2 + length]
+
+
 IPV6_EXTENSIONS = (0, 43, 44, 60)  # hop-by-hop, routing, fragment, destination options
 
 
@@ -141,7 +209,7 @@ def upper_layer(next_header: int, rest: bytes) -> tuple[int, bytes]:
     return next_header, rest
 
 
-def inspect(packet: bytes, capture: Capture) -> None:
+def inspect(packet: bytes, capture: Capture, when: datetime.datetime | None = None) -> None:
     version = packet[0] >> 4
     if version == 4 and len(packet) >= 20:
         header = (packet[0] & 0x0F) * 4
@@ -159,6 +227,7 @@ def inspect(packet: bytes, capture: Capture) -> None:
             capture.lab_packets[address] += 1
     if (proto == 1 and rest[:1] == b"\x08") or (proto == 58 and rest[:1] == b"\x80"):
         capture.echo_requests[dst] += 1
+        capture.events.append((when, src, dst, "ICMP", 0))
     if proto == 6 and len(rest) >= 20:
         sport, dport, seq = struct.unpack("!HHI", rest[0:8])
         flags = rest[13]
@@ -166,19 +235,21 @@ def inspect(packet: bytes, capture: Capture) -> None:
         payload = rest[offset:]
         if flags & 0x02 and not flags & 0x10:
             capture.syns[(dst, dport)] += 1
+            capture.events.append((when, src, dst, "TCP", dport))
             if dst == GATEWAY and dport == LAN_PORT:
                 capture.lan_syns += 1
-        if 53 in (sport, dport) and len(payload) > 2:
-            name = dns_name(payload[2:])
-            if name is not None and dport == 53:
-                capture.dns_names[name.rstrip(".")] += 1
-        if not payload or dst != GATEWAY:
+        if not payload:
             return
         flow = (src, sport, dst, dport)
         segment = (flow, seq)
         if segment in capture.segments_seen:
             return  # a retransmission
         capture.segments_seen.add(segment)
+        if dport == 53:
+            dns_over_tcp(capture, flow, payload, when)
+            return
+        if dst != GATEWAY:
+            return
         first = flow not in capture.first_payload_seen
         capture.first_payload_seen.add(flow)
         if dport in SOCKS_PORTS:
@@ -194,10 +265,16 @@ def inspect(packet: bytes, capture: Capture) -> None:
                 capture.plaintext_on_tls.append(f"{dport}: {payload[:8].hex(' ')}")
     elif proto == 17 and len(rest) >= 8:
         sport, dport = struct.unpack("!HH", rest[0:4])
+        capture.events.append((when, src, dst, "UDP", dport))
         if dport == 53:
             name = dns_name(rest[8:])
             if name is not None:
                 capture.dns_names[name.rstrip(".")] += 1
+                capture.dns_queries.append((when, name.rstrip(".").lower()))
+        elif sport == 53:
+            name, addresses = dns_answer_addresses(rest[8:])
+            if name:
+                capture.dns_answers[name].update(addresses)
         if dst in LAB_ADDRESSES:
             capture.udp_to_lab[f"[{dst}]:{dport}" if ":" in dst else f"{dst}:{dport}"] += 1
 
@@ -223,15 +300,17 @@ def read_capture(path: str) -> Capture:
         return capture
     linktype = struct.unpack(endian + "I", data[20:24])[0] & 0x0FFFFFFF
     at = 24
+    nanoseconds = magic in (b"\x4d\x3c\xb2\xa1", b"\xa1\xb2\x3c\x4d")
     while at + 16 <= len(data):
-        incl_len = struct.unpack(endian + "I", data[at + 8 : at + 12])[0]
+        seconds, fraction, incl_len = struct.unpack(endian + "III", data[at : at + 12])
         frame = data[at + 16 : at + 16 + incl_len]
         at += 16 + incl_len
         capture.packets += 1
+        when = datetime.datetime.fromtimestamp(seconds + fraction / (1e9 if nanoseconds else 1e6), datetime.timezone.utc).replace(tzinfo=None)
         try:
             packet = network_payload(linktype, frame)
             if packet:
-                inspect(packet, capture)
+                inspect(packet, capture, when)
         except (IndexError, struct.error):
             continue
     return capture
@@ -278,19 +357,19 @@ def connected_windows(logcat: list[str], year: int) -> tuple[list[tuple[datetime
     return windows, starts
 
 
-def lookups_while_connected(logcat: list[str], uplink_lines: list[str], year: int) -> tuple[collections.Counter | None, str]:
-    """Names the phone's uplink DNS server was asked for while ProxyFlow was connected (at least MARGIN inside each
-    connected period), or None with the reason when the two clocks cannot be lined up."""
-    windows, starts = connected_windows(logcat, year)
-    if not windows:
-        return None, "no connected period in logcat"
-    queries = []
-    for line in uplink_lines:
+def uplink_queries(lines: list[str], year: int) -> list[tuple[datetime.datetime, str, str]]:
+    found = []
+    for line in lines:
         m = re.search(r"query\[(\w+)\] (\S+) from", line)
         when = dnsmasq_time(line, year) if m else None
         if when is not None:
-            queries.append((when, m.group(2).lower().rstrip("."), m.group(1)))
-    # The clocks: each lookup of the proxy's own name follows a connection attempt within a second or two.
+            found.append((when, m.group(2).lower().rstrip("."), m.group(1)))
+    return found
+
+
+def clocks_agree(queries: list, starts: list[datetime.datetime]) -> tuple[bool, str]:
+    """Each lookup of the proxy's own name follows a connection attempt within a second or two: the runner's clock
+    (the DNS server's log, the emulator's capture) and the phone's (logcat) line up when the median gap is small."""
     offsets = []
     for when, name, _ in queries:
         if name == PROXY_NAME:
@@ -298,13 +377,24 @@ def lookups_while_connected(logcat: list[str], uplink_lines: list[str], year: in
             offsets.append((when - max(before)).total_seconds() if before else 99.0)
     offsets.sort()
     if not offsets or abs(offsets[len(offsets) // 2]) > 3:
-        return None, f"the emulator's and the runner's clocks could not be lined up (lookup offsets {offsets[:5]} s)"
-    inside: collections.Counter = collections.Counter()
-    for when, name, kind in queries:
-        if any(start + MARGIN <= when <= end - MARGIN for start, end in windows):
-            inside[f"{name} {kind}"] += 1
-    span = sum((end - start).total_seconds() for start, end in windows)
-    return inside, f"{len(windows)} connected periods, {span:.0f} s in all"
+        return False, f"the emulator's and the runner's clocks could not be lined up (lookup offsets {offsets[:5]} s)"
+    return True, f"clocks agree within {abs(offsets[len(offsets) // 2]):.1f} s"
+
+
+def inside(when: datetime.datetime | None, windows: list) -> bool:
+    return when is not None and any(start + MARGIN <= when <= end - MARGIN for start, end in windows)
+
+
+def explained(dst: str, kind: str, port: int, android_addresses: set) -> bool:
+    """Traffic from the phone on its own network that is expected while ProxyFlow is connected."""
+    address = ipaddress.ip_address(dst)
+    if address.is_multicast or address.is_link_local or dst == "255.255.255.255" or (kind == "UDP" and port in (67, 68)):
+        return True  # the network itself: DHCP, neighbour discovery, multicast
+    if dst == GATEWAY and kind == "TCP" and port in PROXY_SIDE_PORTS:
+        return True  # ProxyFlow to its proxy (and the tests to the gate's control port)
+    if dst == NETWORK_RESOLVER and (port == 53 or (kind == "TCP" and port == 853)):
+        return True  # lookups on the phone's network (names checked apart) and Android's Private DNS check of it
+    return dst in android_addresses and ((kind == "TCP" and port in (80, 443)) or (kind == "UDP" and port == 123))
 
 
 # --- the checks -----------------------------------------------------------------
@@ -410,16 +500,26 @@ def main(argv: list[str]) -> int:
     )
     if direct_lab:
         problems.append(f"the phone looked up lab destination names itself, around the proxy: {direct_lab}")
-    inside, how = lookups_while_connected(logcat, after("dns-uplink.log"), datetime.datetime.now(datetime.timezone.utc).year)
-    if inside is None:
-        facts.append(f"lookups on the uplink while connected: not lined up ({how})")
+    # While connected: the periods from the VPN layer's log, once the phone's clock and the runner's line up.
+    year = datetime.datetime.now(datetime.timezone.utc).year
+    windows, starts = connected_windows(logcat, year)
+    queried = uplink_queries(after("dns-uplink.log"), year)
+    aligned, how = clocks_agree(queried, starts) if windows else (False, "no connected period in logcat")
+    span = sum((end - start).total_seconds() for start, end in windows)
+    if not aligned:
+        facts.append(f"while connected: not lined up ({how}); the checks below for those periods did not run")
     else:
-        own = sum(count for key, count in inside.items() if key.startswith(PROXY_NAME + " "))
-        rest = collections.Counter({key: count for key, count in inside.items() if not key.startswith(PROXY_NAME + " ")})
+        inside_lookups = collections.Counter(f"{name} {kind}" for when, name, kind in queried if inside(when, windows))
+        own = sum(count for key, count in inside_lookups.items() if key.split(" ")[0] == PROXY_NAME)
+        android = collections.Counter({k: c for k, c in inside_lookups.items() if k.split(" ")[0] in ANDROID_NAMES})
+        unexplained = collections.Counter({k: c for k, c in inside_lookups.items() if k.split(" ")[0] not in ANDROID_NAMES | {PROXY_NAME}})
         facts.append(
-            f"lookups on the uplink while connected ({how}): {own} of the proxy's own name; others: {dict(rest.most_common(12)) or 'none'} "
-            "(lookups Android makes outside VPNs, such as its network checks, appear here; lab names never may)"
+            f"lookups on the uplink while connected ({len(windows)} connected periods, {span:.0f} s in all; {how}): "
+            f"{own} of the proxy's own name; Android's network checks and time: {dict(android) or 'none'}; "
+            f"any other: {dict(unexplained.most_common(12)) or 'none'}"
         )
+        if unexplained:
+            problems.append(f"the phone looked up names on its own network while connected, around the VPN: {dict(unexplained.most_common(12))}")
     refused_probes = [int(m.group(1)) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*engine local_refused=(\d+)", line))]
     if refused_probes:
         facts.append(f"TCP to ProxyFlow's own addresses refused on the phone (Android's DNS-over-TLS probe, engine local_refused): {max(refused_probes)}")
@@ -467,6 +567,10 @@ def main(argv: list[str]) -> int:
         paths.insert(0, args.host_pcap)
     guest = read(os.path.join(args.out, "guest-capture.txt"))
     guest_spans_tests = any(line.startswith("tcpdump at the end: ") and "none" not in line for line in guest)
+    # Per interface where the device script recorded it: a phone capture spans the tests only if its own tcpdump
+    # still ran at the end (another interface's surviving process says nothing about it).
+    alive_at_end = next((line.split(":", 1)[1].split() for line in guest if line.startswith("tcpdump at the end on:")), None)
+    alive_at_start = next((line.split(":", 1)[1].split() for line in guest if line.startswith("tcpdump at the start on:")), None)
     covering = 0
     summary += [
         "| Capture | Packets | SOCKS5 targets (by kind) | HTTP CONNECT targets | TLS-port streams | To lab addresses | DNS for lab names |",
@@ -493,7 +597,7 @@ def main(argv: list[str]) -> int:
             f"| {name} | {capture.packets} | {dict(kinds)} | {sum(capture.connect_targets.values())} | {tls_streams} | "
             f"{sum(capture.lab_packets.values())} | {sum(lab_dns.values())} |"
         )
-        partial = name.startswith("guest-") and not guest_spans_tests
+        partial = guest_capture_partial(name, guest_spans_tests, alive_at_end, alive_at_start)
         if not partial and capture.covers_uplink:
             covering += 1
         for count_name, count in (
@@ -507,6 +611,25 @@ def main(argv: list[str]) -> int:
                 problems.append(f"capture {name}: {count} {count_name}")
         if capture.plaintext_on_tls:
             problems.append(f"capture {name}: plaintext opened a connection to a TLS proxy port: {capture.plaintext_on_tls[:3]}")
+        if aligned and not partial and capture.covers_uplink:
+            phone = {src for (_, src, dst, kind, port) in capture.events if kind == "TCP" and dst == GATEWAY and port in PROXY_SIDE_PORTS}
+            android_addresses = set().union(*(capture.dns_answers.get(n, set()) for n in ANDROID_NAMES))
+            direct = collections.Counter(
+                f"{kind} [{dst}]:{port}" if ":" in dst else f"{kind} {dst}:{port}"
+                for (when, src, dst, kind, port) in capture.events
+                if src in phone and inside(when, windows) and not explained(dst, kind, port, android_addresses)
+            )
+            names_inside = collections.Counter(n for (when, n) in capture.dns_queries if inside(when, windows))
+            odd_names = {n: c for n, c in names_inside.items() if n not in ANDROID_NAMES and n != PROXY_NAME}
+            facts.append(
+                f"capture {name} while connected: new connections, datagrams or pings from the phone other than to its proxy, "
+                f"its network's resolver or Android's own checks: {dict(direct.most_common(12)) or 'none'}; "
+                f"DNS queries: {dict(names_inside.most_common(12)) or 'none'}"
+            )
+            if direct:
+                problems.append(f"capture {name}: traffic left the phone around the VPN while connected: {dict(direct.most_common(12))}")
+            if odd_names:
+                problems.append(f"capture {name}: the phone looked up names on its own network while connected: {odd_names}")
         named = [t for t in capture.socks_targets if t.startswith("name proxyflow.test:") or t.startswith("name secure.proxyflow.test:")]
         if capture.covers_uplink and capture.socks_targets and not named:
             problems.append(f"capture {name}: no SOCKS5 request asked for a lab name: the names did not reach the proxy as names")

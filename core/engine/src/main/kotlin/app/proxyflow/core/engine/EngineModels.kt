@@ -97,6 +97,8 @@ data class EngineStats(
     @SerialName("proxy_timeouts") val proxyTimeouts: Long = 0,
     /** TCP to ProxyFlow's own addresses (not DNS), refused on the phone: Android's DNS-over-TLS probe, for one. */
     @SerialName("local_refused") val localRefused: Long = 0,
+    /** Different names this engine answered with a placeholder (the pool behind [fakeDnsMappings] is shared by every engine). */
+    @SerialName("dns_names") val dnsNames: Int = 0,
     @SerialName("events_dropped") val eventsDropped: Long = 0,
     /** Ping requests (ICMP and ICMPv6 echo) dropped: ProxyFlow never answers one (ADR-0004). */
     @SerialName("icmp_echo_requests_dropped") val icmpEchoRequestsDropped: Long = 0,

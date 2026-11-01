@@ -77,6 +77,17 @@ def ip_of(raw: bytes) -> str:
     return str(ipaddress.ip_address(bytes(raw)))
 
 
+def guest_capture_partial(name: str, any_alive: bool, alive_at_end: list[str] | None, alive_at_start: list[str] | None = None) -> bool:
+    """Whether a phone capture (guest-<interface>.pcap) may have stopped before the tests ended: its own tcpdump must
+    still run at the end. Without per-interface lines (older runs), or when they could not be read at the start, any
+    tcpdump still running counts, as before."""
+    if not name.startswith("guest-"):
+        return False
+    if alive_at_end is None or alive_at_start in (None, ["none"]):
+        return not any_alive
+    return name[len("guest-") : -len(".pcap")] not in alive_at_end
+
+
 def dns_name(payload: bytes) -> str | None:
     """The first question's name of a DNS query, or None for a response or something else."""
     if len(payload) < 12 or payload[2] & 0x80:  # QR bit: a response
@@ -383,6 +394,10 @@ def main(argv: list[str]) -> int:
         facts.append("in-phone capture: " + " | ".join(guest))
     # tcpdump inside the phone counts as coverage only if it was still running after the tests.
     guest_spans_tests = any(line.startswith("tcpdump at the end: ") and "none" not in line for line in guest)
+    # Per interface where the device script recorded it: a phone capture spans the tests only if its own tcpdump
+    # still ran at the end (another interface's surviving process says nothing about it).
+    alive_at_end = next((line.split(":", 1)[1].split() for line in guest if line.startswith("tcpdump at the end on:")), None)
+    alive_at_start = next((line.split(":", 1)[1].split() for line in guest if line.startswith("tcpdump at the start on:")), None)
     if UNREADABLE:
         problems.append(f"unreadable evidence: {UNREADABLE}")
 
@@ -402,7 +417,7 @@ def main(argv: list[str]) -> int:
             f"SYNs to the proxies {capture.syns_to_proxy}, DNS queries {capture.dns_queries}, "
             f"to/from {DESTINATION_ADDRESS}: {capture.to_destination}, DNS queries for {DESTINATION_NAME}: {len(capture.dns_for_destination)}"
         )
-        partial = os.path.basename(capture.path).startswith("guest-") and not guest_spans_tests
+        partial = guest_capture_partial(os.path.basename(capture.path), guest_spans_tests, alive_at_end, alive_at_start)
         if partial:
             facts.append(f"capture {name}: tcpdump was not running after the tests, so it does not count as coverage")
         elif capture.covers_uplink:

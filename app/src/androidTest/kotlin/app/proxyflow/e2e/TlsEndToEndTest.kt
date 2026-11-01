@@ -108,10 +108,13 @@ class TlsEndToEndTest {
         assertSent("tls-gate-up")
 
         gate.forward(lab.tlsUntrustedPort)
-        val line = Lines.next("tls-gate-untrusted")
-        Lines.refused(line, env.destinationName, env.destinationPort)
-        val result = FromShell.tcp(env.destinationName, env.destinationPort, line)
-        assertTrue("a connection through an untrusted certificate must fail: $result", result.startsWith("ERROR"))
+        // By name and by address: nothing may go unencrypted, around the proxy, or straight to an address the phone reaches.
+        for ((host, port) in listOf(env.destinationName to env.destinationPort, lab.addressDestination to lab.addressPort)) {
+            val line = Lines.next("tls-gate-untrusted")
+            Lines.refused(line, host, port)
+            val result = FromShell.tcp(host, port, line)
+            assertTrue("a connection through an untrusted certificate must fail: $result", result.startsWith("ERROR"))
+        }
         eventually("the engine counted the refused certificate") { (ProxyEngine().stats().failures["TLS_UNTRUSTED"] ?: 0) >= 1 }
         val diagnostics = app.awaitDiagnostics("a TLS failure") { it.tls.failures >= 1 }
         assertEquals("TLS_UNTRUSTED", diagnostics.tls.lastCode)

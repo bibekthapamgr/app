@@ -7,6 +7,7 @@ Run: python3 -m unittest discover -s scripts/tests -v
 from __future__ import annotations
 
 import contextlib
+import datetime
 import io
 import ipaddress
 import os
@@ -66,11 +67,29 @@ def socks_connect_by_name(name: str, port: int) -> bytes:
     return b"\x05\x01\x00\x03" + bytes([len(name)]) + name.encode() + struct.pack("!H", port)
 
 
-def pcap(path: str, packets: list[bytes]) -> None:
+YEAR = datetime.datetime.now(datetime.timezone.utc).year
+
+
+def at(clock: str) -> datetime.datetime:
+    """A time on 1 November of this year (the evidence reads logcat's dates as this year's), UTC."""
+    hour, minute, second = (int(part) for part in clock.split(":"))
+    return datetime.datetime(YEAR, 11, 1, hour, minute, second, tzinfo=datetime.timezone.utc)
+
+
+def pcap(path: str, packets: list) -> None:
+    """packets: raw IP packets, or (time, packet) pairs; untimed ones are stamped 1970, outside any connected period."""
     with open(path, "wb") as f:
         f.write(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 101))  # raw IP
-        for packet in packets:
-            f.write(struct.pack("<IIII", 0, 0, len(packet), len(packet)) + packet)
+        for item in packets:
+            when, packet = item if isinstance(item, tuple) else (None, item)
+            seconds = int(when.timestamp()) if when else 0
+            f.write(struct.pack("<IIII", seconds, 0, len(packet), len(packet)) + packet)
+
+
+def dns_response(name: str, address: str) -> bytes:
+    query = dns_query(name)
+    answer = b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 60, 4) + addr(address)
+    return struct.pack("!HHHHHH", 0x1234, 0x8180, 1, 1, 0, 0) + query[12:] + answer
 
 
 def capture_of(packets: list[bytes]) -> m6_evidence.Capture:
@@ -139,6 +158,20 @@ class CaptureTest(unittest.TestCase):
         )
         self.assertEqual({(3129, "TLS"): 1, (3129, "plain"): 1}, dict(c.tls_port_streams))
         self.assertEqual(1, len(c.plaintext_on_tls))
+
+    def test_dns_over_tcp_split_into_two_segments(self):
+        query = dns_query("proxyflow.test")
+        c = capture_of(
+            [
+                ipv4(PHONE4, "8.8.8.8", 6, tcp(40008, 53, struct.pack("!H", len(query)), seq=2)),
+                ipv4(PHONE4, "8.8.8.8", 6, tcp(40008, 53, query, seq=4)),
+            ]
+        )
+        self.assertEqual({"proxyflow.test": 1}, dict(c.dns_names))
+
+    def test_dns_answers_are_read(self):
+        c = capture_of([ipv4("10.0.2.3", PHONE4, 17, udp(53, 40009, dns_response("time.android.com", "216.239.35.0")))])
+        self.assertEqual({"216.239.35.0"}, c.dns_answers["time.android.com"])
 
     def test_dns_queries_over_udp_and_tcp(self):
         query = dns_query("proxyflow.test")
@@ -217,25 +250,73 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(1, status)
         self.assertIn("looked up lab destination names itself", printed)
 
+    VPN = [
+        "11-01 01:59:59.500   200   210 I ProxyFlowVpn: connect p1\n",
+        "11-01 02:00:01.000   200   210 I ProxyFlowVpn: connected p1\n",
+        "11-01 02:00:30.000   200   210 I ProxyFlowVpn: disconnect\n",
+    ]
+    PROXY_LOOKUP = "02:00:00 proxy.proxyflow.test"  # during the check: lines the two clocks up
+
     def test_lookups_while_connected_are_lined_up_with_the_vpn_log(self):
-        vpn = [
-            "11-01 01:59:59.500   200   210 I ProxyFlowVpn: connect p1\n",
-            "11-01 02:00:01.000   200   210 I ProxyFlowVpn: connected p1\n",
-            "11-01 02:00:10.000   200   210 I ProxyFlowVpn: disconnect\n",
-        ]
-        lookups = ["02:00:00 proxy.proxyflow.test", "02:00:05 mtalk.google.com", "02:00:09 www.google.com", "02:00:20 dl.google.com"]
-        status, printed = self.run_evidence(uplink_dns=lookups, logcat_extra=vpn)
+        lookups = [self.PROXY_LOOKUP, "02:00:10 connectivitycheck.gstatic.com", "02:00:29 www.youtube.com", "02:00:40 dl.google.com"]
+        status, printed = self.run_evidence(uplink_dns=lookups, logcat_extra=self.VPN)
+        # Android's own network check is expected; 02:00:29 is too close to the period's end, 02:00:40 after it.
         self.assertEqual(0, status, printed)
-        # The proxy's name was looked up during the check (lined up with "connect"); only 02:00:05 lies at least 2 s inside
-        # the connected period (02:00:09 is too close to its end, 02:00:20 after it).
-        self.assertIn("lookups on the uplink while connected (1 connected periods, 9 s in all): 0 of the proxy's own name; others: {'mtalk.google.com A': 1}", printed)
+        self.assertIn("Android's network checks and time: {'connectivitycheck.gstatic.com A': 1}; any other: none", printed)
+
+    def test_a_lookup_around_the_vpn_while_connected_fails(self):
+        status, printed = self.run_evidence(uplink_dns=[self.PROXY_LOOKUP, "02:00:10 www.youtube.com"], logcat_extra=self.VPN)
+        self.assertEqual(1, status)
+        self.assertIn("looked up names on its own network while connected, around the VPN: {'www.youtube.com A': 1}", printed)
 
     def test_clocks_that_cannot_be_lined_up_are_said(self):
-        vpn = ["11-01 01:00:00.000   200   210 I ProxyFlowVpn: connect p1\n", "11-01 01:00:01.000   200   210 I ProxyFlowVpn: connected p1\n",
-               "11-01 01:00:10.000   200   210 I ProxyFlowVpn: disconnect\n"]
-        status, printed = self.run_evidence(uplink_dns=["02:00:00 proxy.proxyflow.test"], logcat_extra=vpn)
+        vpn = [line.replace("11-01 0", "11-01 1") for line in self.VPN]  # ten hours off
+        status, printed = self.run_evidence(uplink_dns=[self.PROXY_LOOKUP, "02:00:10 www.youtube.com"], logcat_extra=vpn)
         self.assertEqual(0, status, printed)
-        self.assertIn("lookups on the uplink while connected: not lined up (the emulator's and the runner's clocks", printed)
+        self.assertIn("while connected: not lined up (the emulator's and the runner's clocks", printed)
+
+    def test_a_direct_connection_while_connected_fails(self):
+        status, printed = self.run_evidence(
+            uplink_dns=[self.PROXY_LOOKUP],
+            logcat_extra=self.VPN,
+            capture_extra=[(at("02:00:10"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 443, syn=True)))],
+        )
+        self.assertEqual(1, status)
+        self.assertIn("traffic left the phone around the VPN while connected: {'TCP 142.250.80.46:443': 1}", printed)
+
+    def test_the_same_connection_while_disconnected_is_fine(self):
+        status, printed = self.run_evidence(
+            uplink_dns=[self.PROXY_LOOKUP],
+            logcat_extra=self.VPN,
+            capture_extra=[(at("02:00:40"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40021, 443, syn=True)))],
+        )
+        self.assertEqual(0, status, printed)
+
+    def test_a_dns_query_in_the_capture_while_connected_fails(self):
+        query = dns_query("www.youtube.com")
+        status, printed = self.run_evidence(
+            uplink_dns=[self.PROXY_LOOKUP],
+            logcat_extra=self.VPN,
+            capture_extra=[(at("02:00:12"), ipv4(PHONE4, "10.0.2.3", 17, udp(40022, 53, query)))],
+        )
+        self.assertEqual(1, status)
+        self.assertIn("looked up names on its own network while connected: {'www.youtube.com': 1}", printed)
+
+    def test_androids_own_checks_and_the_gate_control_are_expected(self):
+        ntp = "216.239.35.0"
+        status, printed = self.run_evidence(
+            uplink_dns=[self.PROXY_LOOKUP],
+            logcat_extra=self.VPN,
+            capture_extra=[
+                (at("02:00:05"), ipv4(PHONE4, "10.0.2.3", 17, udp(40023, 53, dns_query("time.android.com")))),
+                (at("02:00:05"), ipv4("10.0.2.3", PHONE4, 17, udp(53, 40023, dns_response("time.android.com", ntp)))),
+                (at("02:00:06"), ipv4(PHONE4, ntp, 17, udp(40024, 123, b"\x23" + b"\0" * 47))),
+                (at("02:00:07"), ipv4(PHONE4, GATEWAY, 6, tcp(40025, 1091, syn=True))),
+                (at("02:00:08"), ipv4(PHONE4, "10.0.2.3", 6, tcp(40026, 853, syn=True))),
+            ],
+        )
+        self.assertEqual(0, status, printed)
+        self.assertIn("its network's resolver or Android's own checks: none; DNS queries: {'time.android.com': 1}", printed)
 
 
 if __name__ == "__main__":

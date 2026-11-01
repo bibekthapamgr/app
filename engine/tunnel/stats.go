@@ -1,6 +1,8 @@
 package tunnel
 
 import (
+	"github.com/bibekthapamgr/app/engine/fakedns"
+	"hash/fnv"
 	"os"
 	"runtime"
 	"strconv"
@@ -58,6 +60,7 @@ type stats struct {
 	failures         map[string]int64
 	hostnameFailures map[string]int64
 	dns              map[string]int64
+	names            map[uint64]struct{} // hashes of the names this engine answered with a placeholder (bounded)
 	udpPorts         map[uint16]int64
 	lastProxy        *ErrorInfo
 	lastFailure      *ErrorInfo
@@ -68,6 +71,7 @@ func (s *stats) init() {
 	s.failures = map[string]int64{}
 	s.hostnameFailures = map[string]int64{}
 	s.dns = map[string]int64{}
+	s.names = map[uint64]struct{}{}
 	s.udpPorts = map[uint16]int64{}
 }
 
@@ -86,9 +90,20 @@ func (s *stats) failure(code adapters.Code, detail string, hostname bool) {
 	s.mu.Unlock()
 }
 
-func (s *stats) dnsOutcome(o string) {
+// maxNames bounds the names counted per engine (as many as the placeholder pool maps at once).
+const maxNames = 16384
+
+// dnsAnswered counts a DNS message by outcome and, for a name answered with a placeholder, the name
+// once per engine (only a hash is kept; the pool is shared by every engine, so its size would count
+// earlier connections' names too).
+func (s *stats) dnsAnswered(o fakedns.Outcome, name string) {
 	s.mu.Lock()
-	s.dns[o]++
+	s.dns[string(o)]++
+	if o == fakedns.OutcomeMapped && name != "" && len(s.names) < maxNames {
+		h := fnv.New64a()
+		_, _ = h.Write([]byte(strings.ToLower(strings.TrimSuffix(name, "."))))
+		s.names[h.Sum64()] = struct{}{}
+	}
 	s.mu.Unlock()
 }
 
@@ -139,6 +154,7 @@ type Snapshot struct {
 	InFlightDrops         uint64           `json:"in_flight_drops"`   // SYNs dropped at MaxInFlight (the app retries)
 	DNSDropped            int64            `json:"dns_dropped"`       // DNS sockets refused at MaxDNSFlows, DNS-over-TCP connections at MaxDNSOverTCP
 	DNSOverTCP            int64            `json:"dns_tcp_queries"`   // DNS queries answered over TCP (port 53)
+	DNSNames              int              `json:"dns_names"`         // different names this engine answered with a placeholder
 	ProxyTimeouts         int64            `json:"proxy_timeouts"`    // connecting to the proxy or its handshake timed out
 	LocalRefused          int64            `json:"local_refused"`     // TCP to ProxyFlow's own addresses (not DNS), refused
 	EventsDropped         int64            `json:"events_dropped"`    // events lost to a full queue
@@ -196,11 +212,14 @@ func (e *Engine) Status() Status {
 func (e *Engine) Stats() Snapshot {
 	now := time.Now()
 	s := &e.stats
+	s.mu.Lock()
+	names := len(s.names)
+	s.mu.Unlock()
 	snap := Snapshot{
 		Time: now, TCPActive: s.tcpActive.Load(), TCPOpened: s.tcpOpened.Load(), TCPFailed: s.tcpFailed.Load(),
 		Canceled: s.canceled.Load(), Resets: s.resets.Load(), BytesUp: s.bytesUp.Load(), BytesDown: s.bytesDown.Load(),
 		UDPRejected: s.udpRejected.Load(), IdleTimeouts: s.idleTimeouts.Load(), RecoveredPanics: s.panics.Load(),
-		DNSDropped: s.dnsDropped.Load(), DNSOverTCP: s.dnsTCP.Load(), ProxyTimeouts: s.proxyTimeouts.Load(),
+		DNSDropped: s.dnsDropped.Load(), DNSOverTCP: s.dnsTCP.Load(), DNSNames: names, ProxyTimeouts: s.proxyTimeouts.Load(),
 		LocalRefused: s.localRefused.Load(), EventsDropped: e.evDropped.Load(),
 		Failures: map[string]int64{}, HostnameFailures: map[string]int64{}, DNS: map[string]int64{}, UDPRejectedPorts: map[string]int64{},
 		FakeDNSMappings: e.cfg.FakeDNS.Pool.Len(), Goroutines: runtime.NumGoroutine(), RSSKiB: rssKiB(),

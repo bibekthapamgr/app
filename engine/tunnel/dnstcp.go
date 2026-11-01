@@ -42,7 +42,7 @@ func (e *Engine) serveDNSOverTCP(c net.Conn, abort func()) {
 		}
 		f.up.Add(int64(len(head) + n))
 		resp, outcome, name := e.cfg.FakeDNS.Handle(buf[:n])
-		e.stats.dnsOutcome(string(outcome))
+		e.stats.dnsAnswered(outcome, name)
 		ev := Event{Type: EvDNS, Proto: "tcp", Port: dnsPort, Detail: string(outcome)}
 		if e.cfg.LogDestinations {
 			ev.Dst = name

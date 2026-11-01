@@ -16,8 +16,14 @@ import org.junit.Test
 class DiagnosticsTest {
     @Test
     fun aQuietConnectionHasNoProblems() {
-        // Five lookups of two names: Home counts the names.
-        val stats = EngineStats(stateName = "running", tcpOpened = 3, fakeDnsMappings = 2, dns = mapOf("mapped" to 5L, "nodata" to 2L))
+        // Five lookups of two names during this connection, in a pool holding forty from earlier ones: Home counts the two.
+        val stats = EngineStats(
+            stateName = "running",
+            tcpOpened = 3,
+            dnsNames = 2,
+            fakeDnsMappings = 40,
+            dns = mapOf("mapped" to 5L, "nodata" to 2L),
+        )
         val diagnostics = stats.toDiagnostics()
         assertEquals(RoutingDiagnostics(connectionsOpened = 3, namesForProxy = 2, ipv6LookupsAnsweredEmpty = 2), diagnostics)
         assertFalse(diagnostics.hasProblems)

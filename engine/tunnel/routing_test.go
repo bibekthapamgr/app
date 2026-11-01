@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bibekthapamgr/app/engine/fakedns"
 	"golang.org/x/net/dns/dnsmessage"
 )
 
@@ -215,5 +216,28 @@ func TestFailuresOfFlowsToNamesAreToldApart(t *testing.T) {
 	}
 	if s.ConsecutiveProxyFails != 0 {
 		t.Fatalf("target-level failures leave the escalation count alone: %d", s.ConsecutiveProxyFails)
+	}
+}
+
+// Home counts the names apps looked up during this connection, each once. The placeholder pool is shared by every
+// engine in the app's process (pfengine), so its size would count earlier connections' names too.
+func TestNamesAreCountedOncePerEngine(t *testing.T) {
+	shared, _ := fakedns.NewPool(netip.MustParsePrefix("198.18.0.0/15"), 256, 0)
+	withShared := func(c *Config) { c.FakeDNS = &fakedns.Responder{Pool: shared, TTL: 5} }
+	first, _ := startEngine(t, nil, withShared)
+	for _, name := range []string{"a.test", "b.test", "a.test", "A.TEST"} {
+		resolve(t, first.cs, name)
+	}
+	if got := first.Stats().DNSNames; got != 2 {
+		t.Fatalf("two different names (one asked three times, in two spellings), got %d", got)
+	}
+	second, _ := startEngine(t, nil, withShared)
+	resolve(t, second.cs, "a.test")
+	resolve(t, second.cs, "c.test")
+	if got := second.Stats().DNSNames; got != 2 {
+		t.Fatalf("the second engine counts its own names only, got %d", got)
+	}
+	if shared.Len() != 3 {
+		t.Fatalf("the shared pool holds every engine's names: %d", shared.Len())
 	}
 }

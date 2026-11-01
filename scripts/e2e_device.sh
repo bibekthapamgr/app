@@ -186,6 +186,13 @@ fi
 # tcpdump is still running after the tests.
 # Not on API 29: adbd does not come back after adb root and unroot there (run 41230555282: the device stayed
 # offline, so no test ran), and its uplink, mobile data or Wi-Fi, all passes the emulator's own capture.
+# The interfaces the phone's running tcpdump processes capture, from their command lines ("none" when none runs).
+tcpdump_interfaces() {
+    local found
+    found=$(timeout 30 adb shell 'for p in $(pidof tcpdump); do tr "\0" " " < /proc/$p/cmdline; echo; done' 2>/dev/null |
+        tr -d '\r' | sed -n 's/.*tcpdump -i \([a-z0-9]*\) .*/\1/p' | sort -u | paste -sd ' ' -)
+    echo "${found:-none}"
+}
 GUEST_CAPTURE=0
 if [ "$API" -lt 34 ]; then
     echo "not on API $API: adbd does not survive adb root and unroot on this image; the emulator's own capture (-tcpdump) sees the whole uplink" > "$OUT/guest-capture.txt"
@@ -212,6 +219,8 @@ else
         adb shell 'for p in $(pidof tcpdump); do for c in /sys/fs/cgroup/cgroup.procs /acct/cgroup.procs; do [ -w "$c" ] && echo "$p" > "$c"; done; done' >/dev/null 2>&1 || true
         echo "tcpdump on: $(paste -sd ' ' "$OUT/guest-interfaces.txt")" >> "$OUT/guest-capture.txt"
         echo "tcpdump at the start: $(adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
+        # Which interfaces those processes capture: one surviving process says nothing about the others.
+        echo "tcpdump at the start on: $(tcpdump_interfaces)" >> "$OUT/guest-capture.txt"
     else
         echo "no root or no tcpdump in this image: the emulator's own capture (-tcpdump) is the only one" >> "$OUT/guest-capture.txt"
     fi
@@ -248,6 +257,7 @@ kill "$LIVE_LOGCAT" 2>/dev/null || true
 if [ "$GUEST_CAPTURE" = 1 ]; then
     restart_adbd root || true
     echo "tcpdump at the end: $(timeout 30 adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
+    echo "tcpdump at the end on: $(tcpdump_interfaces)" >> "$OUT/guest-capture.txt"
     timeout 30 adb shell 'pkill -INT tcpdump || killall -INT tcpdump' >/dev/null 2>&1 || true
     sleep 3
     echo "captured on the phone: $(timeout 30 adb shell 'ls -l /data/local/tmp/pf-*.pcap' 2>&1 | tr -d '\r' | awk '{print $NF, $5}' | paste -sd ';' -)" >> "$OUT/guest-capture.txt"
