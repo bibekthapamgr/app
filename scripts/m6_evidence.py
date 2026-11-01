@@ -438,8 +438,9 @@ def capture_offset(capture: "Capture", starts: list[datetime.datetime], phone: "
     """How far the capture's clock is from logcat's, in seconds, measured on the capture itself: right after each
     connection attempt begins (logcat), the phone opens a connection to its proxy (the capture). Both clocks are UTC
     and agree within a second or two, so each attempt is matched with the phone's nearest SYN to a proxy port within
-    3 s. The capture is lined up only if four in five attempts matched, their gaps agree (half of them within 0.5 s of
-    each other) and the offset is under 2 s: a wrong lock onto other connections would scatter the gaps."""
+    3 s. The capture is lined up only if four in five attempts matched, their gaps agree (half of them within 1.5 s of
+    each other: the emulator's own capture, on the runner's clock, scatters by a few tenths of a second) and the offset
+    is under 2 s: a wrong lock onto other connections would scatter the gaps over the whole 6 s."""
     syns = sorted(when for (when, src, dst, kind, port, _) in capture.events
                   if when is not None and kind == "TCP" and src in phone and dst == GATEWAY and port in PROXY_SIDE_PORTS)
     gaps = []
@@ -451,7 +452,7 @@ def capture_offset(capture: "Capture", starts: list[datetime.datetime], phone: "
         return None, f"only {len(gaps)} of {len(starts)} connection attempts have the phone's SYN to its proxy within 3 s"
     gaps.sort()
     median, spread = gaps[len(gaps) // 2], gaps[(3 * len(gaps)) // 4] - gaps[len(gaps) // 4]
-    if spread > 0.5 or abs(median) > 2:
+    if spread > 1.5 or abs(median) > 2:
         return None, f"{len(gaps)} of {len(starts)} attempts matched, but their gaps spread over {spread:.2f} s around {median:+.2f} s"
     return median, f"{len(gaps)} of {len(starts)} connection attempts matched, gaps within {spread:.2f} s"
 

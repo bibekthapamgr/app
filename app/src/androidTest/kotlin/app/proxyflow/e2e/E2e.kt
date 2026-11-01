@@ -330,17 +330,32 @@ class App {
 
     /**
      * Android's own account of ProxyFlow's VPN, for the evidence (scripts/m6_evidence.py): which uids it routes into the
-     * VPN, whether it lets apps bypass it (Android 13 and later say) and its DNS servers, from dumpsys connectivity as
-     * the shell reads it, with ProxyFlow's own uid. Logged only: the evidence checks it.
+     * VPN and whether it lets apps bypass it (Android 13 and later say), from the VPN network's capabilities, and its DNS
+     * servers, with ProxyFlow's own uid. Android tells only callers with the shell's network permission which uids a
+     * network serves, so the shell's permissions are borrowed for the call. Logged only: the evidence checks it.
      */
+    @Suppress("DEPRECATION") // allNetworks: see VpnNetworks
     private fun logAndroidsView() {
-        val lines = runCatching { Shell.run("dumpsys connectivity").lines() }.getOrElse { listOf("unreadable: $it") }
-        val candidates = lines.filter { "Transports: VPN" in it }
-        val vpn = candidates.firstOrNull { "Uids:" in it } ?: candidates.firstOrNull()
-        val view = when (vpn) {
-            null -> "no VPN network in dumpsys connectivity"
-            else -> VIEW_FIELDS.mapNotNull { it.find(vpn)?.value }.joinToString(" | ").ifEmpty { vpn.trim().take(VIEW_CHARS) }
-        }
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val view = runCatching {
+            automation.adoptShellPermissionIdentity()
+            try {
+                val connectivity = context.getSystemService(ConnectivityManager::class.java)
+                val vpn = connectivity.allNetworks.firstOrNull {
+                    connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+                }
+                if (vpn == null) {
+                    "no VPN network"
+                } else {
+                    val capabilities = connectivity.getNetworkCapabilities(vpn).toString()
+                    val dns = connectivity.getLinkProperties(vpn)?.dnsServers.orEmpty().joinToString(" ") { it.hostAddress.orEmpty() }
+                    val fields = VIEW_FIELDS.mapNotNull { it.find(capabilities)?.value }
+                    (fields.ifEmpty { listOf(capabilities.take(VIEW_CHARS)) } + "DnsAddresses: [ $dns ]").joinToString(" | ")
+                }
+            } finally {
+                automation.dropShellPermissionIdentity()
+            }
+        }.getOrElse { "unreadable: $it" }
         Log.i(TAG, "android's view of the VPN (own uid ${Process.myUid()}): $view")
     }
 
@@ -402,12 +417,11 @@ class App {
 
 private const val TAG = "ProxyFlowE2E"
 
-/** The parts of the VPN's NetworkAgentInfo line in dumpsys connectivity the evidence reads. */
+/** The parts of the VPN network's capabilities (their text) the evidence reads. */
 private val VIEW_FIELDS = listOf(
     Regex("Uids: <[^>]*>"),
     Regex("OwnerUid: \\d+"),
     Regex("VpnTransportInfo\\{[^}]*\\}"),
-    Regex("DnsAddresses: \\[[^\\]]*\\]"),
 )
 private const val VIEW_CHARS = 600
 
