@@ -23,9 +23,17 @@ adb shell chmod 644 /data/local/tmp/proxyflow-ca.pem
 # Every adb call that could wait for a wedged device is bounded, so the logs below are always collected.
 restart_adbd() {
     timeout 30 adb "$1" >/dev/null 2>&1 || return 1
-    sleep 3
-    timeout 120 adb wait-for-device
-    timeout 30 adb shell true >/dev/null 2>&1
+    # adbd restarts as the new user, and the old connection can still look online for a moment (run 41278339766,
+    # attempt 3, API 35: "device offline" when the script then asked whether tcpdump still ran): wait until a command
+    # really runs as that user.
+    local want=0
+    if [ "$1" = unroot ]; then want=2000; fi
+    for _ in $(seq 1 60); do
+        sleep 2
+        timeout 10 adb wait-for-device >/dev/null 2>&1 || continue
+        if [ "$(timeout 10 adb shell id -u 2>/dev/null | tr -d '\r')" = "$want" ]; then return 0; fi
+    done
+    return 1
 }
 
 # The phone's uplink becomes its mobile data, which runs through the emulator's own network
