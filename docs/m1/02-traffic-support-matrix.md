@@ -63,7 +63,7 @@ What an observer between the phone and the proxy can see (E04 vs E05):
 | Traffic | Why | Handling |
 |---|---|---|
 | ProxyFlow's own connections to the proxy, and the DNS lookup of the proxy's hostname | The app is excluded from its own VPN (`addDisallowedApplication(self)`), otherwise it would loop | Only the proxy endpoint and its name lookup leave the phone directly. Verified (lab) E16: the underlying resolver saw only proxy hostnames |
-| Android system traffic that runs outside VPNs (e.g. network validation/captive-portal probes, carrier IMS/VoLTE, some system services) | Platform behaviour | Documented; M6: the lab's uplink DNS server logs every name the phone looks up itself, listed per API level in `docs/m6/packet-capture-report.md` |
+| Android system traffic that runs outside VPNs (e.g. network validation/captive-portal probes, carrier IMS/VoLTE, some system services, privileged apps such as Google Play services) | Platform behaviour | Documented; M6: the evidence checks the connected periods and names the owner of anything that left the phone around the VPN (`docs/m6/routing-and-limitations.md` §4, `docs/m6/packet-capture-report.md`) |
 | Tethering / hotspot clients | Android does not route tethered traffic through `VpnService` by default | Documented as not covered |
 | Work profile and other Android users | A `VpnService` applies to the user/profile that started it | Documented as not covered |
 | Apps the user excludes | Not in V1 (no per-app routing) | — |

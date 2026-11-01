@@ -502,10 +502,42 @@ def package_names(out: str) -> dict[int, str]:
     return {uid: ",".join(sorted(packages))[:100] for uid, packages in names.items()}
 
 
+# The tests' own traffic, which the VPN must carry whatever kind of uid it is: adb's shell, and root, which adbd is
+# while the phone's captures start (a failed "adb unroot" would leave the tests running as root).
+TEST_UIDS = (0, 2000)
+OWN_PACKAGES = ("app.proxyflow",)  # ProxyFlow (and its test APK): its only direct traffic is to its proxy
+
+
+def system_uids(out: str) -> set[int]:
+    """The uids of the phone's preinstalled (system) packages, from pm list packages -s -U."""
+    found = set()
+    for line in read(os.path.join(out, "packages-system.txt")):
+        m = re.match(r"package:(\S+) uid:(\d+)", line.strip())
+        if m and not m.group(1).startswith(OWN_PACKAGES):
+            found.add(int(m.group(2)))
+    return found
+
+
+def uids_of(target: str, when: datetime.datetime, sockets: list) -> list[int]:
+    """The uids that owned a socket connecting to [target] around [when] (within 2 s), from the kernel's tables."""
+    return sorted({uid for (at, t, uid) in sockets if t == target and abs((at - when).total_seconds()) <= 2})
+
+
 def owners_of(target: str, when: datetime.datetime, sockets: list, names: dict) -> str:
-    """Who owned a socket connecting to [target] around [when] (within 2 s), as the kernel's tables named it."""
-    uids = sorted({uid for (at, t, uid) in sockets if t == target and abs((at - when).total_seconds()) <= 2})
+    """Who owned a socket connecting to [target] around [when], as the kernel's tables named it."""
+    uids = uids_of(target, when, sockets)
     return ", ".join(f"uid {uid} ({names.get(uid, 'no package: a system uid')})" for uid in uids) or "owner not sampled"
+
+
+def androids_own(uids: list[int], names: dict, system: set[int]) -> bool:
+    """Whether a connection's owners are all Android itself or its preinstalled apps, which Android lets bypass VPNs
+    (its network checks; privileged apps such as Google Play services): never the shell or root, never ProxyFlow,
+    and never an owner the samples missed."""
+    def system_owner(uid: int) -> bool:
+        if uid in TEST_UIDS or names.get(uid, "").startswith(OWN_PACKAGES):
+            return False
+        return uid < 10000 or uid in system
+    return bool(uids) and all(system_owner(uid) for uid in uids)
 
 
 # --- the checks -----------------------------------------------------------------
@@ -617,7 +649,7 @@ def main(argv: list[str]) -> int:
     queried = uplink_queries(after("dns-uplink.log"), year)
     span = sum((end - start).total_seconds() for start, end, _ in windows)
     network = read(os.path.join(args.out, "guest-network.txt"))
-    sockets, names = connecting_sockets(args.out), package_names(args.out)
+    sockets, names, system = connecting_sockets(args.out), package_names(args.out), system_uids(args.out)
     to_placeholders = collections.Counter(
         f"{target} uid {uid} ({names.get(uid, 'no package: a system uid')})"
         for (_, target, uid) in sockets
@@ -752,11 +784,17 @@ def main(argv: list[str]) -> int:
                     for (when, src, dst, kind, port) in capture.events
                     if src in phone and inside(when and when - shift, windows) and not explained(dst, kind, port, android_addresses)
                 ]
+                # Connections Android itself or a preinstalled app made outside the VPN are Android's (it lets them bypass
+                # VPNs, ADR-0011, routing doc section 4): reported with their owner. Any other fails the run.
+                target_of = lambda key: key.split(" ", 1)[1].replace("[", "").replace("]:", ":")  # noqa: E731
+                androids = [(when, key) for when, key in odd_events if androids_own(uids_of(target_of(key), when, sockets), names, system)]
+                odd_events = [(when, key) for when, key in odd_events if (when, key) not in androids]
+                android_direct = collections.Counter(f"{key} ({owners_of(target_of(key), when, sockets, names)})" for when, key in androids)
                 direct = collections.Counter(key for _, key in odd_events)
                 names_inside = collections.Counter(n for (when, n) in capture.dns_queries if inside(when and when - shift, windows))
                 odd_names = {n: c for n, c in names_inside.items() if n not in ANDROID_NAMES and n != PROXY_NAME}
                 where = [
-                    f"{key} at {when:%H:%M:%S.%f}"[:-3] + f" ({period_of(when, windows)}; {owners_of(key.split(' ', 1)[1].strip('[]').replace(']:', ':'), when, sockets, names)})"
+                    f"{key} at {when:%H:%M:%S.%f}"[:-3] + f" ({period_of(when, windows)}; {owners_of(target_of(key), when, sockets, names)})"
                     for when, key in odd_events[:4]
                 ]
                 checked.append(name)
@@ -764,6 +802,7 @@ def main(argv: list[str]) -> int:
                     f"capture {name} while connected ({len(windows)} periods, {span:.0f} s; its clock {offset:+.2f} s from logcat's, {how}; "
                     f"phone {sorted(phone)}): new connections, datagrams or pings from the phone other than to its proxy, its network's "
                     f"resolver or Android's own checks: {dict(direct.most_common(12)) or 'none'}{' — ' + '; '.join(where) if where else ''}; "
+                    f"by Android itself or its preinstalled apps, which it lets bypass VPNs: {dict(android_direct.most_common(8)) or 'none'}; "
                     f"DNS queries: {dict(names_inside.most_common(12)) or 'none'}"
                 )
                 if direct:

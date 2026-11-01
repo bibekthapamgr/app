@@ -264,6 +264,7 @@ kill "$LIVE_LOGCAT" 2>/dev/null || true
 timeout 30 adb shell 'pkill -f pf-connecting.sh' >/dev/null 2>&1 || true
 timeout 120 adb pull /data/local/tmp/pf-connecting.txt "$OUT/phone-connecting.txt" >/dev/null 2>&1 || echo "no socket samples" > "$OUT/phone-connecting.txt"
 timeout 60 adb shell pm list packages -U 2>/dev/null | tr -d '\r' > "$OUT/packages-uids.txt" || true
+timeout 60 adb shell pm list packages -s -U 2>/dev/null | tr -d '\r' > "$OUT/packages-system.txt" || true # preinstalled ones
 # The phone's network after the tests: the same uplink as before them, or what changed.
 {
     echo "after the tests: $(uplink_name)"

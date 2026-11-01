@@ -197,7 +197,7 @@ class EvidenceTest(unittest.TestCase):
     """main() over a small run that passes, and over the same run with one fault at a time."""
 
     def run_evidence(self, *, capture_extra=(), gate_first="16 03 01", uplink_dns=(), logcat_extra=(), network=(), gate_log="",
-                     connecting="", packages="") -> tuple[int, str]:
+                     connecting="", packages="", system_packages="") -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as pf, tempfile.TemporaryDirectory() as out:
             files = {
                 "log-baseline.properties": "destination.log=0\n",
@@ -222,6 +222,8 @@ class EvidenceTest(unittest.TestCase):
                 f.write(connecting)
             with open(os.path.join(out, "packages-uids.txt"), "w") as f:
                 f.write(packages)
+            with open(os.path.join(out, "packages-system.txt"), "w") as f:
+                f.write(system_packages)
             with open(os.path.join(out, "logcat.txt"), "w") as f:
                 f.write("11-01 02:00:00.000   100   100 I ProxyFlowE2E: sent PF6-a-1 to 10.99.0.2:8080\n" + "".join(logcat_extra))
             host = os.path.join(out, "uplink.pcap")
@@ -365,6 +367,54 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(1, status)
         self.assertIn("uid 10123 (com.example.leaky)", printed)
 
+    SYN_TO_PLACEHOLDER = (at("02:00:10"), ipv4(PHONE4, "198.19.41.223", 6, tcp(40040, 5228, syn=True)))
+
+    @staticmethod
+    def sample(uid: int) -> str:  # /proc/net/tcp: remote 198.19.41.223:5228, SYN-SENT, owned by uid
+        return f"T {int(at('02:00:10').timestamp())}\n   7: 1002000A:9C68 DF2913C6:146C 02 00000000:00000000 01:00000064 00000002 {uid} 0 1\n"
+
+    def test_a_preinstalled_app_bypassing_the_vpn_is_reported_as_androids_own(self):
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[self.SYN_TO_PLACEHOLDER],
+            connecting=self.sample(10143),
+            packages="package:com.google.android.gms uid:10143\n",
+            system_packages="package:com.google.android.gms uid:10143\n",
+        )
+        self.assertEqual(0, status, printed)
+        self.assertIn("by Android itself or its preinstalled apps, which it lets bypass VPNs: "
+                      "{'TCP 198.19.41.223:5228 (uid 10143 (com.google.android.gms))': 1}", printed)
+
+    def test_the_shell_bypassing_the_vpn_fails_even_as_a_system_uid(self):
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[self.SYN_TO_PLACEHOLDER],
+            connecting=self.sample(2000),
+            packages="package:com.android.shell uid:2000\n",
+            system_packages="package:com.android.shell uid:2000\n",
+        )
+        self.assertEqual(1, status)
+        self.assertIn("uid 2000 (com.android.shell)", printed)
+
+    def test_root_bypassing_the_vpn_fails(self):  # adbd left as root would run the tests as root
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[self.SYN_TO_PLACEHOLDER],
+            connecting=self.sample(0),
+        )
+        self.assertEqual(1, status)
+        self.assertIn("uid 0 (no package: a system uid)", printed)
+
+    def test_proxyflow_itself_bypassing_the_vpn_elsewhere_than_its_proxy_fails(self):
+        status, printed = self.run_connected(
+            uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[self.SYN_TO_PLACEHOLDER],
+            connecting=self.sample(10200),
+            packages="package:app.proxyflow.debug uid:10200\n",
+            system_packages="package:app.proxyflow.debug uid:10200\n",
+        )
+        self.assertEqual(1, status)
+
     def test_a_direct_ipv6_connection_while_connected_fails(self):
         network = ["IPv6 addresses: lo ::1/128;eth0 fec0::15/64;eth0 fe80::15/64"]
         status, printed = self.run_evidence(
@@ -414,7 +464,8 @@ class EvidenceTest(unittest.TestCase):
             ],
         )
         self.assertEqual(0, status, printed)
-        self.assertIn("its network's resolver or Android's own checks: none; DNS queries: {'time.android.com': 1}", printed)
+        self.assertIn("its network's resolver or Android's own checks: none; by Android itself or its preinstalled apps, which it lets "
+                      "bypass VPNs: none; DNS queries: {'time.android.com': 1}", printed)
 
 
 if __name__ == "__main__":
