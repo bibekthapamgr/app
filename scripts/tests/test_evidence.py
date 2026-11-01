@@ -528,7 +528,7 @@ class EvidenceTest(unittest.TestCase):
         to_proxy = f"T {at('02:00:10').timestamp():.3f}\ntcp    3: 0F02000A:9C40 0202000A:0438 01 00000000:00000000 00:00000000 00000000 10200 0 4713\n"
         status, printed = self.run_viewed(uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.PROXY_SYN], connecting=to_proxy)
         self.assertEqual(0, status, printed)
-        self.assertIn("ProxyFlow's own sockets (uid [10200]): 1 seen, every one to its proxy or the gate's control port", printed)
+        self.assertIn("ProxyFlow's own sockets (uid [10200, 20200]): 1 seen, every one to its proxy or the gate's control port", printed)
 
     def test_an_unsampled_owner_is_put_down_to_such_apps_when_android_left_out_proxyflow_alone(self):
         status, printed = self.run_viewed(
@@ -547,8 +547,15 @@ class EvidenceTest(unittest.TestCase):
             capture_extra=[self.PROXY_SYN, (at("02:00:10"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 5228, syn=True)))],
         )
         self.assertEqual(1, status)
-        self.assertIn("Android's VPN leaves out uids [(10150, 10150), (10200, 10200)], not only ProxyFlow's (10200)", printed)
+        self.assertIn("Android's VPN leaves out uids [(10150, 10150), (10200, 10200)], not only ProxyFlow's (10200 and its SDK sandbox's, 20200)", printed)
         self.assertIn("traffic left the phone around the VPN while connected: {'TCP 142.250.80.46:5228': 1}", printed)
+
+    def test_proxyflows_sdk_sandbox_left_out_with_it_is_fine(self):  # Android 13 and later
+        view = self.VIEW.replace("Uids: <{0-10199}, {10201-99999}>", "Uids: <{0-10199}, {10201-20199}, {20201-99999}>")
+        status, printed = self.run_viewed(view, uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.PROXY_SYN])
+        self.assertEqual(0, status, printed)
+        self.assertIn("{'every uid but 10200 and its SDK sandbox 20200, bypassable=false, DNS 198.18.0.2': 1}", printed)
+        self.assertIn("ProxyFlow's own sockets (uid [10200, 20200])", printed)
 
     def test_a_vpn_android_lets_apps_bypass_fails(self):
         status, printed = self.run_viewed(self.VIEW.replace("bypassable=false", "bypassable=true"), uplink_dns=[self.PROXY_LOOKUP],

@@ -661,8 +661,10 @@ class Owners:
 
 
 def own_uids(logcat: list[str], names: dict) -> set[int]:
+    """ProxyFlow's uids: the one its tests log, any still installed under its packages, and their SDK sandbox uids."""
     found = {int(m.group(1)) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:.*\bown uid (\d+)", line))}
-    return found | {uid for uid, name in names.items() if any(n.startswith(OWN_PACKAGES) for n in name.split(","))}
+    found |= {uid for uid, name in names.items() if any(n.startswith(OWN_PACKAGES) for n in name.split(","))}
+    return found | {uid + 10000 for uid in found if 10000 <= uid < 20000}
 
 
 def androids_views(logcat: list[str]) -> tuple[list[str], list[str]]:
@@ -687,9 +689,12 @@ def androids_views(logcat: list[str]) -> tuple[list[str], list[str]]:
             next_uid = max(next_uid, last + 1)
         if next_uid <= 99999:
             gaps.append((next_uid, 99999))
+        # Since Android 13 an app's SDK sandbox (its uid + 10000) is left out of the app's VPN with the app.
+        sandbox = own + 10000 if 10000 <= own < 20000 else None
+        with_sandbox = [(own, own)] + ([(sandbox, sandbox)] if sandbox else [])
         found = []
-        if gaps != [(own, own)]:
-            found.append(f"Android's VPN leaves out uids {gaps[:4]}, not only ProxyFlow's ({own})")
+        if gaps not in ([(own, own)], with_sandbox):
+            found.append(f"Android's VPN leaves out uids {gaps[:4]}, not only ProxyFlow's ({own}" + (f" and its SDK sandbox's, {sandbox})" if sandbox else ")"))
         bypass = re.search(r"bypassable=(\w+)", text)
         if bypass and bypass.group(1) != "false":
             found.append(f"Android says apps may bypass the VPN (bypassable={bypass.group(1)})")
@@ -697,7 +702,10 @@ def androids_views(logcat: list[str]) -> tuple[list[str], list[str]]:
         if dns and "198.18.0.2" not in dns.group(1):
             found.append(f"the VPN's DNS servers are [{dns.group(1).strip()}]")
         problems += found
-        views.append(f"every uid but {own}" + (f", bypassable={bypass.group(1)}" if bypass else "") + (", DNS 198.18.0.2" if dns and not found else ""))
+        views.append(
+            f"every uid but {own}" + (f" and its SDK sandbox {sandbox}" if sandbox and gaps == with_sandbox else "")
+            + (f", bypassable={bypass.group(1)}" if bypass else "") + (", DNS 198.18.0.2" if dns and not found else "")
+        )
     if unreadable:
         views.append(f"{len(unreadable)} without the routed uids, the first: {unreadable[0]!r}")
     return views, problems
