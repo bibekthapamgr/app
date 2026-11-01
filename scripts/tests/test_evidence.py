@@ -173,6 +173,12 @@ class CaptureTest(unittest.TestCase):
         c = capture_of([ipv4("10.0.2.3", PHONE4, 17, udp(53, 40009, dns_response("time.android.com", "216.239.35.0")))])
         self.assertEqual({"216.239.35.0"}, c.dns_answers["time.android.com"])
 
+    def test_answers_cut_off_by_the_capture_length_are_skipped(self):
+        response = dns_response("time.android.com", "216.239.35.0")
+        c = capture_of([ipv4("10.0.2.3", PHONE4, 17, udp(53, 40010, response[:-2]))])  # the address half cut off
+        self.assertEqual(set(), c.dns_answers["time.android.com"])
+        self.assertEqual(1, c.packets)
+
     def test_dns_queries_over_udp_and_tcp(self):
         query = dns_query("proxyflow.test")
         c = capture_of(

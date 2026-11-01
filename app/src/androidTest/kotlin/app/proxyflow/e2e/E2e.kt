@@ -24,6 +24,8 @@ import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.vpn.ProxyFlowVpnService
 import java.io.File
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -301,22 +303,38 @@ class App {
 
     /**
      * Connects [profileId] and returns the Connected state. An attempt that the phone's own uplink
-     * failed ("no route to the proxy": the emulator's network was gone for a moment, as the API 35
-     * image's sometimes is) is tried once more and logged, and the evidence counts these; any other
-     * failure, or a second one, fails the test at once.
+     * failed ("no route to the proxy": the emulator's network did not reach the runner for a moment,
+     * as the API 34 and 35 images' sometimes do) is tried again once the proxy answers this process
+     * directly (outside the VPN), at most [UPLINK_RETRIES] times, and logged; the evidence counts
+     * these. Any other failure fails the test at once.
      */
     fun connect(profileId: String): ConnectionState {
-        val ended = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
-        if (ended.status == ConnectionStatus.Connected) return ended
-        if (ended.error != UPLINK_DROPPED) throw AssertionError("connecting failed; state is $ended")
-        // The failed attempt leaves nothing behind: a first attempt no interface, a switch only the one it holds.
-        if (ended.status == ConnectionStatus.Disconnected) {
-            eventually("the failed attempt left no interface", diagnose = { Diagnostics.report(this) }) { Descriptors.tun().isEmpty() }
+        var ended = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
+        var retries = 0
+        while (ended.status != ConnectionStatus.Connected) {
+            if (ended.error != UPLINK_DROPPED) throw AssertionError("connecting failed; state is $ended")
+            if (retries == UPLINK_RETRIES) throw AssertionError("connecting failed ${retries + 1} times; state is $ended")
+            // The failed attempt leaves nothing behind: a first attempt no interface, a switch only the one it holds.
+            if (ended.status == ConnectionStatus.Disconnected) {
+                eventually("the failed attempt left no interface", diagnose = { Diagnostics.report(this) }) { Descriptors.tun().isEmpty() }
+            }
+            retries++
+            val waited = ended.profile?.let { awaitProxy(it.host, it.port) }
+            Log.i(TAG, "uplink dropped: connecting again (retry $retries; the proxy answered this process again after $waited ms)")
+            ended = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
         }
-        Log.i(TAG, "uplink dropped: connecting again")
-        val again = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
-        if (again.status != ConnectionStatus.Connected) throw AssertionError("connecting failed twice; state is $again")
-        return again
+        return ended
+    }
+
+    /** Waits until [host]:[port] accepts a connection from this process, which ProxyFlow's VPN leaves out; the time taken. */
+    private fun awaitProxy(host: String, port: Int): Long {
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < UPLINK_WAIT_MS) {
+            val reached = runCatching { Socket().use { it.connect(InetSocketAddress(host, port), 1_000) } }.isSuccess
+            if (reached) return System.currentTimeMillis() - start
+            Thread.sleep(500)
+        }
+        return -1
     }
 
     private fun ConnectionState.connectedOrFailed() = status == ConnectionStatus.Connected ||
@@ -368,6 +386,8 @@ private const val TAG = "ProxyFlowE2E"
 
 /** What the engine reports when the phone has no route to the proxy at all: its own uplink is down. */
 private val UPLINK_DROPPED = ConnectionError("PROXY_UNREACHABLE", "no route to the proxy")
+private const val UPLINK_RETRIES = 2
+private const val UPLINK_WAIT_MS = 15_000L
 
 /** How long a test's setup waits for an earlier test's VPN service and interface to go. */
 const val SETTLE_BEFORE_TEST_MS = 30_000L

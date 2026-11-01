@@ -168,8 +168,12 @@ def dns_answer_addresses(message: bytes) -> tuple[str | None, list[str]]:
     found = []
     for _ in range(answers):
         at = skip_name(message, at)
+        if at + 10 > len(message):
+            break  # the phone's own captures keep 160 bytes of each packet: later answers may be cut off
         rtype, _, _, length = struct.unpack("!HHIH", message[at : at + 10])
         at += 10
+        if at + length > len(message):
+            break
         if (rtype == 1 and length == 4) or (rtype == 28 and length == 16):
             found.append(ip_of(message[at : at + length]))
         at += length
@@ -311,8 +315,8 @@ def read_capture(path: str) -> Capture:
             packet = network_payload(linktype, frame)
             if packet:
                 inspect(packet, capture, when)
-        except (IndexError, struct.error):
-            continue
+        except (IndexError, struct.error, ValueError):
+            continue  # a packet cut off by the capture's length limit, or not what its header says
     return capture
 
 
@@ -655,4 +659,11 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    try:
+        sys.exit(main(sys.argv))
+    except Exception:  # an evidence check that cannot finish is a failed check, said where CI shows annotations
+        import traceback
+
+        api = next((sys.argv[i + 1] for i, a in enumerate(sys.argv[:-1]) if a == "--api"), "?")
+        print(f"::error title=M6 end-to-end evidence (API {api})::the evidence script failed: {escape(traceback.format_exc())}")
+        sys.exit(1)
