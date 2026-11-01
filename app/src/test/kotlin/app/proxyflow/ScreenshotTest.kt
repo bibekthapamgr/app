@@ -27,6 +27,7 @@ import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.ThemePreference
 import app.proxyflow.core.model.TlsMode
+import app.proxyflow.core.model.TlsProblems
 import app.proxyflow.core.model.UnsupportedTraffic
 import app.proxyflow.feature.about.AboutScreen
 import app.proxyflow.feature.home.HomeActions
@@ -105,11 +106,14 @@ class ScreenshotTest {
         HomeScreen(home(connected, diagnostics = sampleDiagnostics), HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
     }
 
-    /** B4 scrolled to the diagnostics (ADR-0011): counts only, no destinations. */
+    /**
+     * B4 when things go wrong while connected (ADR-0011): which TLS check failed, names the proxy couldn't reach,
+     * proxy timeouts and the last problem, as counts and codes only, never destinations.
+     */
     @Test
-    fun homeConnectedDiagnostics() = captureBothThemes("B4_home_connected_diagnostics", scrollTo = "Proxy timeouts") {
+    fun homeConnectedProblems() = captureBothThemes("B4_home_connected_problems") {
         val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
-        HomeScreen(home(connected, diagnostics = sampleDiagnostics), HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
+        HomeScreen(home(connected, diagnostics = troubleDiagnostics), HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
     }
 
     @Test
@@ -350,12 +354,23 @@ class ScreenshotTest {
         const val DIR = "screenshots"
         const val SAMPLE_TIME = 1_793_000_000_000L
 
+        /** A session without problems: what Home shows most of the time. */
         val sampleDiagnostics = RoutingDiagnostics(
             connectionsOpened = 128,
             namesForProxy = 46,
-            dns = DnsProblems(namesNotReached = 1),
             unsupported = UnsupportedTraffic(udpBlocked = 23, udpTopPorts = listOf(443, 3478), pingsDropped = 4),
-            lastProblem = ConnectionError("TARGET_UNREACHABLE", "the proxy could not reach the host"),
+        )
+
+        /** A session where the proxy's certificate stopped passing, a name couldn't be reached and the proxy hung. */
+        val troubleDiagnostics = RoutingDiagnostics(
+            connectionsOpened = 37,
+            namesForProxy = 12,
+            tls = TlsProblems(failures = 3, lastCode = "TLS_UNTRUSTED"),
+            dns = DnsProblems(namesNotReached = 1),
+            unsupported = UnsupportedTraffic(udpBlocked = 5, udpTopPorts = listOf(443)),
+            proxyTimeouts = 2,
+            connectionsFailed = 6,
+            lastProblem = ConnectionError("TLS_UNTRUSTED", "proxy certificate is not trusted by this phone"),
         )
 
         val tokyo = ProxyProfile(

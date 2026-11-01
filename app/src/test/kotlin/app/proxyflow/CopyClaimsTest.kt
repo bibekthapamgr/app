@@ -90,6 +90,7 @@ class CopyClaimsTest {
             "about_carry_tls" to listOf("HTTPS", "end to end", "never decrypts"),
             "home_https_note" to listOf("HTTPS", "end to end", "never decrypts"),
             "home_connected_note" to listOf("TCP"),
+            "home_diag_unsupported_note" to listOf("TCP only", "UDP is refused", "pings get no reply"),
             "edit_plaintext_body" to listOf("HTTPS pages stay encrypted end to end"),
             "edit_tls_hint" to listOf("HTTPS sites stay encrypted end to end"),
             "vpn_notification_connected_text" to listOf("TCP", "UDP and ping blocked"),

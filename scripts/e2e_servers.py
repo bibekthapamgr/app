@@ -160,9 +160,11 @@ class Gate:
             self.server = await asyncio.start_server(self.handle, self.address, self.port, reuse_address=True)
 
     async def stop_listening(self) -> None:
+        # Only the listening socket closes, as when a proxy's port is shut: new connections are refused, the ones
+        # already relayed stay up. No Server.wait_closed(): since Python 3.12 it waits for those connections to end,
+        # which held the control reply (and left the gate deaf to the next "forward").
         if self.server is not None:
             self.server.close()
-            await self.server.wait_closed()
             self.server = None
 
     async def set_mode(self, command: str) -> str:

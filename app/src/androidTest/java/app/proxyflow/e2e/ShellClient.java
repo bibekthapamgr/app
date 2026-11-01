@@ -3,6 +3,7 @@ package app.proxyflow.e2e;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.DatagramPacket;
@@ -97,7 +98,11 @@ public final class ShellClient {
         return reply.toString("US-ASCII").trim();
     }
 
-    /** A connected UDP socket learns of an ICMP port unreachable on its next receive. */
+    /**
+     * A connected UDP socket learns of an ICMP port unreachable on its next call: a receive throws
+     * PortUnreachableException, and on Android a second send fails with ECONNREFUSED, which is the
+     * same ICMP message reported by the kernel (the socket's pending error), so both mean the same.
+     */
     private static String udp(String host, int port, int timeout) throws Exception {
         try (DatagramSocket socket = new DatagramSocket()) {
             socket.connect(InetAddress.getByName(host), port);
@@ -115,6 +120,9 @@ public final class ShellClient {
                 return "PORT_UNREACHABLE";
             } catch (SocketTimeoutException e) {
                 return "TIMEOUT";
+            } catch (IOException e) {
+                if (String.valueOf(e.getMessage()).contains("ECONNREFUSED")) return "PORT_UNREACHABLE";
+                throw e;
             }
         }
     }

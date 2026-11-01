@@ -98,7 +98,7 @@
         <item quantity="one">%d ping</item>
         <item quantity="other">%d pings</item>
     </plurals>
-    <string name="home_diag_unsupported_note">ProxyFlow carries TCP only: apps get an error at once and calls, games and QUIC fall back or fail.</string>
+    <string name="home_diag_unsupported_note">ProxyFlow carries TCP only: UDP is refused at once and pings get no reply, so calls, games and QUIC fall back to TCP or fail.</string>
     <string name="home_diag_timeouts">Proxy timeouts</string>
     <string name="home_diag_none">None</string>
     <plurals name="home_diag_timed_out">
