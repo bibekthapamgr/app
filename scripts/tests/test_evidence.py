@@ -557,6 +557,39 @@ class EvidenceTest(unittest.TestCase):
         self.assertIn("{'every uid but 10200 and its SDK sandbox 20200, bypassable=false, DNS 198.18.0.2': 1}", printed)
         self.assertIn("ProxyFlow's own sockets (uid [10200, 20200])", printed)
 
+    def test_an_unsampled_owner_fails_when_a_view_could_not_be_read(self):
+        unreadable = "11-01 02:00:01.600   100   100 I ProxyFlowE2E: android's view of the VPN (own uid 10200): no VPN network | DnsAddresses: [  ]\n"
+        status, printed = self.run_evidence(
+            logcat_extra=[*self.VPN, self.VIEW, unreadable], uplink_dns=[self.PROXY_LOOKUP],
+            capture_extra=[self.PROXY_SYN, (at("02:00:10"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 5228, syn=True)))],
+        )
+        self.assertEqual(1, status)
+        self.assertIn("1 without the routed uids", printed)
+        self.assertIn("traffic left the phone around the VPN while connected: {'TCP 142.250.80.46:5228': 1}", printed)
+
+    def test_proxyflow_never_counts_as_an_app_android_lets_leave_a_vpn(self):
+        granted = "  Package [app.proxyflow.android.debug] (1):\n    appId=10200\n      android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS: granted=true\n"
+        status, printed = self.run_viewed(
+            uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.PROXY_SYN, self.SYN_TO_PLACEHOLDER], connecting=self.sample(10200),
+            permissions=granted,
+        )
+        self.assertEqual(1, status)
+        self.assertIn("traffic left the phone around the VPN while connected: {'TCP 198.19.41.223:5228': 1}", printed)
+
+    def test_proxyflows_own_socket_to_the_lan_destination_fails(self):  # the runner's address, but not a proxy port
+        to_lan = f"T {at('02:00:10').timestamp():.3f}\ntcp    3: 0F02000A:9C40 0202000A:1F92 01 00000000:00000000 00:00000000 00000000 10200 0 4714\n"
+        status, printed = self.run_viewed(uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.PROXY_SYN], connecting=to_lan)
+        self.assertEqual(1, status)
+        self.assertIn("ProxyFlow's own sockets reached other places than its proxy: {'TCP 10.0.2.2:8082': 1}", printed)
+
+    def test_a_dns_log_entry_is_matched_only_by_a_lookup_at_the_same_time(self):
+        status, printed = self.run_viewed(
+            uplink_dns=[self.PROXY_LOOKUP, "02:00:20 mtalk.google.com"],
+            capture_extra=[self.PROXY_SYN, (at("02:00:12"), ipv4(PHONE4, "10.0.2.3", 17, udp(40022, 53, dns_query("mtalk.google.com"))))],
+        )
+        self.assertEqual(1, status)
+        self.assertIn("around the VPN: {'mtalk.google.com A': 1}", printed)
+
     def test_a_vpn_android_lets_apps_bypass_fails(self):
         status, printed = self.run_viewed(self.VIEW.replace("bypassable=false", "bypassable=true"), uplink_dns=[self.PROXY_LOOKUP],
                                           capture_extra=[self.PROXY_SYN])
@@ -669,6 +702,7 @@ class EvidenceTest(unittest.TestCase):
         ntp = "216.239.35.0"
         status, printed = self.run_connected(
             uplink_dns=[self.PROXY_LOOKUP],
+            network=["addresses: lo 127.0.0.1/8;eth0 10.0.2.15/24"],  # the resolver shares the phone's network but is not the phone
             capture_extra=[
                 (at("02:00:05"), ipv4(PHONE4, "10.0.2.3", 17, udp(40023, 53, dns_query("time.android.com")))),
                 (at("02:00:05"), ipv4("10.0.2.3", PHONE4, 17, udp(53, 40023, dns_response("time.android.com", ntp)))),
