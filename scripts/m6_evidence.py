@@ -668,9 +668,9 @@ def own_uids(logcat: list[str], names: dict) -> set[int]:
 
 
 def androids_views(logcat: list[str]) -> tuple[list[str], list[str]]:
-    """What Android said about ProxyFlow's VPN, as the device tests logged it after each connection (from dumpsys
-    connectivity): the uids it routes into the VPN, whether apps may bypass it (Android 13 and later say), and its DNS
-    servers. Returns each readable view's summary and the problems found."""
+    """What Android said about ProxyFlow's VPN, as the device tests logged it after each connection (the VPN network's
+    capabilities and DNS servers, read with the shell's permissions): the uids it routes into the VPN, whether apps may
+    bypass it (Android 13 and later say), and its DNS servers. Returns each readable view's summary and the problems."""
     views, problems, unreadable = [], [], []
     for line in logcat:
         m = re.search(r"ProxyFlowE2E\s*:\s*android's view of the VPN \(own uid (\d+)\): (.*)$", line)
@@ -848,7 +848,7 @@ def main(argv: list[str]) -> int:
     views, view_problems = androids_views(logcat)
     problems += view_problems
     facts.append(
-        f"Android's view of ProxyFlow's VPN after each connection (dumpsys connectivity): {len([v for v in views if v.startswith('every uid but')])} readable; "
+        f"Android's view of ProxyFlow's VPN after each connection (its network's capabilities): {len([v for v in views if v.startswith('every uid but')])} readable; "
         f"{dict(collections.Counter(views)) or 'none'}" + (f"; problems: {view_problems[:3]}" if view_problems else "")
     )
     # Traffic outside the VPN whose owner no sample named can only have come from an app Android lets leave the VPN,

@@ -536,7 +536,7 @@ class EvidenceTest(unittest.TestCase):
             capture_extra=[self.PROXY_SYN, (at("02:00:10"), ipv4(PHONE4, "142.250.80.46", 6, tcp(40020, 5228, syn=True)))],
         )
         self.assertEqual(0, status, printed)
-        self.assertIn("Android's view of ProxyFlow's VPN after each connection (dumpsys connectivity): 1 readable; "
+        self.assertIn("Android's view of ProxyFlow's VPN after each connection (its network's capabilities): 1 readable; "
                       "{'every uid but 10200, bypassable=false, DNS 198.18.0.2': 1}", printed)
         self.assertIn("with no owner sampled, so theirs (Android routes every other app into this VPN): {'TCP 142.250.80.46:5228': 1}", printed)
 
