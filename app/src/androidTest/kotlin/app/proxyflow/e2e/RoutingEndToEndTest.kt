@@ -64,7 +64,7 @@ class RoutingEndToEndTest {
     fun namesAreAnsweredOnThePhoneAndResolvedByTheProxy() {
         app.connect(socks().id)
 
-        val placeholders = ShellClient.resolve(env.destinationName)
+        val placeholders = FromShell.resolve(env.destinationName)
         assertEquals("the system resolver's answer: $placeholders", 1, placeholders.size)
         val placeholder = placeholders.single()
         assertTrue("$placeholder is a placeholder (198.18.0.0/15), never the real address", isPlaceholder(placeholder))
@@ -72,26 +72,26 @@ class RoutingEndToEndTest {
             assertEquals(
                 "A from $server",
                 DnsAnswer(DnsAnswer.NOERROR, listOf(placeholder)),
-                ShellClient.dns(server, env.destinationName, DnsAnswer.A),
+                FromShell.dns(server, env.destinationName, DnsAnswer.A),
             )
             assertEquals(
                 "AAAA from $server",
                 DnsAnswer(DnsAnswer.NOERROR, emptyList()),
-                ShellClient.dns(server, env.destinationName, DnsAnswer.AAAA),
+                FromShell.dns(server, env.destinationName, DnsAnswer.AAAA),
             )
             assertEquals(
                 "HTTPS from $server",
                 DnsAnswer(DnsAnswer.NOERROR, emptyList()),
-                ShellClient.dns(server, env.destinationName, DnsAnswer.HTTPS),
+                FromShell.dns(server, env.destinationName, DnsAnswer.HTTPS),
             )
             assertEquals(
                 "TXT from $server",
                 DnsAnswer(DnsAnswer.REFUSED, emptyList()),
-                ShellClient.dns(server, env.destinationName, DnsAnswer.TXT),
+                FromShell.dns(server, env.destinationName, DnsAnswer.TXT),
             )
         }
         for (server in listOf(VPN_DNS, PUBLIC_DNS)) {
-            val overTcp = ShellClient.dns(server, env.destinationName, DnsAnswer.A, overTcp = true)
+            val overTcp = FromShell.dns(server, env.destinationName, DnsAnswer.A, overTcp = true)
             assertEquals("A over TCP from $server", DnsAnswer(DnsAnswer.NOERROR, listOf(placeholder)), overTcp)
         }
         assertSent("names", env.destinationName, env.destinationPort)
@@ -124,8 +124,8 @@ class RoutingEndToEndTest {
     fun ipv6OnlyNamesAreReachedThroughTheProxy() {
         for (profile in listOf(socks(), http())) {
             app.connect(profile.id)
-            assertTrue(isPlaceholder(ShellClient.resolve(lab.v6Name).single()))
-            assertEquals(DnsAnswer(DnsAnswer.NOERROR, emptyList()), ShellClient.dns(VPN_DNS, lab.v6Name, DnsAnswer.AAAA))
+            assertTrue(isPlaceholder(FromShell.resolve(lab.v6Name).single()))
+            assertEquals(DnsAnswer(DnsAnswer.NOERROR, emptyList()), FromShell.dns(VPN_DNS, lab.v6Name, DnsAnswer.AAAA))
             assertSent("ipv6-name-${profile.protocol}", lab.v6Name, lab.v6Port)
             app.disconnectAndSettle()
         }
@@ -151,8 +151,8 @@ class RoutingEndToEndTest {
         app.connect(socks().id)
         val before = ProxyEngine().stats().udpRejectedPorts[lab.udpPort.toString()] ?: 0
 
-        assertEquals("UDP to ${env.destinationAddress}", "PORT_UNREACHABLE", ShellClient.udp(env.destinationAddress, lab.udpPort))
-        assertEquals("UDP to ${lab.v6Address}", "PORT_UNREACHABLE", ShellClient.udp(lab.v6Address, lab.udpPort))
+        assertEquals("UDP to ${env.destinationAddress}", "PORT_UNREACHABLE", FromShell.udp(env.destinationAddress, lab.udpPort))
+        assertEquals("UDP to ${lab.v6Address}", "PORT_UNREACHABLE", FromShell.udp(lab.v6Address, lab.udpPort))
 
         eventually("the engine counted the datagrams") {
             (ProxyEngine().stats().udpRejectedPorts[lab.udpPort.toString()] ?: 0) >= before + 2
@@ -184,7 +184,7 @@ class RoutingEndToEndTest {
     fun aNameTheProxyCannotResolveFailsWithoutAFallback() {
         for (profile in listOf(socks(), http())) {
             app.connect(profile.id)
-            assertTrue(isPlaceholder(ShellClient.resolve(lab.missingName).single()))
+            assertTrue(isPlaceholder(FromShell.resolve(lab.missingName).single()))
             assertRefused("missing-name-${profile.protocol}", lab.missingName, env.destinationPort)
             eventually("the engine counted a failure for a name") {
                 (ProxyEngine().stats().hostnameFailures["TARGET_UNREACHABLE"] ?: 0) >= 1
@@ -205,7 +205,7 @@ class RoutingEndToEndTest {
 
         gate.refuse()
         assertRefused("gate-down", env.destinationName, env.destinationPort)
-        assertEquals(DnsAnswer.NOERROR, ShellClient.dns(VPN_DNS, env.destinationName, DnsAnswer.A).rcode)
+        assertEquals(DnsAnswer.NOERROR, FromShell.dns(VPN_DNS, env.destinationName, DnsAnswer.A).rcode)
         val down = app.awaitDiagnostics("the failure counted") { it.lastProblem?.code == "PROXY_UNREACHABLE" }
         assertEquals("still connected: traffic is held, not let out", ConnectionStatus.Connected, app.controller.state.value.status)
         assertTrue("$down", down.connectionsFailed >= 1)
@@ -262,14 +262,14 @@ class RoutingEndToEndTest {
     private fun assertSent(label: String, host: String, port: Int) {
         val line = Lines.next(label)
         Lines.sent(line, host, port)
-        assertEquals("$host:$port", "REPLY PROXYFLOW-DEST $line", ShellClient.tcp(host, port, line))
+        assertEquals("$host:$port", "REPLY PROXYFLOW-DEST $line", FromShell.tcp(host, port, line))
     }
 
     /** One line that must get nowhere: the connection fails, and m6_evidence.py checks no log has the line. */
     private fun assertRefused(label: String, host: String, port: Int, timeoutMillis: Int = 10_000) {
         val line = Lines.next(label)
         Lines.refused(line, host, port)
-        val result = ShellClient.tcp(host, port, line, timeoutMillis)
+        val result = FromShell.tcp(host, port, line, timeoutMillis)
         assertTrue("$host:$port must fail: $result", result.startsWith("ERROR"))
     }
 

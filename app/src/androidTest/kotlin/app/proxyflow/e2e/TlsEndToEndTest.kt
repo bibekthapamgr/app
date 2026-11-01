@@ -110,7 +110,7 @@ class TlsEndToEndTest {
         gate.forward(lab.tlsUntrustedPort)
         val line = Lines.next("tls-gate-untrusted")
         Lines.refused(line, env.destinationName, env.destinationPort)
-        val result = ShellClient.tcp(env.destinationName, env.destinationPort, line)
+        val result = FromShell.tcp(env.destinationName, env.destinationPort, line)
         assertTrue("a connection through an untrusted certificate must fail: $result", result.startsWith("ERROR"))
         eventually("the engine counted the refused certificate") { (ProxyEngine().stats().failures["TLS_UNTRUSTED"] ?: 0) >= 1 }
         val diagnostics = app.awaitDiagnostics("a TLS failure") { it.tls.failures >= 1 }
@@ -131,7 +131,7 @@ class TlsEndToEndTest {
             app.connect(profile.id)
             val line = Lines.next("https-${profile.protocol}-${if (profile.useTls) "tls" else "plain"}")
             Lines.sent(line, lab.httpsName, lab.httpsPort)
-            val result = ShellClient.tls(lab.httpsName, lab.httpsPort, lab.caPath, line)
+            val result = FromShell.tls(lab.httpsName, lab.httpsPort, lab.caPath, line)
             val match =
                 Regex("^TLS (\\S+) LEAF ([0-9a-f]{64}) REPLY (.*)$").find(result) ?: throw AssertionError("TLS to the site failed: $result")
             assertEquals("the site's own certificate, end to end", lab.httpsSha256, match.groupValues[2])
@@ -177,7 +177,7 @@ class TlsEndToEndTest {
     private fun assertSent(label: String) {
         val line = Lines.next(label)
         Lines.sent(line, env.destinationName, env.destinationPort)
-        assertEquals("REPLY PROXYFLOW-DEST $line", ShellClient.tcp(env.destinationName, env.destinationPort, line))
+        assertEquals("REPLY PROXYFLOW-DEST $line", FromShell.tcp(env.destinationName, env.destinationPort, line))
     }
 
     private companion object {

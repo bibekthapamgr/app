@@ -77,9 +77,9 @@ class VpnRuntime(
         .distinctUntilChanged()
         .flatMapLatest { connected ->
             if (!connected) {
-                flowOf(null)
+                flowOf<RoutingDiagnostics?>(null)
             } else {
-                flow {
+                flow<RoutingDiagnostics?> {
                     while (true) {
                         emit(engine.diagnostics())
                         delay(DIAGNOSTICS_INTERVAL_MS)

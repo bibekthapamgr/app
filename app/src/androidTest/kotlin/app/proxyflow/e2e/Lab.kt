@@ -84,7 +84,7 @@ data class LabConfig(
     }
 }
 
-/** A DNS answer as [ShellClient] printed it: the response code and the addresses (or "typeN" for other records). */
+/** A DNS answer as the shell's client printed it: the response code and the addresses (or "typeN" for other records). */
 data class DnsAnswer(val rcode: Int, val answers: List<String>) {
     companion object {
         const val A = 1
@@ -107,11 +107,11 @@ data class DnsAnswer(val rcode: Int, val answers: List<String>) {
 }
 
 /**
- * Runs app/src/androidTest/java/.../ShellClient.java as the shell user, whose traffic Android routes
- * into ProxyFlow's VPN, with app_process and this test APK as its class path (a copy the shell can
- * read in /data/local/tmp). One line of output per call.
+ * Network calls made by the shell user, whose traffic Android routes into ProxyFlow's VPN: runs
+ * [ShellClient] (app/src/androidTest/java) with app_process and this test APK as its class path
+ * (a copy the shell can read in /data/local/tmp). One line of output per call.
  */
-object ShellClient {
+object FromShell {
     private const val APK = "/data/local/tmp/pf-client.apk"
 
     private val installed: Boolean by lazy {
