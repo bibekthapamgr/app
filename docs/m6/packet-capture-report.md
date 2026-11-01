@@ -1,6 +1,6 @@
 # M6 — Packet capture report
 
-**Milestone:** M6 · **Decisions:** ADR-0011 · **Verified run:** see §5 (filled from the verified CI run) · **Checks:** `scripts/m6_evidence.py`, `scripts/m5_evidence.py`
+**Milestone:** M6 · **Decisions:** ADR-0011 · **Verified run:** `android` run [41283456070](https://github.com/bibekthapamgr/app/actions/runs/41283456070) of `439a59e`, attempts 1 to 3 (§5) · **Checks:** `scripts/m6_evidence.py`, `scripts/m5_evidence.py`
 
 This report answers the M6 acceptance criteria that need packets: supported TCP traffic uses the configured proxy, no DNS goes around it, unsupported traffic stays on the phone, TLS to the proxy never falls back to plaintext, and HTTPS to a site stays end to end. It describes where the packets were captured, which controlled servers stood on the other side, what was checked, and what the verified run showed on each API level.
 
@@ -48,7 +48,16 @@ The traffic of `RoutingEndToEndTest` and `TlsEndToEndTest` (and of the M5 tests 
 
 ## 5. Results
 
-Filled from the verified CI run (three attempts of one commit on API 29, 34, 35 and 36): see `docs/m6/M6-acceptance-report.md` §3 for the run and the per-level figures.
+From the verified CI run: `android` run [41283456070](https://github.com/bibekthapamgr/app/actions/runs/41283456070) of commit `439a59e`, attempts 1, 2 and 3, green on API 29, 34, 35 and 36. Figures from attempt 1; attempts 2 and 3 gave the same results, with other packet counts and with Google Play services' connections on API 35 (none in attempt 1, 3 in attempt 2 and 2 in attempt 3), each put down to its grant. The per-level figures for destinations, DNS servers, TLS fronts and the gate are in `docs/m6/M6-acceptance-report.md` (End-to-end evidence).
+
+| API | Captures covering the uplink (packets; IPv6 packets) | To or from lab addresses; UDP or pings to them; DNS for lab names | Connected periods checked | Outside the VPN while connected |
+|---|---|---|---|---|
+| 29 | the emulator's (33,462; 882) | 0; 0; 0 | 40, 89 s | nothing unexplained |
+| 34 | the emulator's (46,619; 475), the phone's `eth0` (21,667; 347) | 0; 0; 0 | 40, 86 s | nothing unexplained |
+| 35 | the phone's `wlan0` (117,630; 425) | 0; 0; 0 | 40, 90 s | nothing unexplained |
+| 36 | the emulator's (40,931; 444), the phone's `eth0` (6,762; 300) | 0; 0; 0 | 40, 77 s | nothing unexplained |
+
+In every capture of every attempt: no packet to or from a destination's address (IPv4 or IPv6), no UDP datagram or echo request to one, no DNS query for a lab name, no SYN straight to the LAN destination, and every connection to a TLS proxy port opened with a TLS record. Every covering capture lined up with logcat on every connection attempt: 54 per level; 55 on API 34, one of them a retry after the emulator's uplink dropped (below). In the connected periods no capture and no uplink DNS log showed any lookup on the phone's network, and nothing left the phone around the VPN that its owner did not explain: only on API 35 over Wi-Fi, in attempts 2 and 3, Google Play services' connections (3 and 2), put down by the phone's socket table to an app granted `CONNECTIVITY_USE_RESTRICTED_NETWORKS` and reported (routing and limitations §4). After each of the 39 connections per level, Android's own view of the VPN routed every uid but ProxyFlow's (and, on API 34 to 36, its SDK sandbox's) into it, with ProxyFlow's DNS server and, where Android says, no bypassing; ProxyFlow's own sockets went only to its proxies and the gate's control port.
 
 ## 6. Reproducing
 
