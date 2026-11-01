@@ -16,7 +16,9 @@ import org.junit.Test
 class DiagnosticsTest {
     @Test
     fun aQuietConnectionHasNoProblems() {
-        val diagnostics = EngineStats(stateName = "running", tcpOpened = 3, dns = mapOf("mapped" to 2L, "nodata" to 2L)).toDiagnostics()
+        // Five lookups of two names: Home counts the names.
+        val stats = EngineStats(stateName = "running", tcpOpened = 3, fakeDnsMappings = 2, dns = mapOf("mapped" to 5L, "nodata" to 2L))
+        val diagnostics = stats.toDiagnostics()
         assertEquals(RoutingDiagnostics(connectionsOpened = 3, namesForProxy = 2, ipv6LookupsAnsweredEmpty = 2), diagnostics)
         assertFalse(diagnostics.hasProblems)
     }
@@ -51,7 +53,7 @@ class DiagnosticsTest {
             DnsProblems(proxyNameLookups = 1, namesNotReached = 2, queriesRefused = 3, lookupsDropped = 2, staleAddresses = 1),
             diagnostics.dns,
         )
-        assertEquals(9L, diagnostics.dns.total)
+        assertEquals("the refused queries are shown, but are no failure", 6L, diagnostics.dns.total)
         // The ports blocked most, most first; equal counts by port number.
         assertEquals(UnsupportedTraffic(udpBlocked = 12, udpTopPorts = listOf(443, 3478, 123), pingsDropped = 4), diagnostics.unsupported)
         assertEquals(2L, diagnostics.proxyTimeouts)
@@ -68,6 +70,15 @@ class DiagnosticsTest {
             lastProxyError = EngineError("HANDSHAKE_TIMEOUT"),
         )
         assertEquals(TlsProblems(failures = 4, lastCode = "TLS_EXPIRED"), stats.toDiagnostics().tls)
+    }
+
+    /** TXT, MX, SRV or PTR lookups, refused by design, are shown but never make DNS look broken. */
+    @Test
+    fun lookupsRefusedByDesignAreNoFailure() {
+        val diagnostics = EngineStats(stateName = "running", dns = mapOf("mapped" to 4L, "refused" to 2L, "formerr" to 1L)).toDiagnostics()
+        assertEquals(3L, diagnostics.dns.queriesRefused)
+        assertEquals(0L, diagnostics.dns.total)
+        assertFalse(diagnostics.hasProblems)
     }
 
     @Test

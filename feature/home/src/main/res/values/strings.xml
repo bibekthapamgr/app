@@ -63,16 +63,17 @@
     </plurals>
     <string name="home_diag_dns">DNS</string>
     <plurals name="home_diag_dns_names">
-        <item quantity="one">Your proxy couldn\'t find or reach %d name</item>
-        <item quantity="other">Your proxy couldn\'t find or reach %d names</item>
+        <item quantity="one">%d connection to a name your proxy couldn\'t find or reach</item>
+        <item quantity="other">%d connections to names your proxy couldn\'t find or reach</item>
     </plurals>
     <plurals name="home_diag_dns_proxy_name">
         <item quantity="one">The proxy\'s own address wasn\'t found %d time</item>
         <item quantity="other">The proxy\'s own address wasn\'t found %d times</item>
     </plurals>
+    <!-- By design, not a failure: shown under the DNS row even when it says "No failures". -->
     <plurals name="home_diag_dns_refused">
-        <item quantity="one">%d lookup of a kind ProxyFlow doesn\'t answer</item>
-        <item quantity="other">%d lookups of a kind ProxyFlow doesn\'t answer</item>
+        <item quantity="one">%d lookup of a kind ProxyFlow doesn\'t answer (TXT, MX…)</item>
+        <item quantity="other">%d lookups of a kind ProxyFlow doesn\'t answer (TXT, MX…)</item>
     </plurals>
     <plurals name="home_diag_dns_dropped">
         <item quantity="one">%d lookup dropped, too many at once</item>

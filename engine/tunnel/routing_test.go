@@ -95,9 +95,14 @@ func TestDNSOverTCPIsAnsweredLocally(t *testing.T) {
 
 func TestDNSOverTCPEndsOnAnUnanswerableMessage(t *testing.T) {
 	e, _ := startEngine(t, nil)
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 7, Response: true})
+	_ = b.StartQuestions()
+	_ = b.Question(dnsmessage.Question{Name: dnsmessage.MustNewName("reply.test."), Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET})
+	response, _ := b.Finish()
 	for name, framed := range map[string][]byte{
 		"empty message": {0, 0},
 		"too long":      {0xff, 0xff},
+		"a response":    append(binary.BigEndian.AppendUint16(nil, uint16(len(response))), response...),
 	} {
 		c := dialOK(t, e, netip.MustParseAddr("198.18.0.2"), 53)
 		_ = c.SetDeadline(time.Now().Add(3 * time.Second))
@@ -108,16 +113,52 @@ func TestDNSOverTCPEndsOnAnUnanswerableMessage(t *testing.T) {
 		c.Close()
 	}
 	waitFor(t, func() bool { return e.Stats().Flows == 0 }, "the DNS connections to end")
+	if got := e.Stats().DNSOverTCP; got != 0 {
+		t.Fatalf("dns_tcp_queries counts answered queries only, got %d", got)
+	}
+}
+
+// DNS-over-TCP connections have their own slots: connections an app keeps open cannot take the ones DNS over UDP
+// needs (with shared slots, one app holding TCP connections to port 53 would stop every app's lookups).
+func TestDNSOverTCPHasItsOwnSlots(t *testing.T) {
+	e, _ := startEngine(t, nil, func(c *Config) {
+		c.MaxDNSOverTCP, c.MaxDNSFlows = 1, 1
+		c.DNSIdleTimeout = 10 * time.Second // the held connection keeps its slot for the whole test
+	})
+	server := netip.MustParseAddr("198.18.0.2")
+	held := dialOK(t, e, server, 53)
+	tcpQuery(t, held, 1, "held.test", dnsmessage.TypeA) // its handler now holds the one DNS-over-TCP slot
+	if _, err := dialTCP(e.cs, server, 53); !isRefused(err) {
+		t.Fatalf("a second DNS-over-TCP connection beyond MaxDNSOverTCP: %v, want a refusal", err)
+	}
+	if got := e.Stats().DNSDropped; got != 1 {
+		t.Fatalf("the refused DNS-over-TCP connection must be counted as dropped: %d", got)
+	}
+	resolve(t, e.cs, "udp.test") // DNS over UDP still has its own slot
+	if got := e.Stats().DNSDropped; got != 1 {
+		t.Fatalf("a lookup over UDP was dropped while a DNS-over-TCP connection was held: %d dropped", got)
+	}
+	held.Close()
+	waitFor(t, func() bool { return len(e.tcpDNS) == 0 }, "the held connection's slot to be released")
+	c := dialOK(t, e, server, 53)
+	tcpQuery(t, c, 2, "again.test", dnsmessage.TypeA)
+	c.Close()
 }
 
 func TestTCPToTheEnginesOwnAddressesIsRefusedLocally(t *testing.T) {
-	e, d := startEngine(t, nil)
+	// LocalAddrs holds the TUN's IPv6 address in the app (fd00:66::1); the test client already uses that one as its
+	// own source address, so another stands in for it here.
+	local6 := netip.MustParseAddr("fd00:66::53")
+	e, d := startEngine(t, nil, func(c *Config) { c.LocalAddrs = []netip.Addr{local6} })
+	addIPv6(t, e.cs)
 	for _, target := range []struct {
 		addr string
 		port uint16
 	}{
-		{"198.18.0.2", 853}, // Android's opportunistic DNS-over-TLS probe to the VPN's DNS server
-		{"198.18.0.1", 443}, // the TUN's own address
+		{"198.18.0.2", 853},    // Android's opportunistic DNS-over-TLS probe to the VPN's DNS server
+		{"198.18.0.1", 443},    // the TUN's own address
+		{local6.String(), 853}, // an address in LocalAddrs
+		{"198.18.0.200", 8080}, // anywhere else in the reserved start of the range
 	} {
 		start := time.Now()
 		if _, err := dialTCP(e.cs, netip.MustParseAddr(target.addr), target.port); !isRefused(err) {
@@ -131,7 +172,7 @@ func TestTCPToTheEnginesOwnAddressesIsRefusedLocally(t *testing.T) {
 		t.Fatalf("the proxy was asked for the engine's own addresses: %+v", d.targets)
 	}
 	s := e.Stats()
-	if s.LocalRefused < 2 {
+	if s.LocalRefused < 4 {
 		t.Fatalf("local refusals not counted: %d", s.LocalRefused)
 	}
 	if len(s.Failures) != 0 || s.TCPFailed != 0 || e.events.count(EvConnFail) != 0 {

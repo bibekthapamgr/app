@@ -41,6 +41,11 @@
 # pushed to the emulator (scripts/e2e_device.sh), never from a command line. After the checks at
 # the end, log-baseline.properties records how long each log was, so the evidence counts only
 # what the device tests caused.
+#
+# Meant for a fresh CI runner or a disposable Ubuntu VM: it installs packages, adds the lab's
+# addresses to the loopback, a system account (pfsocks) and a line to /etc/hosts, and enables
+# IPv6 on every interface, and undoes none of it. Each of those steps checks first, so a second
+# run on the same host works once the first run's servers are stopped (or the host rebooted).
 set -euo pipefail
 
 PF=/tmp/pf
@@ -64,14 +69,14 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommen
 sudo rm -f /usr/sbin/policy-rc.d
 sudo systemctl stop squid danted >/dev/null 2>&1 || true
 
-# The lab's addresses, all on this host's loopback.
+# The lab's addresses, all on this host's loopback (each added once, so a second run on the same host works).
 for address in 10.99.0.1 10.99.0.2 10.99.0.53 10.99.0.54 10.0.2.2; do
-    sudo ip addr add "$address/32" dev lo
+    ip -4 addr show dev lo | grep -q " $address/32 " || sudo ip addr add "$address/32" dev lo
 done
 sudo sysctl -q -w net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.lo.disable_ipv6=0
-sudo ip -6 addr add fd99::1/128 dev lo nodad
+ip -6 addr show dev lo | grep -q " fd99::1/128 " || sudo ip -6 addr add fd99::1/128 dev lo nodad
 # The proxy's name for the phone, if the emulator asks this host's resolver instead of 10.99.0.54.
-echo "10.0.2.2 proxy.proxyflow.test" | sudo tee -a /etc/hosts >/dev/null
+grep -q " proxy.proxyflow.test$" /etc/hosts || echo "10.0.2.2 proxy.proxyflow.test" | sudo tee -a /etc/hosts >/dev/null
 UPSTREAM_DNS="$(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf)"
 test -n "$UPSTREAM_DNS" || { echo "::error title=E2E lab::the runner has no DNS server in /etc/resolv.conf"; exit 1; }
 
@@ -128,7 +133,7 @@ chmod 0644 "$PF/proxies-resolv.conf"
 # proxies' DNS server, so it resolves names there and nowhere else.
 EXTERNAL_IF="$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')"
 test -n "$EXTERNAL_IF" || { echo "::error title=E2E lab::the runner has no default route"; exit 1; }
-sudo useradd --no-create-home --shell /usr/sbin/nologin "$SOCKS_USER"
+id "$SOCKS_USER" >/dev/null 2>&1 || sudo useradd --no-create-home --shell /usr/sbin/nologin "$SOCKS_USER"
 echo "$SOCKS_USER:$SOCKS_PASS" | sudo chpasswd
 cat > "$PF/danted.conf" <<EOF
 logoutput: $PF/danted.log

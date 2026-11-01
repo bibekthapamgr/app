@@ -148,7 +148,7 @@ internal fun EngineStats.toDiagnostics(): RoutingDiagnostics {
         ?: TLS_CODES.filter { failures.count(it) > 0 }.maxByOrNull { failures.count(it) }
     return RoutingDiagnostics(
         connectionsOpened = tcpOpened,
-        namesForProxy = dns.count("mapped"),
+        namesForProxy = fakeDnsMappings.toLong(), // different names; dns["mapped"] counts every lookup, repeats too
         ipv6LookupsAnsweredEmpty = dns.count("nodata"),
         tls = TlsProblems(failures = tlsFailures, lastCode = lastTls.takeIf { tlsFailures > 0 }),
         dns = DnsProblems(

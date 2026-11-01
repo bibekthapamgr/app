@@ -11,7 +11,7 @@ This report answers the M6 acceptance criteria that need packets: supported TCP 
 | The emulator's own capture (`-tcpdump`) | the emulator's network stack, outside the phone, on its mobile-data uplink | every frame the phone sends or receives on mobile data, full length | 29, 34, 36 (their uplink is mobile data); on 35 the uplink is Wi-Fi, which this capture does not see |
 | tcpdump inside the phone | each uplink interface (`eth0`, `wlan0`, `radio0`…; never the VPN's `tun0`), as root, headers and the first 160 bytes of each packet | the uplink whichever it is, Wi-Fi included | 34, 35, 36 (API 29: adbd does not survive `adb root` and back on that image) |
 
-A capture counts as covering the uplink only if it saw the app's connections to both proxies, and tcpdump inside the phone only if it was still running after the tests (`guest-capture.txt`). The VPN's own interface is never captured: what matters is what leaves the phone.
+A capture counts as covering the uplink only if it saw the app's connections to both proxies on the runner, and tcpdump inside the phone only if it was still running after the tests (`guest-capture.txt`). The VPN's own interface is never captured: what matters is what leaves the phone. Each run also records the phone's IPv4 and IPv6 addresses and default routes (`guest-network.txt`): whether a direct IPv6 packet could have left the phone at all.
 
 ## 2. Controlled servers
 
@@ -37,10 +37,10 @@ The traffic of `RoutingEndToEndTest` and `TlsEndToEndTest` (and of the M5 tests 
 
 | Acceptance criterion | Check (`m6_evidence.py` unless noted) |
 |---|---|
-| Supported TCP traffic uses the configured proxy | Every sent line arrived exactly once at the destination it was sent to; each destination's connections equal the proxies' tunnels to it (Squid's and Dante's logs); the captures show the SOCKS5 and HTTP CONNECT requests the phone made, by name for names and by address for addresses, and no packet to or from any destination's address, nor a direct connection to the LAN destination. M5's checks hold on the same run (`m5_evidence.py`). |
-| No silent direct DNS fallback | The proxies' DNS server resolved the lab's names (`proxyflow.test`, `proxyflow6.test`, `missing.proxyflow.test`); the phone's uplink DNS server was never asked for one of them; the captures show no DNS query for them — also during the tests where the proxy refused, hung, or could not resolve the name. |
+| Supported TCP traffic uses the configured proxy | Every sent line arrived exactly once at the destination it was sent to; each destination's connections equal the proxies' tunnels to it (Squid's and Dante's logs); the captures show the SOCKS5 and HTTP CONNECT requests the phone made, by name for names and by address for addresses, and no packet to or from any destination's address, IPv4 or IPv6 (IPv6 extension headers are walked), nor a direct connection to the LAN destination. M5's checks hold on the same run (`m5_evidence.py`). |
+| No silent direct DNS fallback | The proxies' DNS server resolved the lab's names (`proxyflow.test`, `proxyflow6.test`, `missing.proxyflow.test`); the phone's uplink DNS server was never asked for one of them; the captures show no DNS query for them — also during the tests where the proxy refused, hung, or could not resolve the name. The uplink DNS server's log is also lined up with the periods ProxyFlow was connected (the VPN log in logcat; only when the two clocks agree on the app's own lookups of its proxy's name), listing every name the phone looked up itself while connected: Android's own lookups outside VPNs appear there, a lab name never may. |
 | TLS validation cannot be bypassed | Every connection to a TLS proxy port, in the captures and at the gate, opened with a TLS record: none was retried in plaintext after a refused certificate; the TLS fronts logged the handshakes the app ended with an alert. |
-| Unsupported traffic fails closed as documented | The UDP sinks received nothing; the captures show no UDP to them and no echo request to any destination. |
+| Unsupported traffic fails closed as documented | The UDP sinks received nothing; the captures show no UDP to a lab address and no echo request (ICMP or ICMPv6) to one. The engine's refusals of TCP to its own addresses (Android's DNS-over-TLS probe) are reported from the test's log line. |
 | HTTPS stays end to end | The HTTPS destination saw only TLS sessions for the name the client sent (`secure.proxyflow.test`), and the device's client saw that server's own certificate (checked in the test). |
 | No credentials leak | No test password in logcat (`m5_evidence.py`); captures of plaintext proxies hold sign-ins by design (random per run, never published outside the run's artifacts). |
 
@@ -50,6 +50,8 @@ Filled from the verified CI run (three attempts of one commit on API 29, 34, 35 
 
 ## 6. Reproducing
 
+On a fresh Ubuntu runner or a disposable VM: the lab script installs packages and changes the host (loopback addresses, a system account, `/etc/hosts`, IPv6 enabled) and undoes none of it.
+
 ```bash
 bash scripts/e2e_env.sh                       # the lab (sudo; Ubuntu with IPv6)
 adb push /tmp/pf/e2e.properties /data/local/tmp/proxyflow-e2e.properties
@@ -57,4 +59,5 @@ adb push /tmp/pf/pki/ca.crt /data/local/tmp/proxyflow-ca.pem
 # start the emulator with -dns-server 10.99.0.54 -tcpdump uplink.pcap
 ./gradlew :app:connectedDebugAndroidTest
 python3 scripts/m6_evidence.py --api 34 --pf /tmp/pf --out <dir with logcat.txt> --host-pcap uplink.pcap
+python3 -m unittest discover -s scripts/tests   # the evidence checks on synthetic captures
 ```

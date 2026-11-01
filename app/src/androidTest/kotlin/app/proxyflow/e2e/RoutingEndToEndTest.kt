@@ -1,5 +1,6 @@
 package app.proxyflow.e2e
 
+import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.engine.ProxyEngine
 import app.proxyflow.core.model.ConnectionStatus
@@ -98,6 +99,8 @@ class RoutingEndToEndTest {
 
         val stats = ProxyEngine().stats()
         assertTrue("queries over TCP were answered on the phone: ${stats.dnsOverTcp}", stats.dnsOverTcp >= 2)
+        // Android's DNS-over-TLS probe to the VPN's DNS server is refused on the phone (ADR-0011 §2); the evidence reports it.
+        Log.i(LAB_TAG, "engine local_refused=${stats.localRefused}")
         app.awaitDiagnostics("names counted for the proxy") { it.namesForProxy >= 1 && it.ipv6LookupsAnsweredEmpty >= 6 }
     }
 

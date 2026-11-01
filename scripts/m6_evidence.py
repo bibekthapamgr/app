@@ -32,7 +32,9 @@ from __future__ import annotations
 
 import argparse
 import collections
+import datetime
 import glob
+import ipaddress
 import os
 import re
 import struct
@@ -44,10 +46,9 @@ from m5_evidence import dns_name, escape, ip_of, network_payload  # noqa: E402
 
 LAB_NAMES = ("proxyflow.test", "secure.proxyflow.test", "proxyflow6.test", "missing.proxyflow.test")
 PROXY_NAME = "proxy.proxyflow.test"
-LAB_ADDRESSES = ("10.99.0.1", "10.99.0.2", "fd99::1")  # reachable from the phone only through a proxy
+LAB_ADDRESSES = tuple(str(ipaddress.ip_address(a)) for a in ("10.99.0.1", "10.99.0.2", "fd99::1"))  # reachable only through a proxy
 GATEWAY = "10.0.2.2"  # the runner as the emulator sees it: the proxies, and the LAN destination
 LAN_PORT = 8082
-UDP_PORT = 9999
 SOCKS_PORTS = (1080, 1090)  # Dante, and the gate in front of it
 HTTP_PORT = 3128
 TLS_PORTS = (3129, 1443, 3130, 3131, 3132)
@@ -92,8 +93,10 @@ class Capture:
     error: str | None = None
     syns: collections.Counter = field(default_factory=collections.Counter)  # (destination, port)
     lab_packets: collections.Counter = field(default_factory=collections.Counter)  # lab address -> packets
+    ipv6_packets: int = 0
     lan_syns: int = 0
-    udp_to_gateway_sink: int = 0
+    udp_to_lab: collections.Counter = field(default_factory=collections.Counter)  # "address:port" -> datagrams
+    echo_requests: collections.Counter = field(default_factory=collections.Counter)  # destination -> ICMP/ICMPv6 echo requests
     dns_names: collections.Counter = field(default_factory=collections.Counter)
     socks_targets: collections.Counter = field(default_factory=collections.Counter)  # "name x" / "IPv4 x" / "IPv6 x"
     connect_targets: collections.Counter = field(default_factory=collections.Counter)
@@ -123,18 +126,39 @@ def socks_connect_target(payload: bytes) -> str | None:
     return None
 
 
+IPV6_EXTENSIONS = (0, 43, 44, 60)  # hop-by-hop, routing, fragment, destination options
+
+
+def upper_layer(next_header: int, rest: bytes) -> tuple[int, bytes]:
+    """The protocol and payload after any IPv6 extension headers (a later fragment has no upper-layer header)."""
+    while next_header in IPV6_EXTENSIONS and len(rest) >= 8:
+        if next_header == 44:
+            if struct.unpack("!H", rest[2:4])[0] & 0xFFF8:  # not the first fragment
+                return -1, b""
+            next_header, rest = rest[0], rest[8:]
+        else:
+            next_header, rest = rest[0], rest[(rest[1] + 1) * 8 :]
+    return next_header, rest
+
+
 def inspect(packet: bytes, capture: Capture) -> None:
     version = packet[0] >> 4
     if version == 4 and len(packet) >= 20:
         header = (packet[0] & 0x0F) * 4
         proto, src, dst, rest = packet[9], ip_of(packet[12:16]), ip_of(packet[16:20]), packet[header:]
+        if struct.unpack("!H", packet[6:8])[0] & 0x1FFF:  # a later fragment: no upper-layer header
+            proto = -1
     elif version == 6 and len(packet) >= 40:
-        proto, src, dst, rest = packet[6], ip_of(packet[8:24]), ip_of(packet[24:40]), packet[40:]
+        src, dst = ip_of(packet[8:24]), ip_of(packet[24:40])
+        proto, rest = upper_layer(packet[6], packet[40:])
+        capture.ipv6_packets += 1
     else:
         return
     for address in LAB_ADDRESSES:
         if address in (src, dst):
             capture.lab_packets[address] += 1
+    if (proto == 1 and rest[:1] == b"\x08") or (proto == 58 and rest[:1] == b"\x80"):
+        capture.echo_requests[dst] += 1
     if proto == 6 and len(rest) >= 20:
         sport, dport, seq = struct.unpack("!HHI", rest[0:8])
         flags = rest[13]
@@ -174,8 +198,8 @@ def inspect(packet: bytes, capture: Capture) -> None:
             name = dns_name(rest[8:])
             if name is not None:
                 capture.dns_names[name.rstrip(".")] += 1
-        if dst == GATEWAY and dport == UDP_PORT:
-            capture.udp_to_gateway_sink += 1
+        if dst in LAB_ADDRESSES:
+            capture.udp_to_lab[f"[{dst}]:{dport}" if ":" in dst else f"{dst}:{dport}"] += 1
 
 
 def read_capture(path: str) -> Capture:
@@ -211,6 +235,76 @@ def read_capture(path: str) -> Capture:
         except (IndexError, struct.error):
             continue
     return capture
+
+
+# --- what the phone looked up itself while connected ---------------------------
+
+MONTHS = {name: i for i, name in enumerate(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1)}
+MARGIN = datetime.timedelta(seconds=2)  # the emulator's clock and the runner's agree to about a second
+
+
+def logcat_time(line: str, year: int) -> datetime.datetime | None:
+    m = re.match(r"(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\.(\d{3})", line)
+    if not m:
+        return None
+    month, day, hour, minute, second, ms = (int(g) for g in m.groups())
+    return datetime.datetime(year, month, day, hour, minute, second, ms * 1000)
+
+
+def dnsmasq_time(line: str, year: int) -> datetime.datetime | None:
+    m = re.match(r"([A-Z][a-z]{2}) +(\d{1,2}) (\d\d):(\d\d):(\d\d) ", line)
+    if not m or m.group(1) not in MONTHS:
+        return None
+    return datetime.datetime(year, MONTHS[m.group(1)], int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)))
+
+
+def connected_windows(logcat: list[str], year: int) -> tuple[list[tuple[datetime.datetime, datetime.datetime]], list[datetime.datetime]]:
+    """From the VPN layer's log: when apps were routed into the VPN (Connected until Disconnect, revocation or the
+    service's end), and when each connection attempt began (the app looks up a proxy's name right then)."""
+    windows, starts, begun = [], [], None
+    for line in logcat:
+        m = re.search(r"ProxyFlowVpn\s*:\s*(.*)$", line)
+        when = logcat_time(line, year) if m else None
+        if when is None:
+            continue
+        event = m.group(1)
+        if event.startswith("connect ") and "no such profile" not in event:
+            starts.append(when)
+        elif event.startswith("connected ") and begun is None:
+            begun = when
+        elif begun is not None and event.startswith(("disconnect", "revoked", "service destroyed")):
+            windows.append((begun, when))
+            begun = None
+    return windows, starts
+
+
+def lookups_while_connected(logcat: list[str], uplink_lines: list[str], year: int) -> tuple[collections.Counter | None, str]:
+    """Names the phone's uplink DNS server was asked for while ProxyFlow was connected (at least MARGIN inside each
+    connected period), or None with the reason when the two clocks cannot be lined up."""
+    windows, starts = connected_windows(logcat, year)
+    if not windows:
+        return None, "no connected period in logcat"
+    queries = []
+    for line in uplink_lines:
+        m = re.search(r"query\[(\w+)\] (\S+) from", line)
+        when = dnsmasq_time(line, year) if m else None
+        if when is not None:
+            queries.append((when, m.group(2).lower().rstrip("."), m.group(1)))
+    # The clocks: each lookup of the proxy's own name follows a connection attempt within a second or two.
+    offsets = []
+    for when, name, _ in queries:
+        if name == PROXY_NAME:
+            before = [start for start in starts if start <= when + MARGIN]
+            offsets.append((when - max(before)).total_seconds() if before else 99.0)
+    offsets.sort()
+    if not offsets or abs(offsets[len(offsets) // 2]) > 3:
+        return None, f"the emulator's and the runner's clocks could not be lined up (lookup offsets {offsets[:5]} s)"
+    inside: collections.Counter = collections.Counter()
+    for when, name, kind in queries:
+        if any(start + MARGIN <= when <= end - MARGIN for start, end in windows):
+            inside[f"{name} {kind}"] += 1
+    span = sum((end - start).total_seconds() for start, end in windows)
+    return inside, f"{len(windows)} connected periods, {span:.0f} s in all"
 
 
 # --- the checks -----------------------------------------------------------------
@@ -258,7 +352,11 @@ def main(argv: list[str]) -> int:
         hits = [name for name, lines in arrived_lines.items() if line in lines]
         if hits:
             problems.append(f"line {line} to {endpoint} had to fail but arrived at {hits}")
-    facts.append("lines: every sent line arrived once where it was sent; no refused line arrived anywhere")
+    line_problems = [p for p in problems if p.startswith(("line ", "sent line "))]
+    if sent and not line_problems:
+        facts.append("lines: every sent line arrived once where it was sent; no refused line arrived anywhere")
+    else:
+        facts.append(f"lines: {len(line_problems)} problems (listed above the facts)")
 
     # Every connection a destination saw came through a proxy.
     squid = after("squid-access.log")
@@ -278,7 +376,9 @@ def main(argv: list[str]) -> int:
     wrong_sni = [line for line in tls_destination if "sni=secure.proxyflow.test" not in line]
     if wrong_sni:
         problems.append(f"the HTTPS destination saw other names: {wrong_sni[:3]}")
-    facts.append(f"HTTPS destination: {len(tls_destination)} TLS sessions, every one for secure.proxyflow.test (the client's own TLS, end to end)")
+        facts.append(f"HTTPS destination: {len(tls_destination)} TLS sessions, {len(wrong_sni)} not for secure.proxyflow.test")
+    else:
+        facts.append(f"HTTPS destination: {len(tls_destination)} TLS sessions, every one for secure.proxyflow.test (the client's own TLS, end to end)")
 
     udp = after("udp-sink.log")
     facts.append(f"UDP sinks: {len(udp)} datagrams arrived")
@@ -310,6 +410,19 @@ def main(argv: list[str]) -> int:
     )
     if direct_lab:
         problems.append(f"the phone looked up lab destination names itself, around the proxy: {direct_lab}")
+    inside, how = lookups_while_connected(logcat, after("dns-uplink.log"), datetime.datetime.now(datetime.timezone.utc).year)
+    if inside is None:
+        facts.append(f"lookups on the uplink while connected: not lined up ({how})")
+    else:
+        own = sum(count for key, count in inside.items() if key.startswith(PROXY_NAME + " "))
+        rest = collections.Counter({key: count for key, count in inside.items() if not key.startswith(PROXY_NAME + " ")})
+        facts.append(
+            f"lookups on the uplink while connected ({how}): {own} of the proxy's own name; others: {dict(rest.most_common(12)) or 'none'} "
+            "(lookups Android makes outside VPNs, such as its network checks, appear here; lab names never may)"
+        )
+    refused_probes = [int(m.group(1)) for line in logcat if (m := re.search(r"ProxyFlowE2E\s*:\s*engine local_refused=(\d+)", line))]
+    if refused_probes:
+        facts.append(f"TCP to ProxyFlow's own addresses refused on the phone (Android's DNS-over-TLS probe, engine local_refused): {max(refused_probes)}")
     if not uplink_dns:
         facts.append(
             "the phone's uplink DNS server got no query after the lab's checks: this image's uplink does not use it "
@@ -317,7 +430,7 @@ def main(argv: list[str]) -> int:
         )
 
     # The gate: a connection forwarded to a TLS port opens with a TLS record.
-    gate_mode, gate_plain, gate_tls = "", [], 0
+    gate_mode, gate_plain, gate_tls, gate_empty = "", [], 0, 0
     for line in after("gate.log"):
         m = re.search(r"mode forward 127\.0\.0\.1:(\d+)", line)
         if m:
@@ -327,12 +440,17 @@ def main(argv: list[str]) -> int:
         if m and gate_mode and int(gate_mode) in TLS_PORTS:
             if m.group(1).startswith("16 03"):
                 gate_tls += 1
+            elif m.group(1).strip() == "-":
+                gate_empty += 1  # closed before sending anything (a dial cancelled by a disconnect): no plaintext either
             else:
                 gate_plain.append(line[-60:])
     if gate_plain:
         facts.append(f"gate: plaintext to a TLS front: {gate_plain[:3]}")
     else:
-        facts.append(f"gate: {gate_tls} connections to a TLS front, every one opening with a TLS record")
+        facts.append(
+            f"gate: {gate_tls} connections to a TLS front, every one opening with a TLS record"
+            + (f" ({gate_empty} more closed before sending anything)" if gate_empty else "")
+        )
     if gate_plain:
         problems.append(f"the app sent plaintext to a TLS proxy through the gate: {gate_plain[:3]}")
     if gate_tls == 0:
@@ -361,13 +479,15 @@ def main(argv: list[str]) -> int:
             continue
         kinds = collections.Counter(target.split(" ", 1)[0] for target in capture.socks_targets.elements())
         lab_dns = {n: c for n, c in capture.dns_names.items() if n in LAB_NAMES}
+        lab_echo = {a: c for a, c in capture.echo_requests.items() if a in LAB_ADDRESSES}
         tls_streams = {f"{port} {kind}": count for (port, kind), count in sorted(capture.tls_port_streams.items())}
         facts.append(
             f"capture {name}: {capture.packets} packets; SOCKS5 CONNECT targets {dict(capture.socks_targets.most_common(8))}; "
             f"HTTP CONNECT targets {dict(capture.connect_targets.most_common(8))}; streams to TLS ports {tls_streams}; "
             f"packets to/from lab addresses {dict(capture.lab_packets) or 0}; SYNs to the LAN destination {capture.lan_syns}; "
-            f"UDP to the gateway's sink port {capture.udp_to_gateway_sink}; DNS queries for lab names {lab_dns or 0}; "
-            f"DNS names queried {len(capture.dns_names)}"
+            f"UDP to lab addresses {dict(capture.udp_to_lab) or 0}; echo requests to lab addresses {lab_echo or 0} "
+            f"(to anywhere: {sum(capture.echo_requests.values())}); IPv6 packets {capture.ipv6_packets}; "
+            f"DNS queries for lab names {lab_dns or 0}; DNS names queried {len(capture.dns_names)}"
         )
         summary.append(
             f"| {name} | {capture.packets} | {dict(kinds)} | {sum(capture.connect_targets.values())} | {tls_streams} | "
@@ -379,7 +499,8 @@ def main(argv: list[str]) -> int:
         for count_name, count in (
             ("packets to or from a lab destination's address", sum(capture.lab_packets.values())),
             ("SYNs straight to the LAN destination 10.0.2.2:8082", capture.lan_syns),
-            ("UDP datagrams to the gateway's UDP sink port", capture.udp_to_gateway_sink),
+            ("UDP datagrams to a lab address (the UDP sinks are 10.99.0.1:9999 and [fd99::1]:9999)", sum(capture.udp_to_lab.values())),
+            ("echo requests (ping) to a lab address", sum(lab_echo.values())),
             ("DNS queries for lab destination names", sum(lab_dns.values())),
         ):
             if count:

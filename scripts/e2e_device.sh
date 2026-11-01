@@ -171,6 +171,10 @@ fi
     echo "uplink: ${UPLINK:-none: the phone never reached the runner} ($((SECONDS - START)) s)"
     echo "routes: $(adb shell ip route 2>&1 | tr -d '\r' | paste -sd ';' -)"
     echo "addresses: $(adb shell ip -o -4 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
+    # IPv6 on the uplink: whether a direct IPv6 packet could leave the phone at all (the captures would show it).
+    echo "IPv6 addresses: $(adb shell ip -o -6 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
+    V6_ROUTES=$(adb shell ip -6 route show table all 2>&1 | tr -d '\r' | grep '^default' | paste -sd ';' -)
+    echo "IPv6 default routes: ${V6_ROUTES:-none}"
 } > "$OUT/guest-network.txt"
 if [ -z "$UPLINK" ]; then
     echo "::error title=Emulator network (API $API)::The phone never reached the runner (10.0.2.2), over mobile data or Wi-Fi, so no connection to the proxies can work. $(paste -sd ' ' "$OUT/guest-network.txt")"

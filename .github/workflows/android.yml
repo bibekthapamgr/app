@@ -202,6 +202,12 @@ jobs:
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: python3 scripts/check_release_manifest.py
 
+      # The checks the device jobs' evidence rests on, against synthetic packet captures and lab logs:
+      # each kind of leak they look for must be found, and a clean run must pass.
+      - name: The end-to-end evidence scripts' own tests (synthetic captures and logs)
+        if: ${{ !cancelled() }}
+        run: python3 -m unittest discover -s scripts/tests -v
+
       # Fails when a screen no longer matches its copy in app/screenshots, and records the new
       # image there; the screenshots job publishes it for review (ci-screenshots/<branch>).
       - name: Screenshots of every screen, light and dark, match app/screenshots (Roborazzi)

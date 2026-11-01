@@ -1,0 +1,242 @@
+"""Tests of the end-to-end evidence scripts (m6_evidence.py, with m5_evidence.py's helpers) on synthetic packet
+captures and lab logs, so that a check that can never fail, or misses a kind of packet, shows here first.
+
+Run: python3 -m unittest discover -s scripts/tests -v
+"""
+
+from __future__ import annotations
+
+import contextlib
+import io
+import ipaddress
+import os
+import struct
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import m6_evidence  # noqa: E402
+
+PHONE4, PHONE6, GATEWAY = "10.0.2.15", "fec0::15", "10.0.2.2"
+
+
+def addr(text: str) -> bytes:
+    return ipaddress.ip_address(text).packed
+
+
+def ipv4(src: str, dst: str, proto: int, payload: bytes, fragment_offset: int = 0) -> bytes:
+    header = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 20 + len(payload), 1, fragment_offset, 64, proto, 0, addr(src), addr(dst))
+    return header + payload
+
+
+def ipv6(src: str, dst: str, next_header: int, payload: bytes, extensions: list[tuple[int, bytes]] | None = None) -> bytes:
+    """extensions: (header type, body) pairs in order; each body is padded to its header's 8-byte multiple."""
+    chain, after = b"", next_header
+    for kind, body in reversed(extensions or []):
+        if kind == 44:
+            block = bytes([after, 0]) + body[:6].ljust(6, b"\0")
+        else:
+            length = -(-(len(body) + 2) // 8) * 8
+            block = bytes([after, length // 8 - 1]) + body.ljust(length - 2, b"\0")
+        chain, after = block + chain, kind
+    rest = chain + payload
+    return struct.pack("!IHBB16s16s", 6 << 28, len(rest), after, 64, addr(src), addr(dst)) + rest
+
+
+def tcp(sport: int, dport: int, payload: bytes = b"", syn: bool = False, seq: int = 1) -> bytes:
+    flags = 0x02 if syn else 0x18
+    return struct.pack("!HHIIBBHHH", sport, dport, seq, 0, 5 << 4, flags, 65535, 0, 0) + payload
+
+
+def udp(sport: int, dport: int, payload: bytes) -> bytes:
+    return struct.pack("!HHHH", sport, dport, 8 + len(payload), 0) + payload
+
+
+ECHO4 = b"\x08\x00\x00\x00\x00\x01\x00\x01ping"
+ECHO6 = b"\x80\x00\x00\x00\x00\x01\x00\x01ping"
+
+
+def dns_query(name: str, kind: int = 1) -> bytes:
+    labels = b"".join(bytes([len(part)]) + part.encode() for part in name.split(".")) + b"\0"
+    return struct.pack("!HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0) + labels + struct.pack("!HH", kind, 1)
+
+
+def socks_connect_by_name(name: str, port: int) -> bytes:
+    return b"\x05\x01\x00\x03" + bytes([len(name)]) + name.encode() + struct.pack("!H", port)
+
+
+def pcap(path: str, packets: list[bytes]) -> None:
+    with open(path, "wb") as f:
+        f.write(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 101))  # raw IP
+        for packet in packets:
+            f.write(struct.pack("<IIII", 0, 0, len(packet), len(packet)) + packet)
+
+
+def capture_of(packets: list[bytes]) -> m6_evidence.Capture:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "c.pcap")
+        pcap(path, packets)
+        return m6_evidence.read_capture(path)
+
+
+# The phone reaching both proxies on the runner, the SOCKS5 proxy asked for a lab name: a capture that covers the uplink.
+UPLINK = [
+    ipv4(PHONE4, GATEWAY, 6, tcp(40000, 1080, syn=True)),
+    ipv4(PHONE4, GATEWAY, 6, tcp(40001, 3128, syn=True)),
+    ipv4(PHONE4, GATEWAY, 6, tcp(40000, 1080, socks_connect_by_name("proxyflow.test", 8080), seq=2)),
+]
+
+
+class CaptureTest(unittest.TestCase):
+    def test_ipv6_packets_to_the_lab_are_seen(self):
+        c = capture_of(
+            [
+                ipv6(PHONE6, "fd99::1", 6, tcp(40000, 8080, syn=True)),
+                ipv6(PHONE6, "fd99::1", 17, udp(40001, 9999, b"x")),
+                ipv6(PHONE6, "fd99::1", 58, ECHO6),
+            ]
+        )
+        self.assertEqual({"fd99::1": 3}, dict(c.lab_packets))
+        self.assertEqual({"[fd99::1]:9999": 1}, dict(c.udp_to_lab))
+        self.assertEqual({"fd99::1": 1}, dict(c.echo_requests))
+        self.assertEqual(3, c.ipv6_packets)
+
+    def test_extension_headers_are_walked(self):
+        c = capture_of(
+            [
+                ipv6(PHONE6, "fd99::1", 17, udp(40001, 9999, b"x"), extensions=[(0, b"\x01\x02")]),
+                ipv6(PHONE6, "fd99::1", 58, ECHO6, extensions=[(0, b""), (60, b"\x01\x04\0\0\0\0")]),
+                ipv6(PHONE6, "fd99::1", 58, ECHO6, extensions=[(44, b"\x00\x00\x00\x00\x00\x01")]),  # an atomic fragment
+            ]
+        )
+        self.assertEqual({"[fd99::1]:9999": 1}, dict(c.udp_to_lab))
+        self.assertEqual({"fd99::1": 2}, dict(c.echo_requests))
+        self.assertEqual(3, c.lab_packets["fd99::1"])
+
+    def test_later_fragments_count_only_as_packets(self):
+        c = capture_of([ipv4(PHONE4, "10.99.0.1", 1, b"\x08rest-of-a-big-ping", fragment_offset=185)])
+        self.assertEqual({"10.99.0.1": 1}, dict(c.lab_packets))
+        self.assertEqual({}, dict(c.echo_requests))
+
+    def test_ipv4_pings_and_udp_to_the_lab_are_seen(self):
+        c = capture_of([ipv4(PHONE4, "10.99.0.1", 1, ECHO4), ipv4(PHONE4, "10.99.0.1", 17, udp(40002, 9999, b"x"))])
+        self.assertEqual({"10.99.0.1": 1}, dict(c.echo_requests))
+        self.assertEqual({"10.99.0.1:9999": 1}, dict(c.udp_to_lab))
+
+    def test_what_the_phone_asked_the_proxies_for(self):
+        c = capture_of(UPLINK + [ipv4(PHONE4, GATEWAY, 6, tcp(40003, 3128, b"CONNECT [fd99::1]:8080 HTTP/1.1\r\n\r\n", seq=2))])
+        self.assertTrue(c.covers_uplink)
+        self.assertEqual({"name proxyflow.test:8080": 1}, dict(c.socks_targets))
+        self.assertEqual({"[fd99::1]:8080": 1}, dict(c.connect_targets))
+
+    def test_plaintext_to_a_tls_proxy_port_is_seen(self):
+        c = capture_of(
+            [
+                ipv4(PHONE4, GATEWAY, 6, tcp(40004, 3129, b"\x16\x03\x01\x00\x05hello", seq=2)),
+                ipv4(PHONE4, GATEWAY, 6, tcp(40005, 3129, b"CONNECT proxyflow.test:8080 HTTP/1.1\r\n", seq=2)),
+            ]
+        )
+        self.assertEqual({(3129, "TLS"): 1, (3129, "plain"): 1}, dict(c.tls_port_streams))
+        self.assertEqual(1, len(c.plaintext_on_tls))
+
+    def test_dns_queries_over_udp_and_tcp(self):
+        query = dns_query("proxyflow.test")
+        c = capture_of(
+            [
+                ipv4(PHONE4, "8.8.8.8", 17, udp(40006, 53, query)),
+                ipv4(PHONE4, "8.8.8.8", 6, tcp(40007, 53, struct.pack("!H", len(query)) + query, seq=2)),
+            ]
+        )
+        self.assertEqual({"proxyflow.test": 2}, dict(c.dns_names))
+
+
+class EvidenceTest(unittest.TestCase):
+    """main() over a small run that passes, and over the same run with one fault at a time."""
+
+    def run_evidence(self, *, capture_extra=(), gate_first="16 03 01", uplink_dns=(), logcat_extra=()) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory() as pf, tempfile.TemporaryDirectory() as out:
+            files = {
+                "log-baseline.properties": "destination.log=0\n",
+                "destination-address.log": "1.0 127.0.0.1:5000 PF6-a-1\n",
+                "squid-access.log": "1.0 3 127.0.0.1 TCP_TUNNEL/200 87 CONNECT 10.99.0.2:8080 pfhttp HIER_DIRECT/10.99.0.2 -\n",
+                "dns-proxies.log": "".join(
+                    f"Nov  1 02:00:00 dnsmasq[1]: 1 127.0.0.1/5000 query[A] {name} from 127.0.0.1\n"
+                    for name in ("proxyflow.test", "proxyflow6.test", "missing.proxyflow.test")
+                ),
+                "dns-uplink.log": "".join(
+                    f"Nov  1 {when} dnsmasq[2]: 1 10.0.2.15/5000 query[A] {name} from 10.0.2.15\n"
+                    for when, name in (entry.split(" ", 1) if " " in entry else ("02:00:00", entry) for entry in uplink_dns)
+                ),
+                "gate.log": f"1.0 mode forward 127.0.0.1:3129\n1.1 connection 1 from 127.0.0.1:4000 mode=forward first={gate_first}\n",
+            }
+            for name, text in files.items():
+                with open(os.path.join(pf, name), "w") as f:
+                    f.write(text)
+            with open(os.path.join(out, "logcat.txt"), "w") as f:
+                f.write("11-01 02:00:00.000   100   100 I ProxyFlowE2E: sent PF6-a-1 to 10.99.0.2:8080\n" + "".join(logcat_extra))
+            host = os.path.join(out, "uplink.pcap")
+            pcap(host, UPLINK + list(capture_extra))
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                status = m6_evidence.main(["m6_evidence.py", "--api", "0", "--pf", pf, "--out", out, "--host-pcap", host])
+            return status, printed.getvalue()
+
+    def test_a_clean_run_passes(self):
+        status, printed = self.run_evidence()
+        self.assertEqual(0, status, printed)
+
+    def test_an_ipv6_packet_to_the_lab_fails(self):
+        status, printed = self.run_evidence(capture_extra=[ipv6(PHONE6, "fd99::1", 6, tcp(40010, 8080, syn=True))])
+        self.assertEqual(1, status)
+        self.assertIn("packets to or from a lab destination's address", printed)
+
+    def test_a_ping_to_the_lab_fails(self):
+        status, printed = self.run_evidence(capture_extra=[ipv6(PHONE6, "fd99::1", 58, ECHO6)])
+        self.assertEqual(1, status)
+        self.assertIn("echo requests (ping) to a lab address", printed)
+
+    def test_udp_to_a_sink_fails(self):
+        status, printed = self.run_evidence(capture_extra=[ipv4(PHONE4, "10.99.0.1", 17, udp(40011, 9999, b"x"))])
+        self.assertEqual(1, status)
+        self.assertIn("UDP datagrams to a lab address", printed)
+
+    def test_plaintext_through_the_gate_to_a_tls_front_fails(self):
+        status, printed = self.run_evidence(gate_first="05 02 00")
+        self.assertEqual(1, status)
+        self.assertIn("plaintext to a TLS proxy through the gate", printed)
+
+    def test_no_tls_connection_through_the_gate_fails(self):
+        status, printed = self.run_evidence(gate_first="-")
+        self.assertEqual(1, status)
+        self.assertIn("no connection went through the gate to a TLS front", printed)
+        self.assertNotIn("plaintext to a TLS proxy", printed)
+
+    def test_a_lab_name_looked_up_on_the_uplink_fails(self):
+        status, printed = self.run_evidence(uplink_dns=["proxyflow.test"])
+        self.assertEqual(1, status)
+        self.assertIn("looked up lab destination names itself", printed)
+
+    def test_lookups_while_connected_are_lined_up_with_the_vpn_log(self):
+        vpn = [
+            "11-01 01:59:59.500   200   210 I ProxyFlowVpn: connect p1\n",
+            "11-01 02:00:01.000   200   210 I ProxyFlowVpn: connected p1\n",
+            "11-01 02:00:10.000   200   210 I ProxyFlowVpn: disconnect\n",
+        ]
+        lookups = ["02:00:00 proxy.proxyflow.test", "02:00:05 mtalk.google.com", "02:00:09 www.google.com", "02:00:20 dl.google.com"]
+        status, printed = self.run_evidence(uplink_dns=lookups, logcat_extra=vpn)
+        self.assertEqual(0, status, printed)
+        # The proxy's name was looked up during the check (lined up with "connect"); only 02:00:05 lies at least 2 s inside
+        # the connected period (02:00:09 is too close to its end, 02:00:20 after it).
+        self.assertIn("lookups on the uplink while connected (1 connected periods, 9 s in all): 0 of the proxy's own name; others: {'mtalk.google.com A': 1}", printed)
+
+    def test_clocks_that_cannot_be_lined_up_are_said(self):
+        vpn = ["11-01 01:00:00.000   200   210 I ProxyFlowVpn: connect p1\n", "11-01 01:00:01.000   200   210 I ProxyFlowVpn: connected p1\n",
+               "11-01 01:00:10.000   200   210 I ProxyFlowVpn: disconnect\n"]
+        status, printed = self.run_evidence(uplink_dns=["02:00:00 proxy.proxyflow.test"], logcat_extra=vpn)
+        self.assertEqual(0, status, printed)
+        self.assertIn("lookups on the uplink while connected: not lined up (the emulator's and the runner's clocks", printed)
+
+
+if __name__ == "__main__":
+    unittest.main()

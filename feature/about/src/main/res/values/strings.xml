@@ -11,7 +11,7 @@
     <string name="about_privacy_on_phone">Profiles stay on this phone. Usernames and passwords are encrypted with an Android Keystore key that is never exported or backed up. A password is only ever sent to the proxy it was saved for.</string>
     <string name="about_privacy_provider">Your proxy provider can see which sites you visit and any unencrypted data.</string>
     <string name="about_section_carry">What goes through your proxy</string>
-    <string name="about_carry_tcp">Websites and most apps use TCP, and their connections go through your proxy. Site names are looked up by your proxy, not by this phone.</string>
+    <string name="about_carry_tcp">Websites and most apps use TCP, and their connections go through your proxy. Site names are looked up by your proxy, not by this phone. An app or Android\'s Private DNS that uses its own encrypted DNS goes through your proxy too, but then your proxy sees addresses instead of names.</string>
     <string name="about_carry_blocked">UDP is blocked, so calls, some games and QUIC fall back to TCP or fail, and ping isn\'t answered. Devices on your local network, like printers, are reached through your proxy too, so usually not at all.</string>
     <string name="about_carry_ipv6">IPv6 addresses work only if your proxy supports IPv6. Names are always answered with IPv4 addresses, and your proxy reaches the site however it can.</string>
     <string name="about_carry_outside">ProxyFlow\'s own connection to your proxy, the lookup of your proxy\'s name, and some of Android\'s own traffic don\'t use the VPN.</string>

@@ -120,12 +120,22 @@ class HomeScreenTest {
         scrolledTo("Via proxy · 42 connections").assertIsDisplayed()
         scrolledTo("Resolved by proxy · 31 names").assertIsDisplayed()
         scrolledTo("Not used").assertIsDisplayed() // the profile uses no TLS to the proxy
-        scrolledTo("3 failed").assertIsDisplayed()
-        scrolledTo("Your proxy couldn't find or reach 2 names\n1 lookup of a kind ProxyFlow doesn't answer").assertIsDisplayed()
+        scrolledTo("2 failed").assertIsDisplayed() // the refused lookup is shown, but is no failure
+        scrolledTo("2 connections to names your proxy couldn't find or reach\n1 lookup of a kind ProxyFlow doesn't answer (TXT, MX…)")
+            .assertIsDisplayed()
         scrolledTo("15 blocked").assertIsDisplayed()
         compose.onNodeWithText("12 UDP packets (ports 443, 3478) · 3 pings", substring = true).performScrollTo().assertIsDisplayed()
         scrolledTo("1 connection timed out").assertIsDisplayed()
         scrolledTo("Last problem: TARGET_UNREACHABLE · the proxy could not reach the host").assertIsDisplayed()
+    }
+
+    @Test
+    fun lookupsRefusedByDesignAreShownWithoutAFailure() {
+        val diagnostics = RoutingDiagnostics(dns = DnsProblems(queriesRefused = 2))
+        show(ready(ConnectionState(ConnectionStatus.Connected, "p1", "Office", connectedSinceMillis = 0), diagnostics = diagnostics))
+        scrolledTo("2 lookups of a kind ProxyFlow doesn't answer (TXT, MX…)").assertIsDisplayed()
+        val failures = compose.onAllNodesWithText("failed", substring = true).fetchSemanticsNodes()
+        assertTrue("no failure shown: $failures", failures.isEmpty())
     }
 
     @Test

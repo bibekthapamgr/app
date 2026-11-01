@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import ipaddress
 import os
 import re
 import struct
@@ -72,9 +73,8 @@ class Capture:
 
 
 def ip_of(raw: bytes) -> str:
-    if len(raw) == 4:
-        return ".".join(str(b) for b in raw)
-    return ":".join(f"{raw[i] << 8 | raw[i + 1]:x}" for i in range(0, 16, 2))
+    """An address in its canonical text form (IPv6 compressed, "fd99::1"), the form the lab's constants use."""
+    return str(ipaddress.ip_address(bytes(raw)))
 
 
 def dns_name(payload: bytes) -> str | None:

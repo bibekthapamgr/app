@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -51,11 +52,11 @@ func (e *Engine) handleTCP(r *tcp.ForwarderRequest) {
 		// DNS over TCP, to any address, is answered here like DNS over UDP (ADR-0011):
 		// the query never leaves the phone, and the name still reaches the proxy as a name.
 		select {
-		case e.dnsSem <- struct{}{}:
-			defer func() { <-e.dnsSem }()
+		case e.tcpDNS <- struct{}{}:
+			defer func() { <-e.tcpDNS }()
 		default:
 			completed = true
-			e.stats.dnsDropped.Add(1) // too many DNS clients at once: refused, the app retries
+			e.stats.dnsDropped.Add(1) // too many DNS-over-TCP clients at once: refused, the app retries
 			r.Complete(true)
 			return
 		}
@@ -72,7 +73,7 @@ func (e *Engine) handleTCP(r *tcp.ForwarderRequest) {
 		e.serveDNSOverTCP(conn, cleanup)
 		return
 	}
-	if e.cfg.FakeDNS.Pool.Reserved(dst) {
+	if e.cfg.FakeDNS.Pool.Reserved(dst) || e.isLocal(dst) {
 		// ProxyFlow's own addresses (the TUN's, the DNS server's): there is nothing to
 		// proxy. Android's opportunistic DNS-over-TLS probe to the VPN's DNS server (port
 		// 853) ends here, and then uses plain DNS. Not a failure of any app's connection.
@@ -269,4 +270,14 @@ func setKeepalive(ep tcpip.Endpoint) {
 	intvl := tcpip.KeepaliveIntervalOption(30 * time.Second)
 	_ = ep.SetSockOpt(&intvl)
 	_ = ep.SetSockOptInt(tcpip.KeepaliveCountOption, 9)
+}
+
+// isLocal reports whether dst is one of the TUN's own addresses outside the placeholder pool.
+func (e *Engine) isLocal(dst netip.Addr) bool {
+	for _, a := range e.cfg.LocalAddrs {
+		if a == dst {
+			return true
+		}
+	}
+	return false
 }

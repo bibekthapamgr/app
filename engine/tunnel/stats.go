@@ -137,7 +137,7 @@ type Snapshot struct {
 	IdleTimeouts          int64            `json:"idle_timeouts"`
 	RecoveredPanics       int64            `json:"recovered_panics"`
 	InFlightDrops         uint64           `json:"in_flight_drops"`   // SYNs dropped at MaxInFlight (the app retries)
-	DNSDropped            int64            `json:"dns_dropped"`       // DNS sockets refused at MaxDNSFlows
+	DNSDropped            int64            `json:"dns_dropped"`       // DNS sockets refused at MaxDNSFlows, DNS-over-TCP connections at MaxDNSOverTCP
 	DNSOverTCP            int64            `json:"dns_tcp_queries"`   // DNS queries answered over TCP (port 53)
 	ProxyTimeouts         int64            `json:"proxy_timeouts"`    // connecting to the proxy or its handshake timed out
 	LocalRefused          int64            `json:"local_refused"`     // TCP to ProxyFlow's own addresses (not DNS), refused
