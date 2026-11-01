@@ -95,7 +95,7 @@ class VpnConsentTest {
         press(By.res("android", "button1"), "(?i)ok")
 
         waitForText("Connected", CONNECT_TIMEOUT_MS)
-        waitForText("Traffic is going through your proxy")
+        waitForText("Apps' TCP connections go through your proxy")
         eventually("the notification says Connected", diagnose = { Diagnostics.report(app) }) {
             app.notificationTitle(ProxyFlowVpnService.STATUS_NOTIFICATION_ID) == "Connected"
         }

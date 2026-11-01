@@ -2,10 +2,17 @@ package app.proxyflow.core.vpn
 
 import app.proxyflow.core.engine.AndroidEnginePlatform
 import app.proxyflow.core.engine.EngineSecret
+import app.proxyflow.core.engine.EngineState
+import app.proxyflow.core.engine.EngineStats
 import app.proxyflow.core.engine.ProxyEngine
 import app.proxyflow.core.engine.toEngineProfile
 import app.proxyflow.core.model.ConnectionError
+import app.proxyflow.core.model.DnsProblems
 import app.proxyflow.core.model.ProxyProfile
+import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.TlsProblems
+import app.proxyflow.core.model.UnsupportedTraffic
+import javax.net.ssl.X509TrustManager
 
 /**
  * The packet engine as the session drives it: [ProxyEngine] in the app, a fake
@@ -41,6 +48,12 @@ interface TunnelEngine {
 
     /** Stops the engine and waits for it; it never closes the TUN descriptor. Safe at any time. */
     fun stop()
+
+    /**
+     * The running engine's counters as Home's diagnostics (ADR-0011), or null when no engine
+     * runs or they can't be read. Unlike the other calls, safe from any thread at any time.
+     */
+    fun diagnostics(): RoutingDiagnostics? = null
 }
 
 /**
@@ -59,8 +72,19 @@ data class PreflightAnswer(val ok: Boolean, val code: String? = null, val detail
     val error: ConnectionError get() = ConnectionError(code ?: ConnectionError.INTERNAL, detail)
 }
 
-/** [TunnelEngine] on the real engine (libgojni.so, loaded on first use). */
-class ProxyTunnelEngine(private val engine: ProxyEngine = ProxyEngine()) : TunnelEngine {
+/**
+ * [TunnelEngine] on the real engine (libgojni.so, loaded on first use).
+ *
+ * @param trust decides whether a TLS proxy's certificate is trusted, asked once per check and
+ *   per engine start: the platform's trust manager (system CAs, Android's distrust rules, the
+ *   app's network security config; ADR-0005). Only the device tests replace it, with a
+ *   platform trust manager whose anchors include their run's test CA (ADR-0011); nothing in
+ *   the app does.
+ */
+class ProxyTunnelEngine(
+    private val engine: ProxyEngine = ProxyEngine(),
+    private val trust: () -> X509TrustManager = { AndroidEnginePlatform.systemTrustManager() },
+) : TunnelEngine {
     override fun tunConfig(): TunConfig = TunConfig.from(engine.networkPlan())
 
     override fun probe(
@@ -70,7 +94,13 @@ class ProxyTunnelEngine(private val engine: ProxyEngine = ProxyEngine()) : Tunne
         timeoutMillis: Long,
         protect: (Int) -> Boolean,
     ): PreflightAnswer {
-        val result = engine.probe(profile.toEngineProfile(), secret, target, timeoutMillis, AndroidEnginePlatform(protect))
+        val result = engine.probe(
+            profile.toEngineProfile(),
+            secret,
+            target,
+            timeoutMillis,
+            AndroidEnginePlatform(protect, trustManager = trust()),
+        )
         return PreflightAnswer(ok = result.ok, code = result.code, detail = result.detail)
     }
 
@@ -84,6 +114,7 @@ class ProxyTunnelEngine(private val engine: ProxyEngine = ProxyEngine()) : Tunne
     ) {
         val platform = AndroidEnginePlatform(
             protector = protect,
+            trustManager = trust(),
             onEvent = { event ->
                 if (event.type == ENGINE_FAILED) {
                     onFailure(ConnectionError(event.code ?: ConnectionError.ENGINE_STOPPED, event.detail))
@@ -96,8 +127,52 @@ class ProxyTunnelEngine(private val engine: ProxyEngine = ProxyEngine()) : Tunne
 
     override fun stop() = engine.stop()
 
+    override fun diagnostics(): RoutingDiagnostics? =
+        runCatching { engine.stats() }.getOrNull()?.takeIf { it.state == EngineState.Running }?.toDiagnostics()
+
     private companion object {
         /** tunnel.EvEngineFailed: the packet loop ended without Stop. */
         const val ENGINE_FAILED = "engine_failed"
     }
 }
+
+private val TLS_CODES = setOf("TLS_UNTRUSTED", "TLS_HOSTNAME", "TLS_EXPIRED", "TLS_HANDSHAKE")
+
+/** The engine's counters as Home's diagnostics (ADR-0011): counts only, no destinations. */
+internal fun EngineStats.toDiagnostics(): RoutingDiagnostics {
+    fun Map<String, Long>.count(key: String) = this[key] ?: 0L
+    val tlsFailures = TLS_CODES.sumOf { failures.count(it) }
+    // The engine keeps the last proxy-level failure; when a later one of another kind replaced a
+    // TLS failure, the TLS code seen most often stands for them.
+    val lastTls = lastProxyError?.code?.takeIf { it in TLS_CODES }
+        ?: TLS_CODES.filter { failures.count(it) > 0 }.maxByOrNull { failures.count(it) }
+    return RoutingDiagnostics(
+        connectionsOpened = tcpOpened,
+        // Different names during this connection: dns["mapped"] counts every lookup, repeats too, and the pool behind
+        // fakeDnsMappings is shared by every engine in the process.
+        namesForProxy = dnsNames.toLong(),
+        ipv6LookupsAnsweredEmpty = dns.count("nodata"),
+        tls = TlsProblems(failures = tlsFailures, lastCode = lastTls.takeIf { tlsFailures > 0 }),
+        dns = DnsProblems(
+            proxyNameLookups = failures.count("PROXY_DNS_FAILED"),
+            namesNotReached = hostnameFailures.count("TARGET_UNREACHABLE"),
+            queriesRefused = dns.count("refused") + dns.count("formerr"),
+            lookupsDropped = dns.count("exhausted") + dnsDropped,
+            staleAddresses = failures.count("STALE_DNS_MAPPING"),
+        ),
+        unsupported = UnsupportedTraffic(
+            udpBlocked = udpRejected,
+            udpTopPorts = udpRejectedPorts.entries
+                .mapNotNull { (port, count) -> port.toIntOrNull()?.let { it to count } }
+                .sortedWith(compareByDescending<Pair<Int, Long>> { it.second }.thenBy { it.first })
+                .take(TOP_PORTS)
+                .map { it.first },
+            pingsDropped = icmpEchoRequestsDropped,
+        ),
+        proxyTimeouts = proxyTimeouts,
+        connectionsFailed = tcpFailed,
+        lastProblem = lastFailure?.let { ConnectionError(it.code, it.detail) },
+    )
+}
+
+private const val TOP_PORTS = 3

@@ -10,8 +10,10 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"os"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -286,6 +288,43 @@ func TestHandshakeTimeout(t *testing.T) {
 			t.Fatalf("%s: handshake timeout not enforced (%v)", kind, el)
 		}
 		waitFor(t, func() bool { return silent.Active() == 0 }, "the timed-out proxy connection to be closed")
+	}
+}
+
+// The app's diagnostics count proxy timeouts (IsTimeout): connecting to the proxy or
+// its handshake took too long. Other failures, and a slow lookup of the proxy's own
+// name (a DNS failure), are not timeouts.
+func TestTimeoutsAreTold(t *testing.T) {
+	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	canceled, cancel2 := context.WithCancel(context.Background())
+	cancel2()
+	timeouts := map[string]error{
+		"connect deadline":         connectCtxErr(expired),
+		"connect timeout error":    classifyConnectError(os.ErrDeadlineExceeded),
+		"connect without an error": classifyConnectError(nil),
+		"handshake deadline":       handshakeCtxErr(expired),
+		"handshake timeout error":  classifyHandshakeError(context.Background(), os.ErrDeadlineExceeded),
+		"TLS handshake timeout":    classifyTLSError(os.ErrDeadlineExceeded),
+	}
+	for name, err := range timeouts {
+		if !IsTimeout(err) || !CodeOf(err).IsProxyLevel() {
+			t.Errorf("%s: %v is not told as a proxy timeout", name, err)
+		}
+	}
+	others := map[string]error{
+		"refused":           classifyConnectError(syscall.ECONNREFUSED),
+		"no route":          classifyConnectError(syscall.ENETUNREACH),
+		"canceled connect":  connectCtxErr(canceled),
+		"proxy name lookup": newErr(CodeProxyDNS, "looking up the proxy host timed out", context.DeadlineExceeded),
+		"sign-in":           newErr(CodeAuthFailed, "rejected", nil),
+		"plain error":       errors.New("timeout"),
+		"nil":               nil,
+	}
+	for name, err := range others {
+		if IsTimeout(err) {
+			t.Errorf("%s: %v is told as a proxy timeout", name, err)
+		}
 	}
 }
 

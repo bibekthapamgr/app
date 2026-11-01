@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import android.system.Os
 import android.util.Log
 import androidx.test.core.app.ApplicationProvider
@@ -24,6 +25,8 @@ import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.vpn.ProxyFlowVpnService
 import java.io.File
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -40,7 +43,7 @@ import org.junit.Assume.assumeTrue
 
 /**
  * What the CI runner set up for the end-to-end tests (.github/workflows/android.yml,
- * scripts/m5_device_env.sh): a Dante SOCKS5 proxy and a Squid HTTP proxy, both with
+ * scripts/e2e_env.sh): a Dante SOCKS5 proxy and a Squid HTTP proxy, both with
  * sign-in, a proxy that accepts connections and never answers, a closed port, a
  * destination server reachable only by name through the proxies, and a sink beside it
  * that only lines sent while traffic is held go to. The runner writes it
@@ -65,12 +68,18 @@ data class E2eConfig(
     companion object {
         private const val FILE = "/data/local/tmp/proxyflow-e2e.properties"
 
-        /** The runner's setup, or the test is skipped where there is none (a developer's device). */
-        fun load(): E2eConfig {
+        /** The runner's setup as keys and values, or the test is skipped where there is none (a developer's device). */
+        fun properties(): Map<String, String> {
             val values = Shell.run("cat $FILE").lines().mapNotNull { line ->
                 line.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0].trim() to it[1].trim() }
             }.toMap()
             assumeTrue("no proxy setup on this device ($FILE)", "socks.port" in values)
+            return values
+        }
+
+        /** The runner's setup, or the test is skipped where there is none (a developer's device). */
+        fun load(): E2eConfig {
+            val values = properties()
             fun value(key: String) = checkNotNull(values[key]) { "$FILE has no $key" }
             return E2eConfig(
                 proxyHost = value("proxy.host"),
@@ -295,22 +304,70 @@ class App {
 
     /**
      * Connects [profileId] and returns the Connected state. An attempt that the phone's own uplink
-     * failed ("no route to the proxy": the emulator's network was gone for a moment, as the API 35
-     * image's sometimes is) is tried once more and logged, and the evidence counts these; any other
-     * failure, or a second one, fails the test at once.
+     * failed ("no route to the proxy": the emulator's network did not reach the runner for a moment,
+     * as the API 34 and 35 images' sometimes do) is tried again once the proxy answers this process
+     * directly (outside the VPN), at most [UPLINK_RETRIES] times, and logged; the evidence counts
+     * these. Any other failure fails the test at once.
      */
     fun connect(profileId: String): ConnectionState {
-        val ended = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
-        if (ended.status == ConnectionStatus.Connected) return ended
-        if (ended.error != UPLINK_DROPPED) throw AssertionError("connecting failed; state is $ended")
-        // The failed attempt leaves nothing behind: a first attempt no interface, a switch only the one it holds.
-        if (ended.status == ConnectionStatus.Disconnected) {
-            eventually("the failed attempt left no interface", diagnose = { Diagnostics.report(this) }) { Descriptors.tun().isEmpty() }
+        var ended = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
+        var retries = 0
+        while (ended.status != ConnectionStatus.Connected) {
+            if (ended.error != UPLINK_DROPPED) throw AssertionError("connecting failed; state is $ended")
+            if (retries == UPLINK_RETRIES) throw AssertionError("connecting failed ${retries + 1} times; state is $ended")
+            // The failed attempt leaves nothing behind: a first attempt no interface, a switch only the one it holds.
+            if (ended.status == ConnectionStatus.Disconnected) {
+                eventually("the failed attempt left no interface", diagnose = { Diagnostics.report(this) }) { Descriptors.tun().isEmpty() }
+            }
+            retries++
+            val waited = ended.profile?.let { awaitProxy(it.host, it.port) }
+            Log.i(TAG, "uplink dropped: connecting again (retry $retries; the proxy answered this process again after $waited ms)")
+            ended = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
         }
-        Log.i(TAG, "uplink dropped: connecting again")
-        val again = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
-        if (again.status != ConnectionStatus.Connected) throw AssertionError("connecting failed twice; state is $again")
-        return again
+        logAndroidsView()
+        return ended
+    }
+
+    /**
+     * Android's own account of ProxyFlow's VPN, for the evidence (scripts/m6_evidence.py): which uids it routes into the
+     * VPN and whether it lets apps bypass it (Android 13 and later say), from the VPN network's capabilities, and its DNS
+     * servers, with ProxyFlow's own uid. Android tells only callers with the shell's network permission which uids a
+     * network serves, so the shell's permissions are borrowed for the call. Logged only: the evidence checks it.
+     */
+    @Suppress("DEPRECATION") // allNetworks: see VpnNetworks
+    private fun logAndroidsView() {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val view = runCatching {
+            automation.adoptShellPermissionIdentity()
+            try {
+                val connectivity = context.getSystemService(ConnectivityManager::class.java)
+                val vpn = connectivity.allNetworks.firstOrNull {
+                    connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+                }
+                if (vpn == null) {
+                    "no VPN network"
+                } else {
+                    val capabilities = connectivity.getNetworkCapabilities(vpn).toString()
+                    val dns = connectivity.getLinkProperties(vpn)?.dnsServers.orEmpty().joinToString(" ") { it.hostAddress.orEmpty() }
+                    val fields = VIEW_FIELDS.mapNotNull { it.find(capabilities)?.value }
+                    (fields.ifEmpty { listOf(capabilities.take(VIEW_CHARS)) } + "DnsAddresses: [ $dns ]").joinToString(" | ")
+                }
+            } finally {
+                automation.dropShellPermissionIdentity()
+            }
+        }.getOrElse { "unreadable: $it" }
+        Log.i(TAG, "android's view of the VPN (own uid ${Process.myUid()}): $view")
+    }
+
+    /** Waits until [host]:[port] accepts a connection from this process, which ProxyFlow's VPN leaves out; the time taken. */
+    private fun awaitProxy(host: String, port: Int): Long {
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < UPLINK_WAIT_MS) {
+            val reached = runCatching { Socket().use { it.connect(InetSocketAddress(host, port), 1_000) } }.isSuccess
+            if (reached) return System.currentTimeMillis() - start
+            Thread.sleep(500)
+        }
+        return -1
     }
 
     private fun ConnectionState.connectedOrFailed() = status == ConnectionStatus.Connected ||
@@ -360,8 +417,18 @@ class App {
 
 private const val TAG = "ProxyFlowE2E"
 
+/** The parts of the VPN network's capabilities (their text) the evidence reads. */
+private val VIEW_FIELDS = listOf(
+    Regex("Uids: <[^>]*>"),
+    Regex("OwnerUid: \\d+"),
+    Regex("VpnTransportInfo\\{[^}]*\\}"),
+)
+private const val VIEW_CHARS = 600
+
 /** What the engine reports when the phone has no route to the proxy at all: its own uplink is down. */
 private val UPLINK_DROPPED = ConnectionError("PROXY_UNREACHABLE", "no route to the proxy")
+private const val UPLINK_RETRIES = 2
+private const val UPLINK_WAIT_MS = 15_000L
 
 /** How long a test's setup waits for an earlier test's VPN service and interface to go. */
 const val SETTLE_BEFORE_TEST_MS = 30_000L

@@ -70,6 +70,7 @@ const (
 	DefaultMaxConns         = 1024
 	DefaultMaxInFlight      = 512
 	DefaultMaxDNSFlows      = 256
+	DefaultMaxDNSOverTCP    = 32
 	DefaultDialTimeout      = 15 * time.Second
 	DefaultIdleTimeout      = 5 * time.Minute
 	DefaultDNSIdleTimeout   = 2 * time.Second
@@ -87,9 +88,16 @@ type Config struct {
 	Dialer  TunnelDialer
 	FakeDNS *fakedns.Responder // required: DNS never leaves the device directly
 
-	MaxConns       int           // concurrent TCP flows, including ones being set up (default 1024)
-	MaxInFlight    int           // TCP handshakes the stack holds open while tunnels are set up (default 512)
-	MaxDNSFlows    int           // concurrent DNS client sockets (default 256)
+	MaxConns    int // concurrent TCP flows, including ones being set up (default 1024)
+	MaxInFlight int // TCP handshakes the stack holds open while tunnels are set up (default 512)
+	MaxDNSFlows int // concurrent DNS client sockets (default 256)
+	// MaxDNSOverTCP bounds DNS-over-TCP connections apart from MaxDNSFlows, so that
+	// connections an app keeps open cannot take the slots DNS over UDP needs (default 32).
+	MaxDNSOverTCP int
+	// LocalAddrs are the TUN's own addresses outside the placeholder pool (its IPv6
+	// address): like the pool's reserved addresses, TCP to them other than DNS is
+	// refused on the phone, there being nothing to proxy (ADR-0011).
+	LocalAddrs     []netip.Addr
 	DialTimeout    time.Duration // whole tunnel set-up per flow (default 15 s)
 	IdleTimeout    time.Duration // per-flow idle timeout, both directions together (default 5 min)
 	DNSIdleTimeout time.Duration // per-DNS-socket idle timeout (default 2 s)
@@ -155,6 +163,7 @@ type Engine struct {
 	stats   stats
 	sem     chan struct{} // MaxConns slots
 	dnsSem  chan struct{} // MaxDNSFlows slots
+	tcpDNS  chan struct{} // MaxDNSOverTCP slots
 	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup // flow goroutines, only added under mu while running
@@ -194,6 +203,7 @@ func New(cfg Config) (*Engine, error) {
 	setDefault(&cfg.MaxConns, DefaultMaxConns)
 	setDefault(&cfg.MaxInFlight, DefaultMaxInFlight)
 	setDefault(&cfg.MaxDNSFlows, DefaultMaxDNSFlows)
+	setDefault(&cfg.MaxDNSOverTCP, DefaultMaxDNSOverTCP)
 	setDefault(&cfg.RelayBufferBytes, DefaultRelayBufferBytes)
 	setDefault(&cfg.TCPBufferBytes, DefaultTCPBufferBytes)
 	if cfg.TCPBufferBytes < 4<<10 {
@@ -217,7 +227,7 @@ func New(cfg Config) (*Engine, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	e := &Engine{
-		cfg: cfg, sem: make(chan struct{}, cfg.MaxConns), dnsSem: make(chan struct{}, cfg.MaxDNSFlows),
+		cfg: cfg, sem: make(chan struct{}, cfg.MaxConns), dnsSem: make(chan struct{}, cfg.MaxDNSFlows), tcpDNS: make(chan struct{}, cfg.MaxDNSOverTCP),
 		ctx: ctx, cancel: cancel, flows: map[uint64]*flow{}, stopped: make(chan struct{}),
 	}
 	size := cfg.RelayBufferBytes

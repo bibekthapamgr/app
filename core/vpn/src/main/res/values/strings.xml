@@ -10,13 +10,13 @@
 
     <string name="vpn_notification_connecting">Connecting…</string>
     <string name="vpn_notification_checking_proxy">Checking proxy — TLS and sign-in</string>
-    <string name="vpn_notification_starting_protection">Starting protection</string>
+    <string name="vpn_notification_starting_protection">Starting the VPN</string>
     <string name="vpn_notification_reconnecting">Reconnecting… traffic paused</string>
-    <string name="vpn_notification_reconnecting_text">Nothing is sent around your proxy.</string>
+    <string name="vpn_notification_reconnecting_text">ProxyFlow sends nothing around your proxy.</string>
     <string name="vpn_notification_connected">Connected</string>
-    <string name="vpn_notification_connected_text">Traffic is going through your proxy · UDP blocked</string>
+    <string name="vpn_notification_connected_text">Apps\' TCP goes through your proxy · UDP and ping blocked</string>
     <string name="vpn_notification_blocked">Traffic blocked</string>
-    <string name="vpn_notification_blocked_engine">Protection stopped unexpectedly. Apps stay offline until you restart it or disconnect.</string>
+    <string name="vpn_notification_blocked_engine">ProxyFlow stopped unexpectedly. Apps stay offline until you restart it or disconnect.</string>
     <string name="vpn_notification_blocked_text">ProxyFlow couldn\'t connect to your proxy. Apps stay offline until you try again or disconnect.</string>
     <string name="vpn_notification_blocked_profile_deleted">The profile this connection used was deleted. Apps stay offline until you disconnect.</string>
     <string name="vpn_notification_disconnected">Not connected</string>

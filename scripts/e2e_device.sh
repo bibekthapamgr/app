@@ -1,27 +1,39 @@
 #!/usr/bin/env bash
 # Runs inside reactivecircus/android-emulator-runner (one line in the workflow, as
 # the action runs each script line on its own): every module's device tests, with
-# the M5 end-to-end setup pushed to the emulator and the phone's uplink captured
-# from inside it when the image has tcpdump. Afterwards scripts/m5_evidence.py
-# reads what this leaves in $RUNNER_TEMP/m5-api<level>.
+# the end-to-end lab's setup (scripts/e2e_env.sh) and its CA certificate pushed to the
+# emulator and the phone's uplink captured from inside it when the image has tcpdump.
+# Afterwards scripts/m5_evidence.py and scripts/m6_evidence.py read what this leaves in
+# $RUNNER_TEMP/m5-api<level>.
 #
-# Usage: m5_device_e2e.sh <api level>
+# Usage: e2e_device.sh <api level>
 set -uo pipefail
 
 API="$1"
 OUT="$RUNNER_TEMP/m5-api$API"
 mkdir -p "$OUT"
 
-# The tests read the proxies' addresses and the run's passwords from here (as the shell user).
+# The tests read the lab's addresses and the run's passwords from here (as the shell user), and the lab's CA
+# certificate, which the TLS tests trust only where a test says so (ADR-0011).
 adb push /tmp/pf/e2e.properties /data/local/tmp/proxyflow-e2e.properties >/dev/null
 adb shell chmod 644 /data/local/tmp/proxyflow-e2e.properties
+adb push /tmp/pf/pki/ca.crt /data/local/tmp/proxyflow-ca.pem >/dev/null
+adb shell chmod 644 /data/local/tmp/proxyflow-ca.pem
 
 # Every adb call that could wait for a wedged device is bounded, so the logs below are always collected.
 restart_adbd() {
     timeout 30 adb "$1" >/dev/null 2>&1 || return 1
-    sleep 3
-    timeout 120 adb wait-for-device
-    timeout 30 adb shell true >/dev/null 2>&1
+    # adbd restarts as the new user, and the old connection can still look online for a moment (run 41278339766,
+    # attempt 3, API 35: "device offline" when the script then asked whether tcpdump still ran): wait until a command
+    # really runs as that user.
+    local want=0
+    if [ "$1" = unroot ]; then want=2000; fi
+    for _ in $(seq 1 60); do
+        sleep 2
+        timeout 10 adb wait-for-device >/dev/null 2>&1 || continue
+        if [ "$(timeout 10 adb shell id -u 2>/dev/null | tr -d '\r')" = "$want" ]; then return 0; fi
+    done
+    return 1
 }
 
 # The phone's uplink becomes its mobile data, which runs through the emulator's own network
@@ -167,6 +179,10 @@ fi
     echo "uplink: ${UPLINK:-none: the phone never reached the runner} ($((SECONDS - START)) s)"
     echo "routes: $(adb shell ip route 2>&1 | tr -d '\r' | paste -sd ';' -)"
     echo "addresses: $(adb shell ip -o -4 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
+    # IPv6 on the uplink: whether a direct IPv6 packet could leave the phone at all (the captures would show it).
+    echo "IPv6 addresses: $(adb shell ip -o -6 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
+    V6_ROUTES=$(adb shell ip -6 route show table all 2>&1 | tr -d '\r' | grep '^default' | paste -sd ';' -)
+    echo "IPv6 default routes: ${V6_ROUTES:-none}"
 } > "$OUT/guest-network.txt"
 if [ -z "$UPLINK" ]; then
     echo "::error title=Emulator network (API $API)::The phone never reached the runner (10.0.2.2), over mobile data or Wi-Fi, so no connection to the proxies can work. $(paste -sd ' ' "$OUT/guest-network.txt")"
@@ -178,6 +194,13 @@ fi
 # tcpdump is still running after the tests.
 # Not on API 29: adbd does not come back after adb root and unroot there (run 41230555282: the device stayed
 # offline, so no test ran), and its uplink, mobile data or Wi-Fi, all passes the emulator's own capture.
+# The interfaces the phone's running tcpdump processes capture, from their command lines ("none" when none runs).
+tcpdump_interfaces() {
+    local found
+    found=$(timeout 30 adb shell 'for p in $(pidof tcpdump); do tr "\0" " " < /proc/$p/cmdline; echo; done' 2>/dev/null |
+        tr -d '\r' | sed -n 's/.*tcpdump -i \([a-z0-9]*\) .*/\1/p' | sort -u | paste -sd ' ' -)
+    echo "${found:-none}"
+}
 GUEST_CAPTURE=0
 if [ "$API" -lt 34 ]; then
     echo "not on API $API: adbd does not survive adb root and unroot on this image; the emulator's own capture (-tcpdump) sees the whole uplink" > "$OUT/guest-capture.txt"
@@ -193,9 +216,10 @@ else
         adb shell ip -o link show > "$OUT/guest-links.txt" 2>&1
         IFACES="$(awk -F': ' '{print $2}' "$OUT/guest-links.txt" | sed 's/@.*//' | tr -d '\r' | grep -E '^(eth|wlan|radio|rmnet)[0-9]+$' || true)"
         for iface in $IFACES; do
-            # Headers only (160 bytes: IP, TCP, and DNS queries in full): over Wi-Fi, Google Play's updates run through
-            # the VPN too, and a full capture grew too large to pull in time (run 41237942120, API 35).
-            adb shell "setsid tcpdump -i $iface -s 160 -U -w /data/local/tmp/pf-$iface.pcap </dev/null >/dev/null 2>&1 &"
+            # The first 400 bytes of each packet (IP, TCP, DNS queries and answers in full, long names included): over
+            # Wi-Fi, Google Play's updates run through the VPN too, and a full capture grew too large to pull in time
+            # (run 41237942120, API 35).
+            adb shell "setsid tcpdump -i $iface -s 400 -U -w /data/local/tmp/pf-$iface.pcap </dev/null >/dev/null 2>&1 &"
         done
         echo "$IFACES" > "$OUT/guest-interfaces.txt"
         GUEST_CAPTURE=1
@@ -204,6 +228,8 @@ else
         adb shell 'for p in $(pidof tcpdump); do for c in /sys/fs/cgroup/cgroup.procs /acct/cgroup.procs; do [ -w "$c" ] && echo "$p" > "$c"; done; done' >/dev/null 2>&1 || true
         echo "tcpdump on: $(paste -sd ' ' "$OUT/guest-interfaces.txt")" >> "$OUT/guest-capture.txt"
         echo "tcpdump at the start: $(adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
+        # Which interfaces those processes capture: one surviving process says nothing about the others.
+        echo "tcpdump at the start on: $(tcpdump_interfaces)" >> "$OUT/guest-capture.txt"
     else
         echo "no root or no tcpdump in this image: the emulator's own capture (-tcpdump) is the only one" >> "$OUT/guest-capture.txt"
     fi
@@ -213,33 +239,60 @@ fi
 timeout 30 adb logcat -G 16M >/dev/null 2>&1 || true
 timeout 30 adb logcat -c || true
 # Logcat streamed to the runner as the tests run: it survives a device or a step that hangs later.
-adb logcat -v threadtime > "$OUT/logcat-live.txt" 2>&1 &
+adb logcat -v threadtime -v UTC > "$OUT/logcat-live.txt" 2>&1 & # UTC, like the captures: the evidence lines them up
 LIVE_LOGCAT=$!
+# About four times a second, the phone's sockets with their owner's uid, from the kernel's own tables: every TCP socket
+# held open (not listening, not TIME-WAIT, which keeps no owner) and every connected UDP socket, so the evidence can name
+# who sent a connection, datagram or lookup it finds on the uplink while connected; and every few seconds the phone's
+# addresses (a temporary IPv6 address can appear during the tests). The shell's EPOCHREALTIME gives sub-second times.
+cat > "$RUNNER_TEMP/pf-connecting.sh" <<'SAMPLER'
+n=0
+while true; do
+    echo "T ${EPOCHREALTIME:-$(date +%s)}"
+    for f in tcp tcp6; do grep -v -e ' 0A ' -e ' 06 ' /proc/net/$f 2>/dev/null | sed "s/^/$f /"; done
+    for f in udp udp6; do grep ' 01 ' /proc/net/$f 2>/dev/null | sed "s/^/$f /"; done
+    if [ $((n % 20)) = 0 ]; then ip -o addr show 2>/dev/null | sed 's/^/A /'; fi
+    n=$((n + 1))
+    sleep 0.25
+done
+SAMPLER
+timeout 30 adb push "$RUNNER_TEMP/pf-connecting.sh" /data/local/tmp/pf-connecting.sh >/dev/null 2>&1 || true
+adb shell "setsid sh /data/local/tmp/pf-connecting.sh > /data/local/tmp/pf-connecting.txt 2>/dev/null </dev/null &" || true
 
 # Bounded well inside the job's own limit, so that logcat, the captures and the evidence are still
 # collected when a test hangs (scripts/m5_evidence.py reads how far the tests got from logcat).
 # Into a file, not through tee: a Gradle daemon that outlives a stopped build would hold a pipe open.
 GRADLE_LOG="$RUNNER_TEMP/gradle-2-device.log"
-timeout --kill-after=60s "${DEVICE_TESTS_TIMEOUT:-40m}" \
+timeout --kill-after=60s "${DEVICE_TESTS_TIMEOUT:-55m}" \
     ./gradlew :core:data:connectedDebugAndroidTest :core:engine:connectedDebugAndroidTest :app:connectedDebugAndroidTest \
     --continue > "$GRADLE_LOG" 2>&1
 STATUS=$?
 cat "$GRADLE_LOG"
 if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
-    echo "::error title=Device tests (API $API)::The device tests ran past ${DEVICE_TESTS_TIMEOUT:-40m} and were stopped; the evidence lists from logcat which tests ran, failed or never finished."
+    echo "::error title=Device tests (API $API)::The device tests ran past ${DEVICE_TESTS_TIMEOUT:-55m} and were stopped; the evidence lists from logcat which tests ran, failed or never finished."
     timeout 60 ./gradlew --stop >/dev/null 2>&1 || true # its daemon may still be running them
 fi
 
-timeout 120 adb logcat -d > "$OUT/logcat.txt" 2>&1 || true
+timeout 120 adb logcat -d -v threadtime -v UTC > "$OUT/logcat.txt" 2>&1 || true
 kill "$LIVE_LOGCAT" 2>/dev/null || true
+timeout 30 adb shell 'pkill -f pf-connecting.sh' >/dev/null 2>&1 || true
+timeout 120 adb pull /data/local/tmp/pf-connecting.txt "$OUT/phone-connecting.txt" >/dev/null 2>&1 || echo "no socket samples" > "$OUT/phone-connecting.txt"
+timeout 60 adb shell pm list packages -U 2>/dev/null | tr -d '\r' > "$OUT/packages-uids.txt" || true
+# Which apps Android lets leave a VPN (netd's system permission): each package's and shared user's uid and the network
+# permissions granted to it. Gradle has removed ProxyFlow's packages by now; its tests log its uid.
+timeout 120 adb shell dumpsys package 2>/dev/null | tr -d '\r' |
+    grep -E '(Package|SharedUser) \[|(userId|appId)=[0-9]|android\.permission\.[A-Z_]*(NETWORK|CONNECTIVITY)[A-Z_]*: granted=true' \
+    > "$OUT/packages-network-permissions.txt" || true
 # The phone's network after the tests: the same uplink as before them, or what changed.
 {
     echo "after the tests: $(uplink_name)"
     echo "addresses after the tests: $(timeout 30 adb shell ip -o -4 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
+    echo "IPv6 addresses after the tests: $(timeout 30 adb shell ip -o -6 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
 } >> "$OUT/guest-network.txt"
 if [ "$GUEST_CAPTURE" = 1 ]; then
     restart_adbd root || true
     echo "tcpdump at the end: $(timeout 30 adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
+    echo "tcpdump at the end on: $(tcpdump_interfaces)" >> "$OUT/guest-capture.txt"
     timeout 30 adb shell 'pkill -INT tcpdump || killall -INT tcpdump' >/dev/null 2>&1 || true
     sleep 3
     echo "captured on the phone: $(timeout 30 adb shell 'ls -l /data/local/tmp/pf-*.pcap' 2>&1 | tr -d '\r' | awk '{print $NF, $5}' | paste -sd ';' -)" >> "$OUT/guest-capture.txt"
@@ -248,5 +301,6 @@ if [ "$GUEST_CAPTURE" = 1 ]; then
             echo "pull of pf-$iface.pcap failed or timed out" >> "$OUT/guest-capture.txt"
     done
 fi
-timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties >/dev/null 2>&1 || true
+timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties /data/local/tmp/proxyflow-ca.pem /data/local/tmp/pf-client.apk \
+    /data/local/tmp/pf-connecting.sh /data/local/tmp/pf-connecting.txt >/dev/null 2>&1 || true
 exit "$STATUS"

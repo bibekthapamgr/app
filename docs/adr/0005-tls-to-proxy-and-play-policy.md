@@ -30,7 +30,7 @@
 
 ## Evidence
 
-E04 (six cases: valid SOCKS5+TLS, valid HTTP+TLS with auth, expired, hostname mismatch, untrusted issuer, TLS to a plaintext port), E05 (plaintext exposure), unit `TestTLSToProxyValidation`, `TestTLSToPlaintextProxy`. On-device validation with the platform trust manager in M6.
+E04 (six cases: valid SOCKS5+TLS, valid HTTP+TLS with auth, expired, hostname mismatch, untrusted issuer, TLS to a plaintext port), E05 (plaintext exposure), unit `TestTLSToProxyValidation`, `TestTLSToPlaintextProxy`. On-device validation with the platform trust manager: M4 (`EngineOnDeviceTest`, the engine alone) and M6 (`TlsEndToEndTest`, the app end to end through stunnel with the CI run's CA, ADR-0011).
 
 ## Implementation (M4)
 

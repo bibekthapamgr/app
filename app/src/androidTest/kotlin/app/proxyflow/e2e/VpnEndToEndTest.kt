@@ -258,7 +258,10 @@ class VpnEndToEndTest {
         val profile = socks()
         app.connect(profile.id)
 
-        // The user withdraws the permission; Android takes the VPN away at the next prepare().
+        // The user withdraws the permission; Android takes the VPN away at the next prepare(). Logged first: Android may
+        // remove the VPN before ProxyFlow hears of it, and apps then use the normal network (scripts/m6_evidence.py ends
+        // the connected period here).
+        Log.i(TAG, "revoking the VPN: the permission is withdrawn")
         app.setVpnConsent(allowed = false)
         assertNotNull("Android asks for consent again", VpnService.prepare(app.context))
         val revoked = app.await(what = "VPN_REVOKED") { it.error?.code == ConnectionError.VPN_REVOKED }

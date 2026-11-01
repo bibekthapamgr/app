@@ -15,8 +15,9 @@
     <!-- B2 -->
     <string name="home_normal_network">Apps are using your normal network</string>
     <string name="home_proxy_label">Proxy</string>
-    <string name="home_tls">TLS</string>
-    <string name="home_not_encrypted">Not encrypted</string>
+    <!-- TLS between this phone and the proxy, never HTTPS to sites (ADR-0005, ADR-0011). -->
+    <string name="home_tls">TLS to proxy</string>
+    <string name="home_not_encrypted">No TLS to proxy</string>
     <string name="home_change_profile">Change</string>
     <string name="home_connect">Connect</string>
     <string name="home_connect_unavailable">Connecting isn\'t available in this build. It saves your proxies but doesn\'t connect.</string>
@@ -25,38 +26,106 @@
     <string name="home_connecting_to">Connecting to %1$s</string>
     <string name="home_step_permission">VPN permission granted</string>
     <string name="home_step_checking">Checking proxy — TLS and sign-in</string>
-    <string name="home_step_starting">Starting protection</string>
+    <string name="home_step_starting">Starting the VPN</string>
     <string name="home_step_done">Done</string>
     <string name="home_step_current">In progress</string>
     <string name="home_step_pending">Not started</string>
-    <string name="home_connecting_note">Your phone\'s network is unchanged until protection starts. If the proxy check fails, nothing is switched over.</string>
+    <string name="home_connecting_note">Your phone\'s network is unchanged until the VPN starts. If the proxy check fails, nothing is switched over.</string>
     <string name="home_cancel">Cancel</string>
 
-    <!-- B4 -->
-    <string name="home_connected_note">Traffic is going through your proxy</string>
-    <string name="home_protocol_with_tls">%1$s + TLS</string>
-    <string name="home_protection_apps">Apps (TCP)</string>
-    <string name="home_protection_via_proxy">Via proxy</string>
-    <string name="home_protection_dns">DNS</string>
-    <string name="home_protection_by_proxy">Resolved by proxy</string>
-    <string name="home_protection_udp">UDP &amp; ping</string>
-    <string name="home_protection_blocked">Blocked</string>
+    <!-- B4: what goes through the proxy and the diagnostics (ADR-0011). Counts only, never destinations. -->
+    <string name="home_connected_note">Apps\' TCP connections go through your proxy</string>
+    <string name="home_protocol_with_tls">%1$s · TLS to proxy</string>
+    <string name="home_route_title">Through your proxy</string>
+    <string name="home_route_apps">Apps (TCP)</string>
+    <string name="home_route_via_proxy">Via proxy</string>
+    <plurals name="home_route_connections">
+        <item quantity="one">Via proxy · %d connection</item>
+        <item quantity="other">Via proxy · %d connections</item>
+    </plurals>
+    <string name="home_route_dns">Site names (DNS)</string>
+    <string name="home_route_by_proxy">Resolved by proxy</string>
+    <plurals name="home_route_names">
+        <item quantity="one">Resolved by proxy · %d name</item>
+        <item quantity="other">Resolved by proxy · %d names</item>
+    </plurals>
+    <string name="home_route_udp">UDP &amp; ping</string>
+    <string name="home_route_blocked">Blocked</string>
+    <string name="home_https_note">HTTPS sites stay encrypted end to end: ProxyFlow never decrypts them. TLS to proxy only encrypts the connection between this phone and your proxy.</string>
+    <string name="home_diag_title">Diagnostics since connecting</string>
+    <string name="home_diag_waiting">Reading…</string>
+    <string name="home_diag_tls">TLS to proxy</string>
+    <string name="home_diag_tls_off">Not used</string>
+    <string name="home_diag_no_failures">No failures</string>
+    <plurals name="home_diag_failed">
+        <item quantity="one">%d failed</item>
+        <item quantity="other">%d failed</item>
+    </plurals>
+    <string name="home_diag_dns">DNS</string>
+    <plurals name="home_diag_dns_names">
+        <item quantity="one">%d connection to a name your proxy couldn\'t find or reach</item>
+        <item quantity="other">%d connections to names your proxy couldn\'t find or reach</item>
+    </plurals>
+    <plurals name="home_diag_dns_proxy_name">
+        <item quantity="one">The proxy\'s own address wasn\'t found %d time</item>
+        <item quantity="other">The proxy\'s own address wasn\'t found %d times</item>
+    </plurals>
+    <!-- By design, not a failure: shown under the DNS row even when it says "No failures". -->
+    <plurals name="home_diag_dns_refused">
+        <item quantity="one">%d lookup of a kind ProxyFlow doesn\'t answer (TXT, MX…)</item>
+        <item quantity="other">%d lookups of a kind ProxyFlow doesn\'t answer (TXT, MX…)</item>
+    </plurals>
+    <plurals name="home_diag_dns_dropped">
+        <item quantity="one">%d lookup dropped, too many at once</item>
+        <item quantity="other">%d lookups dropped, too many at once</item>
+    </plurals>
+    <plurals name="home_diag_dns_stale">
+        <item quantity="one">%d connection to an address from an earlier session</item>
+        <item quantity="other">%d connections to an address from an earlier session</item>
+    </plurals>
+    <string name="home_diag_unsupported">Unsupported traffic</string>
+    <string name="home_diag_none_blocked">None blocked</string>
+    <plurals name="home_diag_blocked">
+        <item quantity="one">%d blocked</item>
+        <item quantity="other">%d blocked</item>
+    </plurals>
+    <plurals name="home_diag_udp">
+        <item quantity="one">%d UDP packet</item>
+        <item quantity="other">%d UDP packets</item>
+    </plurals>
+    <!-- After the UDP count: the ports blocked most (%1$s, e.g. "443, 3478"); the quantity is how many ports. -->
+    <plurals name="home_diag_udp_ports">
+        <item quantity="one">port %1$s</item>
+        <item quantity="other">ports %1$s</item>
+    </plurals>
+    <plurals name="home_diag_pings">
+        <item quantity="one">%d ping</item>
+        <item quantity="other">%d pings</item>
+    </plurals>
+    <string name="home_diag_unsupported_note">ProxyFlow carries TCP only: UDP is refused at once and pings get no reply, so calls, games and QUIC fall back to TCP or fail.</string>
+    <string name="home_diag_timeouts">Proxy timeouts</string>
+    <string name="home_diag_none">None</string>
+    <plurals name="home_diag_timed_out">
+        <item quantity="one">%d connection timed out</item>
+        <item quantity="other">%d connections timed out</item>
+    </plurals>
+    <string name="home_diag_last">Last problem: %1$s</string>
     <string name="home_disconnect">Disconnect</string>
 
     <!-- Switching profiles or restarting: the VPN interface stays, so traffic is held. -->
     <string name="home_reconnecting_to">Reconnecting to %1$s</string>
-    <string name="home_reconnecting_note">Traffic is paused until the proxy answers. Nothing is sent around it.</string>
+    <string name="home_reconnecting_note">Apps\' traffic is paused until the proxy answers. ProxyFlow sends nothing around it.</string>
 
     <!-- B6b (pre-flight failures) and the blocked layout -->
     <string name="home_not_connected_note">You\'re not connected — apps are still using your normal network.</string>
-    <string name="home_blocked_note">Apps can\'t go online until this is fixed — nothing is sent around your proxy.</string>
+    <string name="home_blocked_note">Apps can\'t go online until this is fixed — ProxyFlow sends nothing around your proxy.</string>
     <string name="home_code">Code: %1$s</string>
     <string name="home_try_again">Try again</string>
     <string name="home_restart">Restart</string>
     <string name="home_edit_profile">Edit profile</string>
     <string name="home_use_another_proxy">Use another proxy</string>
     <string name="home_stop_normal_network">Stop and use normal network</string>
-    <string name="home_stop_title">Stop protection?</string>
+    <string name="home_stop_title">Use your normal network?</string>
     <string name="home_stop_message">Apps will use your normal network, not your proxy, until you connect again.</string>
 
     <!-- B6d -->
@@ -67,7 +136,7 @@
 
     <!-- B9 -->
     <string name="home_vpn_explainer_title">Allow a VPN connection</string>
-    <string name="home_vpn_explainer_body">Android will ask you to allow ProxyFlow to set up a VPN. That is how your apps\' traffic reaches your proxy on this phone.</string>
+    <string name="home_vpn_explainer_body">Android will ask you to allow ProxyFlow to set up a VPN. That is how apps\' connections reach your proxy on this phone.</string>
     <string name="home_vpn_explainer_no_servers">ProxyFlow has no servers of its own and doesn\'t collect your traffic.</string>
     <string name="home_vpn_explainer_key_icon">A key icon appears in the status bar while connected.</string>
     <string name="home_vpn_explainer_one_vpn">Only one VPN app can be active. Starting another turns ProxyFlow off.</string>
@@ -88,20 +157,20 @@
     <string name="home_error_auth_failed_title">Username or password rejected</string>
     <string name="home_error_auth_failed_message">The proxy didn\'t accept your credentials. Check them with your proxy provider.</string>
     <string name="home_error_tls_untrusted_title">Certificate not trusted</string>
-    <string name="home_error_tls_untrusted_message">The proxy\'s certificate isn\'t from a trusted authority. ProxyFlow only connects to proxies with a valid certificate.</string>
+    <string name="home_error_tls_untrusted_message">The proxy\'s certificate isn\'t from an authority this phone trusts. ProxyFlow only connects to proxies with a valid certificate, and can\'t be told to skip the check.</string>
     <string name="home_error_tls_hostname_title">Certificate doesn\'t match</string>
     <string name="home_error_tls_hostname_message">The certificate isn\'t valid for %1$s. Check the server name in the profile.</string>
     <string name="home_error_tls_expired_title">Certificate expired</string>
     <string name="home_error_tls_expired_message">The proxy\'s certificate is expired or not yet valid. Check your phone\'s date and time, or contact your provider.</string>
-    <string name="home_error_tls_handshake_title">Secure connection failed</string>
-    <string name="home_error_tls_handshake_message">The proxy didn\'t answer with TLS. It may not support TLS on this port.</string>
+    <string name="home_error_tls_handshake_title">TLS to proxy failed</string>
+    <string name="home_error_tls_handshake_message">The proxy didn\'t answer with TLS. It may not support TLS on this port. ProxyFlow never falls back to an unencrypted connection.</string>
     <string name="home_error_protocol_title">This doesn\'t look like a %1$s proxy</string>
     <string name="home_error_protocol_message">The server answered in an unexpected way. Check the protocol and port.</string>
     <string name="home_error_timeout_title">Proxy isn\'t responding</string>
     <string name="home_error_timeout_message">The proxy accepted the connection but didn\'t respond in time.</string>
     <string name="home_error_credentials_title">Re-enter your password</string>
     <string name="home_error_credentials_message">The saved password can\'t be read on this phone any more, so it isn\'t used. Enter it again.</string>
-    <string name="home_error_engine_stopped_title">Protection stopped unexpectedly</string>
+    <string name="home_error_engine_stopped_title">ProxyFlow stopped unexpectedly</string>
     <string name="home_error_engine_stopped_message">The packet engine stopped while connected. Traffic stays blocked until you restart it or disconnect.</string>
     <!-- The pre-flight check's destination-level failures (ADR-0010 §4): the proxy works, but refused or failed the test connection. -->
     <string name="home_error_refused_title">Your proxy refused the connection</string>

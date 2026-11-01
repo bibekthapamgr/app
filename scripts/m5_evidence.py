@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import ipaddress
 import os
 import re
 import struct
@@ -49,6 +50,24 @@ LIFECYCLE_CHARS = 3400
 
 def escape(text: str) -> str:
     return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+ANNOTATION_CHARS = 3500  # GitHub cuts an annotation's message at 4096 characters (run 41272331602: M6, API 34)
+
+
+def annotate(level: str, title: str, lines: list[str]) -> None:
+    """Prints [lines] as annotations of at most ANNOTATION_CHARS characters each, "title 1/3", "title 2/3"... when they
+    need more than one, so that nothing is cut; a line too long for one is split. GitHub keeps 10 of a kind per step."""
+    pieces = [line[i:i + ANNOTATION_CHARS] for line in lines for i in range(0, max(len(line), 1), ANNOTATION_CHARS)]
+    chunks: list[str] = []
+    for piece in pieces:
+        if chunks and len(chunks[-1]) + 1 + len(piece) <= ANNOTATION_CHARS:
+            chunks[-1] += "\n" + piece
+        else:
+            chunks.append(piece)
+    for n, chunk in enumerate(chunks):
+        suffix = f" {n + 1}/{len(chunks)}" if len(chunks) > 1 else ""
+        print(f"::{level} title={title}{suffix}::{escape(chunk)}")
 
 
 # --- packet captures --------------------------------------------------------
@@ -72,9 +91,19 @@ class Capture:
 
 
 def ip_of(raw: bytes) -> str:
-    if len(raw) == 4:
-        return ".".join(str(b) for b in raw)
-    return ":".join(f"{raw[i] << 8 | raw[i + 1]:x}" for i in range(0, 16, 2))
+    """An address in its canonical text form (IPv6 compressed, "fd99::1"), the form the lab's constants use."""
+    return str(ipaddress.ip_address(bytes(raw)))
+
+
+def guest_capture_partial(name: str, any_alive: bool, alive_at_end: list[str] | None, alive_at_start: list[str] | None = None) -> bool:
+    """Whether a phone capture (guest-<interface>.pcap) may have stopped before the tests ended: its own tcpdump must
+    still run at the end. Without per-interface lines (older runs), or when they could not be read at the start, any
+    tcpdump still running counts, as before."""
+    if not name.startswith("guest-"):
+        return False
+    if alive_at_end is None or alive_at_start in (None, ["none"]):
+        return not any_alive
+    return name[len("guest-") : -len(".pcap")] not in alive_at_end
 
 
 def dns_name(payload: bytes) -> str | None:
@@ -268,8 +297,8 @@ def network_changes(logcat: list[str], last: int = 6) -> list[str]:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", required=True)
-    parser.add_argument("--pf", required=True, help="the runner-side directory of scripts/m5_device_env.sh")
-    parser.add_argument("--out", required=True, help="what scripts/m5_device_e2e.sh pulled from the emulator")
+    parser.add_argument("--pf", required=True, help="the runner-side directory of scripts/e2e_env.sh")
+    parser.add_argument("--out", required=True, help="what scripts/e2e_device.sh pulled from the emulator")
     parser.add_argument("--host-pcap", help="the emulator's own capture (-tcpdump)")
     args = parser.parse_args(argv[1:])
 
@@ -383,6 +412,10 @@ def main(argv: list[str]) -> int:
         facts.append("in-phone capture: " + " | ".join(guest))
     # tcpdump inside the phone counts as coverage only if it was still running after the tests.
     guest_spans_tests = any(line.startswith("tcpdump at the end: ") and "none" not in line for line in guest)
+    # Per interface where the device script recorded it: a phone capture spans the tests only if its own tcpdump
+    # still ran at the end (another interface's surviving process says nothing about it).
+    alive_at_end = next((line.split(":", 1)[1].split() for line in guest if line.startswith("tcpdump at the end on:")), None)
+    alive_at_start = next((line.split(":", 1)[1].split() for line in guest if line.startswith("tcpdump at the start on:")), None)
     if UNREADABLE:
         problems.append(f"unreadable evidence: {UNREADABLE}")
 
@@ -402,7 +435,7 @@ def main(argv: list[str]) -> int:
             f"SYNs to the proxies {capture.syns_to_proxy}, DNS queries {capture.dns_queries}, "
             f"to/from {DESTINATION_ADDRESS}: {capture.to_destination}, DNS queries for {DESTINATION_NAME}: {len(capture.dns_for_destination)}"
         )
-        partial = os.path.basename(capture.path).startswith("guest-") and not guest_spans_tests
+        partial = guest_capture_partial(os.path.basename(capture.path), guest_spans_tests, alive_at_end, alive_at_start)
         if partial:
             facts.append(f"capture {name}: tcpdump was not running after the tests, so it does not count as coverage")
         elif capture.covers_uplink:
@@ -436,9 +469,9 @@ def main(argv: list[str]) -> int:
     print(f"::{token}::")
     print(f"::notice title=M5 VPN lifecycle (API {args.api}), last of {len(lifecycle)} lines::{escape(lifecycle_tail or '(none)')}")
     if problems:
-        print(f"::error title=M5 end-to-end evidence (API {args.api})::{escape(chr(10).join(problems + facts))}")
+        annotate("error", f"M5 end-to-end evidence (API {args.api})", problems + facts)
         return 1
-    print(f"::notice title=M5 end-to-end evidence (API {args.api})::{escape(chr(10).join(facts))}")
+    annotate("notice", f"M5 end-to-end evidence (API {args.api})", facts)
     return 0
 
 

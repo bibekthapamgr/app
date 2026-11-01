@@ -1,10 +1,17 @@
 package app.proxyflow.feature.home
 
 import android.content.Intent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -14,9 +21,15 @@ import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.DnsProblems
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
+import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.TlsMode
+import app.proxyflow.core.model.TlsProblems
+import app.proxyflow.core.model.UnsupportedTraffic
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -53,7 +66,7 @@ class HomeScreenTest {
         show(ready(ConnectionState.Idle, canConnect = false))
         compose.onNodeWithText("Not connected").assertIsDisplayed()
         compose.onNodeWithText("Office").assertIsDisplayed()
-        compose.onNodeWithText("HTTP · Not encrypted").assertIsDisplayed()
+        compose.onNodeWithText("HTTP · No TLS to proxy").assertIsDisplayed()
         compose.onNodeWithText("203.0.113.10:3128").assertIsDisplayed()
         scrolledTo("Connect").assertIsNotEnabled()
         scrolledTo("Connecting isn't available in this build. It saves your proxies but doesn't connect.").assertIsDisplayed()
@@ -66,7 +79,7 @@ class HomeScreenTest {
         compose.onNodeWithText("Connecting to Office").assertIsDisplayed()
         scrolledTo("Checking proxy — TLS and sign-in").assertIsDisplayed()
         scrolledTo(
-            "Your phone's network is unchanged until protection starts. If the proxy check fails, nothing is switched over.",
+            "Your phone's network is unchanged until the VPN starts. If the proxy check fails, nothing is switched over.",
         ).assertIsDisplayed()
         scrolledTo("Cancel").performClick()
         assertEquals(listOf("disconnect"), calls)
@@ -78,10 +91,88 @@ class HomeScreenTest {
         show(ready(ConnectionState(ConnectionStatus.Connected, "p1", "Office", connectedSinceMillis = since)), now = since + 3_723_000)
         compose.onNodeWithText("Connected").assertIsDisplayed()
         compose.onNodeWithText("01:02:03").assertIsDisplayed()
-        scrolledTo("Traffic is going through your proxy").assertIsDisplayed()
+        scrolledTo("Apps' TCP connections go through your proxy").assertIsDisplayed()
         scrolledTo("Office · HTTP").assertIsDisplayed()
+        // Before the first reading, what goes through the proxy and what doesn't.
+        scrolledTo("Via proxy").assertIsDisplayed()
+        scrolledTo("Resolved by proxy").assertIsDisplayed()
+        scrolledTo("Blocked").assertIsDisplayed()
+        scrolledTo(
+            "HTTPS sites stay encrypted end to end: ProxyFlow never decrypts them. " +
+                "TLS to proxy only encrypts the connection between this phone and your proxy.",
+        ).assertIsDisplayed()
         scrolledTo("Disconnect").performClick()
         assertEquals(listOf("disconnect"), calls)
+    }
+
+    /** M6 diagnostics (ADR-0011): TLS to the proxy, DNS, unsupported traffic, proxy timeouts; counts only. */
+    @Test
+    fun connectedShowsTheDiagnostics() {
+        val diagnostics = RoutingDiagnostics(
+            connectionsOpened = 42,
+            namesForProxy = 31,
+            dns = DnsProblems(namesNotReached = 2, queriesRefused = 1),
+            unsupported = UnsupportedTraffic(udpBlocked = 12, udpTopPorts = listOf(443, 3478), pingsDropped = 3),
+            proxyTimeouts = 1,
+            lastProblem = ConnectionError("TARGET_UNREACHABLE", "the proxy could not reach the host"),
+        )
+        show(ready(ConnectionState(ConnectionStatus.Connected, "p1", "Office", connectedSinceMillis = 0), diagnostics = diagnostics))
+        scrolledTo("Via proxy · 42 connections").assertIsDisplayed()
+        scrolledTo("Resolved by proxy · 31 names").assertIsDisplayed()
+        scrolledTo("Not used").assertIsDisplayed() // the profile uses no TLS to the proxy
+        scrolledTo("2 failed").assertIsDisplayed() // the refused lookup is shown, but is no failure
+        scrolledTo("2 connections to names your proxy couldn't find or reach\n1 lookup of a kind ProxyFlow doesn't answer (TXT, MX…)")
+            .assertIsDisplayed()
+        scrolledTo("15 blocked").assertIsDisplayed()
+        compose.onNodeWithText("12 UDP packets (ports 443, 3478) · 3 pings", substring = true).performScrollTo().assertIsDisplayed()
+        scrolledTo("1 connection timed out").assertIsDisplayed()
+        scrolledTo("Last problem: TARGET_UNREACHABLE · the proxy could not reach the host").assertIsDisplayed()
+    }
+
+    @Test
+    fun lookupsRefusedByDesignAreShownWithoutAFailure() {
+        val diagnostics = RoutingDiagnostics(dns = DnsProblems(queriesRefused = 2))
+        show(ready(ConnectionState(ConnectionStatus.Connected, "p1", "Office", connectedSinceMillis = 0), diagnostics = diagnostics))
+        scrolledTo("2 lookups of a kind ProxyFlow doesn't answer (TXT, MX…)").assertIsDisplayed()
+        val failures = compose.onAllNodesWithText("failed", substring = true).fetchSemanticsNodes()
+        assertTrue("no failure shown: $failures", failures.isEmpty())
+    }
+
+    @Test
+    fun oneBlockedPortIsNamedInTheSingular() {
+        val diagnostics = RoutingDiagnostics(unsupported = UnsupportedTraffic(udpBlocked = 5, udpTopPorts = listOf(443)))
+        show(ready(ConnectionState(ConnectionStatus.Connected, "p1", "Office", connectedSinceMillis = 0), diagnostics = diagnostics))
+        compose.onNodeWithText("5 UDP packets (port 443)", substring = true).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun tlsFailuresWhileConnectedSayWhichCheckFailed() {
+        val tlsProfile = profile.copy(tlsMode = TlsMode.Tls)
+        val diagnostics = RoutingDiagnostics(tls = TlsProblems(failures = 2, lastCode = "TLS_UNTRUSTED"))
+        show(HomeUiState.Ready(tlsProfile, ConnectionState(ConnectionStatus.Connected, "p1", "Office"), true, diagnostics = diagnostics))
+        scrolledTo("Office · HTTP · TLS to proxy").assertIsDisplayed()
+        scrolledTo("2 failed").assertIsDisplayed()
+        scrolledTo("Certificate not trusted").assertIsDisplayed()
+        scrolledTo("No failures").assertIsDisplayed() // DNS
+        scrolledTo("None blocked").assertIsDisplayed()
+        scrolledTo("None").assertIsDisplayed()
+    }
+
+    /** A refused certificate can only be fixed, never skipped: no button may accept it anyway (ADR-0005). */
+    @Test
+    fun aRefusedCertificateOffersNoWayAroundTheCheck() {
+        var state by mutableStateOf(ready(ConnectionState(profileId = "p1", error = ConnectionError("TLS_UNTRUSTED"))))
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
+        for (code in listOf("TLS_UNTRUSTED", "TLS_HOSTNAME", "TLS_EXPIRED", "TLS_HANDSHAKE")) {
+            state = ready(ConnectionState(profileId = "p1", error = ConnectionError(code)))
+            compose.waitForIdle()
+            compose.onNodeWithText("Code: $code").performScrollTo().assertIsDisplayed()
+            val buttons = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().map { node ->
+                node.config.getOrNull(SemanticsProperties.Text)?.joinToString(" ").orEmpty()
+            }
+            assertEquals("$code: $buttons", setOf("Try again", "Edit profile", "Use another proxy", "Change"), buttons.toSet())
+            assertTrue(compose.onAllNodesWithText("anyway", substring = true, ignoreCase = true).fetchSemanticsNodes().isEmpty())
+        }
     }
 
     @Test
@@ -104,8 +195,8 @@ class HomeScreenTest {
         val stopped = ConnectionError(ConnectionError.ENGINE_STOPPED, "reading the TUN interface failed")
         show(ready(ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = stopped)))
         compose.onNodeWithText("Traffic blocked").assertIsDisplayed()
-        scrolledTo("Protection stopped unexpectedly").assertIsDisplayed()
-        scrolledTo("Apps can't go online until this is fixed — nothing is sent around your proxy.").assertIsDisplayed()
+        scrolledTo("ProxyFlow stopped unexpectedly").assertIsDisplayed()
+        scrolledTo("Apps can't go online until this is fixed — ProxyFlow sends nothing around your proxy.").assertIsDisplayed()
         scrolledTo("Code: ENGINE_STOPPED · reading the TUN interface failed").assertIsDisplayed()
         scrolledTo("Restart").performClick()
         scrolledTo("Stop and use normal network").performClick()
@@ -164,7 +255,7 @@ class HomeScreenTest {
     fun stoppingWhileBlockedAsksFirst() {
         val blocked = ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.ENGINE_STOPPED))
         show(ready(blocked, dialog = HomeDialog.ConfirmStop))
-        compose.onNodeWithText("Stop protection?").assertIsDisplayed()
+        compose.onNodeWithText("Use your normal network?").assertIsDisplayed()
         compose.onNodeWithText("Apps will use your normal network, not your proxy, until you connect again.").assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()
         assertEquals(listOf("dismiss"), calls)
@@ -196,8 +287,12 @@ class HomeScreenTest {
         assertEquals(listOf("dismiss", "connect"), calls)
     }
 
-    private fun ready(connection: ConnectionState, canConnect: Boolean = true, dialog: HomeDialog? = null) =
-        HomeUiState.Ready(profile, connection, canConnect, dialog)
+    private fun ready(
+        connection: ConnectionState,
+        canConnect: Boolean = true,
+        dialog: HomeDialog? = null,
+        diagnostics: RoutingDiagnostics? = null,
+    ) = HomeUiState.Ready(profile, connection, canConnect, dialog, diagnostics)
 
     private fun show(state: HomeUiState, now: Long = 0L) {
         compose.setContent { ProxyFlowTheme { HomeScreen(state, actions, nowMillis = now) } }

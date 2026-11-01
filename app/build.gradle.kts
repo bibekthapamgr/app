@@ -36,8 +36,9 @@ android {
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 5
         versionName = "0.5.0"
-        // The VPN's end-to-end tests (src/androidTest): the real service, engine and proxies on emulators.
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // The VPN's end-to-end tests (src/androidTest): the real service, engine and proxies on emulators. The runner
+        // lets a test trust the lab's CA for TLS proxies (ADR-0011); the app as installed never does.
+        testInstrumentationRunner = "app.proxyflow.e2e.E2eTestRunner"
     }
 
     signingConfigs {

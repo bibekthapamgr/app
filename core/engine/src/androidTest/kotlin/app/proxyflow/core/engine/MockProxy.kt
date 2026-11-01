@@ -13,6 +13,7 @@ import java.util.Collections
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import javax.net.ssl.SSLContext
 
 /** A TCP server on 127.0.0.1 that sends back what it receives. */
@@ -27,10 +28,11 @@ class EchoServer : Closeable {
             while (!server.isClosed) {
                 val s = runCatching { server.accept() }.getOrNull() ?: break
                 sockets += s
-                pool.execute {
+                val started = pool.serve(s) {
                     s.use { runCatching { it.getInputStream().copyTo(it.getOutputStream()) } }
                     sockets -= s
                 }
+                if (!started) break
             }
         }
     }
@@ -73,7 +75,7 @@ class MockProxy(
             while (!server.isClosed) {
                 val client = runCatching { server.accept() }.getOrNull() ?: break
                 sockets += client
-                pool.execute {
+                val started = pool.serve(client) {
                     try {
                         if (silent) {
                             val sink = ByteArray(4096)
@@ -91,6 +93,7 @@ class MockProxy(
                         sockets -= client
                     }
                 }
+                if (!started) break
             }
         }
     }
@@ -238,4 +241,17 @@ class MockProxy(
             sockets -= upstream
         }
     }
+}
+
+/**
+ * Runs [handler] for a connection just accepted, or closes the connection when the server is being closed: an
+ * accept can return just before close() shuts the pool, and the rejected task would otherwise throw on the accept
+ * thread and crash the test process (seen once on API 35 in M6). Returns whether the handler was started.
+ */
+private fun ExecutorService.serve(connection: Socket, handler: () -> Unit): Boolean = try {
+    execute(handler)
+    true
+} catch (_: RejectedExecutionException) {
+    runCatching { connection.close() }
+    false
 }
