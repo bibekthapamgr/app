@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- About & privacy (board G1), worded for what this build really does. -->
+    <!-- About & privacy (board G1), worded for what this build really does; no claim of anonymity or of
+         carrying all traffic (docs/m6/routing-and-limitations.md, CopyClaimsTest). -->
     <string name="about_title">About &amp; privacy</string>
     <string name="about_app_name">ProxyFlow</string>
     <string name="about_version">Version %1$s · free, no account</string>
-    <string name="about_build_scope">This build saves your proxies but doesn\'t connect yet. Connecting arrives with the VPN service in a later version.</string>
+    <string name="about_summary">ProxyFlow sends apps\' TCP connections to the proxy you choose. It doesn\'t make you anonymous: your proxy provider sees the sites you open, and apps and sites can still recognise you, for example when you sign in.</string>
     <string name="about_section_privacy">Privacy</string>
     <string name="about_privacy_no_account">No account, ads or analytics. ProxyFlow has no servers of its own.</string>
     <string name="about_privacy_on_phone">Profiles stay on this phone. Usernames and passwords are encrypted with an Android Keystore key that is never exported or backed up. A password is only ever sent to the proxy it was saved for.</string>
     <string name="about_privacy_provider">Your proxy provider can see which sites you visit and any unencrypted data.</string>
-    <string name="about_section_carry">What it will carry</string>
-    <string name="about_carry_tcp">Websites and most apps (TCP) and website names (DNS) go through your proxy.</string>
-    <string name="about_carry_blocked">UDP (calls, some games) and ping are blocked, and local devices like printers can\'t be reached.</string>
-    <string name="about_carry_ipv6">IPv6 addresses work only if your proxy supports IPv6.</string>
+    <string name="about_section_carry">What goes through your proxy</string>
+    <string name="about_carry_tcp">Websites and most apps use TCP, and their connections go through your proxy. Site names are looked up by your proxy, not by this phone.</string>
+    <string name="about_carry_blocked">UDP is blocked, so calls, some games and QUIC fall back to TCP or fail, and ping isn\'t answered. Devices on your local network, like printers, are reached through your proxy too, so usually not at all.</string>
+    <string name="about_carry_ipv6">IPv6 addresses work only if your proxy supports IPv6. Names are always answered with IPv4 addresses, and your proxy reaches the site however it can.</string>
+    <string name="about_carry_outside">ProxyFlow\'s own connection to your proxy, the lookup of your proxy\'s name, and some of Android\'s own traffic don\'t use the VPN.</string>
+    <string name="about_carry_tls">TLS to the proxy encrypts the connection between this phone and your proxy. HTTPS sites stay encrypted end to end whether you use it or not: ProxyFlow never decrypts them.</string>
     <string name="about_independent">ProxyFlow is free and independent. It isn\'t affiliated with any proxy provider.</string>
 </resources>

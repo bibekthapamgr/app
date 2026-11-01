@@ -18,13 +18,16 @@ import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ConnectionTestResult
+import app.proxyflow.core.model.DnsProblems
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
+import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.ThemePreference
 import app.proxyflow.core.model.TlsMode
+import app.proxyflow.core.model.UnsupportedTraffic
 import app.proxyflow.feature.about.AboutScreen
 import app.proxyflow.feature.home.HomeActions
 import app.proxyflow.feature.home.HomeDialog
@@ -54,7 +57,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Screenshots of every screen and state built so far (M2, M3, M5) in light and dark
+ * Screenshots of every screen and state built so far (M2, M3, M5, M6) in light and dark
  * theme, named after the M1 design boards, kept in app/screenshots. CI runs
  * `./gradlew :app:verifyAndRecordRoborazziDebug`: any screen that no longer
  * matches its committed copy fails the build, and the new image is published on
@@ -99,7 +102,14 @@ class ScreenshotTest {
     fun homeConnected() = captureBothThemes("B4_home_connected") {
         val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
         // 00:12:47 on the timer, as on the design board.
-        HomeScreen(home(connected), HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
+        HomeScreen(home(connected, diagnostics = sampleDiagnostics), HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
+    }
+
+    /** B4 scrolled to the diagnostics (ADR-0011): counts only, no destinations. */
+    @Test
+    fun homeConnectedDiagnostics() = captureBothThemes("B4_home_connected_diagnostics", scrollTo = "Proxy timeouts") {
+        val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
+        HomeScreen(home(connected, diagnostics = sampleDiagnostics), HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
     }
 
     @Test
@@ -307,8 +317,8 @@ class ScreenshotTest {
     @Test
     fun about() = captureBothThemes("G1_about") { AboutScreen(version = "0.2.0 (2)", onBack = {}) }
 
-    private fun home(connection: ConnectionState, dialog: HomeDialog? = null) =
-        HomeUiState.Ready(tokyo, connection, canConnect = true, dialog = dialog)
+    private fun home(connection: ConnectionState, dialog: HomeDialog? = null, diagnostics: RoutingDiagnostics? = null) =
+        HomeUiState.Ready(tokyo, connection, canConnect = true, dialog = dialog, diagnostics = diagnostics)
 
     /** A screen with a dialog open, in the light theme (dialogs draw in their own window, so the whole screen is captured). */
     @OptIn(ExperimentalRoborazziApi::class)
@@ -339,6 +349,14 @@ class ScreenshotTest {
     private companion object {
         const val DIR = "screenshots"
         const val SAMPLE_TIME = 1_793_000_000_000L
+
+        val sampleDiagnostics = RoutingDiagnostics(
+            connectionsOpened = 128,
+            namesForProxy = 46,
+            dns = DnsProblems(namesNotReached = 1),
+            unsupported = UnsupportedTraffic(udpBlocked = 23, udpTopPorts = listOf(443, 3478), pingsDropped = 4),
+            lastProblem = ConnectionError("TARGET_UNREACHABLE", "the proxy could not reach the host"),
+        )
 
         val tokyo = ProxyProfile(
             id = "p1",

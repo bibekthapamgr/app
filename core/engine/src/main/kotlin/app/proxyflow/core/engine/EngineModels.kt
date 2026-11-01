@@ -68,7 +68,7 @@ data class EngineStatus(
     val state: EngineState get() = EngineState.of(stateName)
 }
 
-/** The counters the UI and diagnostics use (tunnel.Snapshot has more). */
+/** The counters the UI and diagnostics use (tunnel.Snapshot has a few more). */
 @Serializable
 data class EngineStats(
     @SerialName("state") val stateName: String = "unknown",
@@ -86,10 +86,31 @@ data class EngineStats(
     @SerialName("bytes_up") val bytesUp: Long = 0,
     @SerialName("bytes_down") val bytesDown: Long = 0,
     @SerialName("udp_rejected") val udpRejected: Long = 0,
+    /** UDP datagrams refused, by destination port (at most 256 ports are told apart). */
+    @SerialName("udp_rejected_ports") val udpRejectedPorts: Map<String, Long> = emptyMap(),
+    @SerialName("idle_timeouts") val idleTimeouts: Long = 0,
+    /** DNS sockets refused because too many were open at once (the app retries). */
+    @SerialName("dns_dropped") val dnsDropped: Long = 0,
+    /** DNS queries answered over TCP port 53 (ADR-0011). */
+    @SerialName("dns_tcp_queries") val dnsOverTcp: Long = 0,
+    /** Connecting to the proxy, or its handshake (TLS, SOCKS5, HTTP CONNECT), took too long. */
+    @SerialName("proxy_timeouts") val proxyTimeouts: Long = 0,
+    /** TCP to ProxyFlow's own addresses (not DNS), refused on the phone: Android's DNS-over-TLS probe, for one. */
+    @SerialName("local_refused") val localRefused: Long = 0,
     @SerialName("events_dropped") val eventsDropped: Long = 0,
+    /** Ping requests (ICMP and ICMPv6 echo) dropped: ProxyFlow never answers one (ADR-0004). */
+    @SerialName("icmp_echo_requests_dropped") val icmpEchoRequestsDropped: Long = 0,
+    @SerialName("icmp_fragments_dropped") val icmpFragmentsDropped: Long = 0,
+    /** Echo replies that reached the TUN: must stay 0. */
     @SerialName("icmp_echo_replies_sent") val icmpEchoRepliesSent: Long = 0,
+    @SerialName("recovered_panics") val recoveredPanics: Long = 0,
+    /** Failed flows by error code. */
     val failures: Map<String, Long> = emptyMap(),
+    /** Failed flows to a name (the proxy was asked to resolve it), by error code. */
+    @SerialName("hostname_failures") val hostnameFailures: Map<String, Long> = emptyMap(),
+    /** DNS queries by outcome: mapped, nodata, refused, formerr, ignored, exhausted. */
     val dns: Map<String, Long> = emptyMap(),
+    @SerialName("fake_dns_mappings") val fakeDnsMappings: Int = 0,
     val goroutines: Int = 0,
     @SerialName("rss_kib") val rssKib: Long = 0,
 ) {

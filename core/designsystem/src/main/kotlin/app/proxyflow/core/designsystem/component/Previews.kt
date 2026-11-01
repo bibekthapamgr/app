@@ -29,7 +29,7 @@ private fun ComponentGalleryPreview() {
                 PfTextField(value = "proxy.example.com", onValueChange = {}, label = "Server")
                 PfTextField(value = "99999", onValueChange = {}, label = "Port", errorText = "Port must be between 1 and 65535")
                 PfPasswordField(value = "secret", onValueChange = {}, label = "Password")
-                PfSwitchRow(title = "Encrypt connection (TLS)", subtitle = "Recommended", checked = true, onCheckedChange = {})
+                PfSwitchRow(title = "TLS to the proxy", subtitle = "Recommended", checked = true, onCheckedChange = {})
                 PfBanner(text = "Without TLS, your password can be seen on the network.", tone = BannerTone.Warning)
                 PfCard { Text("Card content") }
                 PfListRow(title = "Theme", supportingText = "System default", onClick = {})

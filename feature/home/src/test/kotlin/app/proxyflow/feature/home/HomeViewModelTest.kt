@@ -8,8 +8,10 @@ import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfileInput
+import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
@@ -209,6 +211,23 @@ class HomeViewModelTest {
         assertEquals(listOf("clearError", "connect ${saved.id}"), controller.calls)
     }
 
+    /** The diagnostics are shown while connected only, never for a connection that is gone (ADR-0011). */
+    @Test
+    fun diagnosticsShowWhileConnectedOnly() = runTest {
+        val controller = RecordingController()
+        val saved = profiles.save(null, ProxyProfileInput(server = "proxy.example.com", port = "1080"))
+        val viewModel = HomeViewModel(profiles, controller)
+        observe(viewModel)
+        val reading = RoutingDiagnostics(connectionsOpened = 7)
+        controller.readings.value = reading
+
+        assertNull("not connected", ready(viewModel).diagnostics)
+        controller.current.value = ConnectionState(ConnectionStatus.Connected, saved.id, profile = saved)
+        assertEquals(reading, ready(viewModel).diagnostics)
+        controller.current.value = ConnectionState(ConnectionStatus.Reconnecting, saved.id, profile = saved)
+        assertNull("a switch shows no counters of the engine that stopped", ready(viewModel).diagnostics)
+    }
+
     @Test
     fun theNotificationPermissionIsRequestedOncePerRun() {
         val viewModel = HomeViewModel(profiles, RecordingController())
@@ -242,5 +261,8 @@ class HomeViewModelTest {
         override fun clearError() {
             calls += "clearError"
         }
+
+        val readings = MutableStateFlow<RoutingDiagnostics?>(null)
+        override val diagnostics: Flow<RoutingDiagnostics?> = readings
     }
 }
