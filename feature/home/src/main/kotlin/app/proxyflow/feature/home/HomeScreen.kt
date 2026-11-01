@@ -562,7 +562,7 @@ private fun DiagnosticsCard(profile: ProxyProfile, diagnostics: RoutingDiagnosti
             },
             detail = unsupported?.takeIf { blocked != null && blocked > 0 }?.let {
                 val ports = it.udpTopPorts.takeIf { list -> list.isNotEmpty() }?.joinToString(", ")
-                val portsText = ports?.let { list -> stringResource(R.string.home_diag_udp_ports, list) }
+                val portsText = ports?.let { list -> pluralStringResource(R.plurals.home_diag_udp_ports, it.udpTopPorts.size, list) }
                 val udp = countOrNull(R.plurals.home_diag_udp, it.udpBlocked)?.let { text -> portsText?.let { p -> "$text ($p)" } ?: text }
                 listOfNotNull(udp, countOrNull(R.plurals.home_diag_pings, it.pingsDropped)).joinToString(" · ") + "\n" +
                     stringResource(R.string.home_diag_unsupported_note)

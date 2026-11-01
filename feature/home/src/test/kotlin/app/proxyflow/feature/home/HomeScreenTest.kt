@@ -129,6 +129,13 @@ class HomeScreenTest {
     }
 
     @Test
+    fun oneBlockedPortIsNamedInTheSingular() {
+        val diagnostics = RoutingDiagnostics(unsupported = UnsupportedTraffic(udpBlocked = 5, udpTopPorts = listOf(443)))
+        show(ready(ConnectionState(ConnectionStatus.Connected, "p1", "Office", connectedSinceMillis = 0), diagnostics = diagnostics))
+        compose.onNodeWithText("5 UDP packets (port 443)", substring = true).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     fun tlsFailuresWhileConnectedSayWhichCheckFailed() {
         val tlsProfile = profile.copy(tlsMode = TlsMode.Tls)
         val diagnostics = RoutingDiagnostics(tls = TlsProblems(failures = 2, lastCode = "TLS_UNTRUSTED"))

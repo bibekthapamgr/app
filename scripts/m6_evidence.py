@@ -335,6 +335,8 @@ def main(argv: list[str]) -> int:
         facts.append(f"gate: {gate_tls} connections to a TLS front, every one opening with a TLS record")
     if gate_plain:
         problems.append(f"the app sent plaintext to a TLS proxy through the gate: {gate_plain[:3]}")
+    if gate_tls == 0:
+        problems.append("no connection went through the gate to a TLS front: the certificate-change test did not run, so nothing shows its retries stayed TLS")
 
     stunnel = after("stunnel.log")
     accepted = collections.Counter(m.group(1) for line in stunnel if (m := re.search(r"Service \[([\w-]+)\] accepted connection", line)))

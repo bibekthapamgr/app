@@ -92,8 +92,11 @@
         <item quantity="one">%d UDP packet</item>
         <item quantity="other">%d UDP packets</item>
     </plurals>
-    <!-- After the UDP count: the ports blocked most, e.g. "443, 3478". -->
-    <string name="home_diag_udp_ports">ports %1$s</string>
+    <!-- After the UDP count: the ports blocked most (%1$s, e.g. "443, 3478"); the quantity is how many ports. -->
+    <plurals name="home_diag_udp_ports">
+        <item quantity="one">port %1$s</item>
+        <item quantity="other">ports %1$s</item>
+    </plurals>
     <plurals name="home_diag_pings">
         <item quantity="one">%d ping</item>
         <item quantity="other">%d pings</item>
