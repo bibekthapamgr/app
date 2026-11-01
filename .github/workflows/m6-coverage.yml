@@ -1,0 +1,31 @@
+name: m6-coverage
+on:
+  push:
+    branches: [tmp/m6-coverage]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 439a59e62e4ad45021eb8746fc1065187e0027c1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: tool
+      - name: Download the device-test artifacts of run 41283456070 (the attempt GitHub keeps)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for api in 29 34 35 36; do
+            gh run download 41283456070 -R "${{ github.repository }}" -n "device-tests-api-$api" -D "art/$api"
+          done
+          find art -maxdepth 8 -type d -name 'm5-evidence-api*'
+      - name: Measure
+        run: |
+          python3 tool/coverage.py art | tee coverage.txt
+          { echo '```'; cat coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r line; do echo "::notice title=coverage::$line"; done < <(grep '^API\|views logged\|not checked at all\|pings' coverage.txt | cut -c1-900)
