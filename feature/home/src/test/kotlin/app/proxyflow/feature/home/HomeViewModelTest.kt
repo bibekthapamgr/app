@@ -218,7 +218,8 @@ class HomeViewModelTest {
 
         viewModel.connect()
 
-        assertEquals(listOf("clearError", "connect ${saved.id}"), controller.calls)
+        // Connecting also puts away a notice of an interrupted connection (M8): it is about the connection before.
+        assertEquals(listOf("clearError", "connect ${saved.id}", "dismissInterruption"), controller.calls)
     }
 
     /** The diagnostics are shown while connected only, never for a connection that is gone (ADR-0011). */

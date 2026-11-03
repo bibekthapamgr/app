@@ -2,6 +2,7 @@ package app.proxyflow.e2e
 
 import android.os.Build
 import android.os.Process
+import android.os.SystemClock
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -154,11 +155,22 @@ class KillSwitchEndToEndTest {
             ExitReason.entries.firstOrNull { it.key == key.trim() } ?: throw AssertionError("-e expect: no reason has the key \"$key\"")
         }
         val after = since
-        val found: Interruption = runBlocking {
-            withTimeout(INTERRUPTION_WAIT_MS) {
-                app.runtime.protection.interruption.filterNotNull().first { it.connectedSinceMillis >= after }
+        // Read afresh every 250 ms rather than followed as a flow: when it is not found, what is there says why.
+        val protection = app.runtime.protection
+        val waitUntil = SystemClock.elapsedRealtime() + INTERRUPTION_WAIT_MS
+        var stored: Interruption? = null
+        while (stored == null || stored.connectedSinceMillis < after) {
+            if (SystemClock.elapsedRealtime() > waitUntil) {
+                val marker = runBlocking { protection.connectedMarker() }
+                throw AssertionError(
+                    "no interruption of a connection made since $after within ${INTERRUPTION_WAIT_MS / 1_000} s: stored $stored, " +
+                        "marker $marker, session ${app.controller.state.value.status}",
+                )
             }
+            Thread.sleep(250)
+            stored = runBlocking { protection.interruption.first() }
         }
+        val found: Interruption = checkNotNull(stored)
         say("interruption: ${found.reason.key}, ended at ${found.endedAtMillis ?: "-"}, connected since ${found.connectedSinceMillis}")
         assertTrue("how Android says the last process ended: ${found.reason}, expected one of $expected", found.reason in expected)
         assertEquals(chosen, found.profileId)

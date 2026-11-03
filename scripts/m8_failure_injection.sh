@@ -442,7 +442,7 @@ if [ "$STATUS" != 0 ]; then
     echo "::group::M8 logcat, ProxyFlow's and Android's lines (API $API)"
     echo "::stop-commands::$TOKEN"
     grep -E 'ProxyFlowVpn|ProxyFlowM8|ProxyFlowE2E|AndroidRuntime|ActivityManager.*proxyflow' "$LOGCAT" |
-        sed -E -e 's/PF8SECRET[A-Za-z0-9]*/<planted password>/g' -e 's/pf8user/<planted user>/g' | tail -n 400
+        sed -E -e 's/PF8SECRET[A-Za-z0-9]*/<planted password>/g' -e 's/pf8user/<planted user>/g' | tail -n 1500
     echo "::$TOKEN::"
     echo "::endgroup::"
 fi

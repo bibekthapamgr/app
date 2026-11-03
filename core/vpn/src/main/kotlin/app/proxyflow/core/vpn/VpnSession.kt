@@ -208,6 +208,7 @@ class VpnSession(
             if (interruption != null) {
                 try {
                     protection.interrupted(interruption)
+                    log("the interruption is kept for Home")
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {

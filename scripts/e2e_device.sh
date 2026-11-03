@@ -22,16 +22,23 @@ adb shell chmod 644 /data/local/tmp/proxyflow-ca.pem
 
 # Every adb call that could wait for a wedged device is bounded, so the logs below are always collected.
 restart_adbd() {
-    timeout 30 adb "$1" >/dev/null 2>&1 || return 1
     # adbd restarts as the new user, and the old connection can still look online for a moment (run 41278339766,
     # attempt 3, API 35: "device offline" when the script then asked whether tcpdump still ran): wait until a command
-    # really runs as that user.
-    local want=0
+    # really runs as that user. adb itself can lose the device across the restart (run 41690836372, API 35: "adb root"
+    # failed and the device stayed offline, so the phone's captures were never pulled): then it connects again and
+    # tries once more, up to three times.
+    local want=0 _try _
     if [ "$1" = unroot ]; then want=2000; fi
-    for _ in $(seq 1 60); do
-        sleep 2
-        timeout 10 adb wait-for-device >/dev/null 2>&1 || continue
-        if [ "$(timeout 10 adb shell id -u 2>/dev/null | tr -d '\r')" = "$want" ]; then return 0; fi
+    for _try in 1 2 3; do
+        if timeout 30 adb "$1" >/dev/null 2>&1; then
+            for _ in $(seq 1 30); do
+                sleep 2
+                timeout 10 adb wait-for-device >/dev/null 2>&1 || continue
+                if [ "$(timeout 10 adb shell id -u 2>/dev/null | tr -d '\r')" = "$want" ]; then return 0; fi
+            done
+        fi
+        timeout 20 adb reconnect >/dev/null 2>&1 || true
+        timeout 60 adb wait-for-device >/dev/null 2>&1 || true
     done
     return 1
 }
@@ -322,7 +329,9 @@ if [ "$GUEST_CAPTURE" = 1 ]; then
     sleep 3
     echo "captured on the phone: $(timeout 30 adb shell 'ls -l /data/local/tmp/pf-*.pcap' 2>&1 | tr -d '\r' | awk '{print $NF, $5}' | paste -sd ';' -)" >> "$OUT/guest-capture.txt"
     for iface in $(cat "$OUT/guest-interfaces.txt"); do
+        # Once more after adb has the device again, should the first pull fail (the device offline for a moment).
         timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1 ||
+            { timeout 60 adb wait-for-device >/dev/null 2>&1; timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1; } ||
             echo "pull of pf-$iface.pcap failed or timed out" >> "$OUT/guest-capture.txt"
     done
 fi

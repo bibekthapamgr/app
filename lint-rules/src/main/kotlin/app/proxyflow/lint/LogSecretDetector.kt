@@ -80,13 +80,16 @@ class LogSecretDetector :
      * and the lazy message of the preconditions (not their condition). Null when [node] makes no exception message.
      */
     private fun exceptionMessage(context: JavaContext, node: UCallExpression): List<UExpression>? {
-        if (node.isConstructorCall()) {
-            val created = node.resolve()?.containingClass ?: return null
+        val method = node.resolve()
+        // A constructor call, or a constructor's delegation to its superclass's: `: Exception("…")` in a class header,
+        // `super(…)`, `this(…)`, which UAST may give as a call of the constructor rather than as a constructor call.
+        if (node.isConstructorCall() || method?.isConstructor == true) {
+            val created = method?.containingClass ?: return null
             if (!context.evaluator.inheritsFrom(created, "java.lang.Throwable", false)) return null
             return node.valueArguments.filterNot { it.getExpressionType()?.isThrowable() == true }
         }
         val name = node.methodName ?: return null
-        val owner = node.resolve()?.containingClass?.qualifiedName ?: return null
+        val owner = method?.containingClass?.qualifiedName ?: return null
         if (!owner.startsWith("kotlin.PreconditionsKt")) return null
         return when (name) {
             "error" -> node.valueArguments
