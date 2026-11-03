@@ -424,6 +424,11 @@ class App {
     fun disconnectAndSettle(timeoutMillis: Long = 10_000) {
         controller.disconnect()
         awaitStatus(ConnectionStatus.Disconnected)
+        settleDisconnected(timeoutMillis)
+    }
+
+    /** After Disconnected: the VPN interface, the service and Android's VPN network all go. */
+    fun settleDisconnected(timeoutMillis: Long = 10_000) {
         val diagnose = { Diagnostics.report(this) }
         eventually("the VPN interface closes", timeoutMillis, diagnose) { Descriptors.tun().isEmpty() }
         eventually("the VPN service stops", timeoutMillis, diagnose) { ProxyFlowVpnService.liveInstances.get() == 0 }

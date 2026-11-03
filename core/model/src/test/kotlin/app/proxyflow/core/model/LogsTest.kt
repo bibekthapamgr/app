@@ -1,5 +1,6 @@
 package app.proxyflow.core.model
 
+import java.io.File
 import java.time.ZoneId
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
@@ -34,6 +35,16 @@ class LogsTest {
             "socks5://alice:secret@10.0.0.1:1080" to "secret",
             "user alice:hunter2@host" to "hunter2",
             "token dGhpcyBpcyBhIHNlY3JldCB0b2tlbiB2YWx1ZQ== leaked" to "dGhpcyBpcyBhIHNlY3JldCB0b2tlbiB2YWx1ZQ",
+            // Short, letters only, or looking like a word: still a credential after Basic or Bearer.
+            "Basic cHVnOndscXpj" to "cHVnOndscXpj",
+            "Basic YTpi" to "YTpi",
+            "Bearer abcdefghijklmnop" to "abcdefghijklmnop",
+            "Digest username=\"alice\", realm=\"proxy\", nonce=\"dcd98b7102dd2f0e\"" to "alice",
+            "Digest username=\"alice\", realm=\"proxy\", nonce=\"dcd98b7102dd2f0e\"" to "dcd98b7102dd2f0e",
+            "alice:hunter 2@host" to "hunter",
+            "ip_203.0.113.7" to "203.0.113.7",
+            "203.0.113.7ms" to "203.0.113.7",
+            "--proxy.example.com" to "proxy.example",
         )
         for ((raw, secret) in leaks) {
             val clean = LogSanitizer.text(raw)
@@ -54,7 +65,36 @@ class LogsTest {
             "proxy offers only Digest authentication; V1 supports Basic",
             "SOCKS5 reply 0x04 host unreachable",
             "the proxy did not reach the site in time",
+            "username or password not valid for HTTP Basic authentication",
+            "HTTP Basic usernames cannot contain ':' (RFC 7617)",
+            "proxy offers only bearer authentication; V1 supports Basic",
         )
+        for (phrase in phrases) assertEquals(phrase, LogSanitizer.text(phrase))
+    }
+
+    /** Every fixed phrase the engine's errors and the session's own carry, read from their sources, stays as it is. */
+    @Test
+    fun everyPhraseTheEngineAndTheSessionWriteStaysReadable() {
+        val root = generateSequence(File("").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }
+        val goCall =
+            Regex(
+                """(?:newErr\(\s*\w+\s*,\s*|newTimeoutErr\(\s*|errors\.New\(\s*|fmt\.Errorf\(\s*|fmt\.Sprintf\(\s*|Detail:\s*)"((?:[^"\\]|\\.)*)"""",
+            )
+        val engine = File(root, "engine").walkTopDown()
+            .filter { it.extension == "go" && !it.name.endsWith("_test.go") && "proxytest" !in it.path }
+            .flatMap { file -> goCall.findAll(file.readText()).map { it.groupValues[1].replace("\\\"", "\"") } }
+            .flatMap { phrase ->
+                val filled = phrase.replace(Regex("%0?2x"), "0x04").replace("%d", "3").replace("%q", "\"x\"")
+                // What %s and %v stand for: the sign-in schemes a proxy offers, or an error's text.
+                val fills = if ("authentication" in filled) listOf("basic", "Bearer", "digest,ntlm", "NTLM") else listOf("failure")
+                fills.map { filled.replace(Regex("%[svw]"), it) }
+            }
+        val kotlinCall = Regex("""(?:ConnectionError\(\s*ConnectionError\.\w+\s*,\s*|LogDetail\.DETAIL to )"((?:[^"\\$]|\\.)*)"""")
+        val session = File(root, "core").walkTopDown()
+            .filter { it.extension == "kt" && "/src/main/" in it.invariantSeparatorsPath }
+            .flatMap { file -> kotlinCall.findAll(file.readText()).map { it.groupValues[1] } }
+        val phrases = (engine + session).toSortedSet()
+        assertTrue("${phrases.size} phrases", phrases.size > 100)
         for (phrase in phrases) assertEquals(phrase, LogSanitizer.text(phrase))
     }
 

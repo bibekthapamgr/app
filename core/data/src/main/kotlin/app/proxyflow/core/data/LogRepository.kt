@@ -8,11 +8,14 @@ import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
 import app.proxyflow.core.model.LogSanitizer
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
 /**
@@ -28,10 +31,18 @@ interface LogRepository {
      */
     val entries: Flow<List<LogEntry>>
 
-    /** Keeps [entries]; one older than the last [clear] (a batch already on its way) is dropped, so cleared events never come back. */
-    suspend fun append(entries: List<LogEntry>)
+    /**
+     * Which clearing of the log this is: one more after each [clear], counted from the app's start. A writer takes it
+     * when an event happens and hands it to [append] with the event's entry, so an entry of an event from before a
+     * Clear that arrives after it (a batch already on its way) is dropped — counted, never timed, so a clock set right
+     * in between changes nothing.
+     */
+    val generation: Long
 
-    /** Removes every entry. */
+    /** Keeps [entries] — unless the log was cleared after [generation] was taken: they are of events Clear removed, and dropped. */
+    suspend fun append(entries: List<LogEntry>, generation: Long = this.generation)
+
+    /** Removes every entry, and with them every entry of an event from before it still on its way ([generation]). */
     suspend fun clear()
 
     /**
@@ -67,22 +78,24 @@ class InMemoryLogRepository(
 ) : LogRepository {
     private val list = MutableStateFlow<List<LogEntry>>(emptyList())
     private var nextId = 1L
-    private var clearedAtMillis = Long.MIN_VALUE
+    private val clears = AtomicLong()
     override val entries: Flow<List<LogEntry>> = list.map { all ->
         val now = clock()
         all.filter { kept(it.timeMillis, now, retentionMillis) }
     }
+    override val generation: Long get() = clears.get()
 
-    override suspend fun append(entries: List<LogEntry>) {
+    override suspend fun append(entries: List<LogEntry>, generation: Long) {
         synchronized(this) {
-            val added = entries.filter { it.timeMillis >= clearedAtMillis }.map { it.sanitized().copy(id = nextId++) }
+            if (generation < clears.get()) return
+            val added = entries.map { it.sanitized().copy(id = nextId++) }
             if (added.isNotEmpty()) list.value = bounded(added + list.value)
         }
     }
 
     override suspend fun clear() {
         synchronized(this) {
-            clearedAtMillis = clock()
+            clears.incrementAndGet()
             list.value = emptyList()
         }
     }
@@ -107,8 +120,10 @@ class RoomLogRepository(
     private val maxEntries: Int = LogRepository.MAX_ENTRIES,
 ) : LogRepository {
     private val dao: LogEventDao = database.logEventDao()
+    private val clears = AtomicLong()
 
-    @Volatile private var clearedAtMillis = Long.MIN_VALUE
+    // Clear and every write take turns, so a batch that passed the check can't land after Clear's delete.
+    private val writing = Mutex()
 
     // Room hands rows to the collector's thread; parsing and sanitizing thousands of them stays off the main thread.
     override val entries: Flow<List<LogEntry>> = dao.observeLatest(maxEntries)
@@ -118,16 +133,23 @@ class RoomLogRepository(
         }
         .flowOn(Dispatchers.Default)
 
-    override suspend fun append(entries: List<LogEntry>) {
-        val rows = entries.filter { it.timeMillis >= clearedAtMillis }.map { it.sanitized().toRow() }
+    override val generation: Long get() = clears.get()
+
+    override suspend fun append(entries: List<LogEntry>, generation: Long) {
+        val rows = entries.map { it.sanitized().toRow() }
         if (rows.isEmpty()) return
-        val now = clock()
-        dao.insertBounded(rows, now - retentionMillis, now + LogRepository.FUTURE_MARGIN_MILLIS, maxEntries)
+        writing.withLock {
+            if (generation < clears.get()) return
+            val now = clock()
+            dao.insertBounded(rows, now - retentionMillis, now + LogRepository.FUTURE_MARGIN_MILLIS, maxEntries)
+        }
     }
 
     override suspend fun clear() {
-        clearedAtMillis = clock()
-        dao.deleteAll()
+        writing.withLock {
+            clears.incrementAndGet()
+            dao.deleteAll()
+        }
     }
 
     override suspend fun purge() {

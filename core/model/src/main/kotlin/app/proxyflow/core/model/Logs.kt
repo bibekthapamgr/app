@@ -148,21 +148,35 @@ object LogSanitizer {
     private const val W = """[\p{L}\p{N}_]"""
     private val RULES: List<Pair<Regex, (MatchResult) -> CharSequence>> = listOf(
         Regex("""(?i)\b[a-z][a-z0-9+.-]*://\S*""") to { _ -> "[url]" },
+        // "user:password@", a password with spaces too: from the user to the end of what follows the @.
+        Regex("""(?<!\S)[^\s:@]+:[^@]{0,64}?@\S*""") to { _ -> "[redacted]" },
         Regex("""\S+@\S*""") to { _ -> "[redacted]" },
-        // A sign-in scheme's credentials ("Basic dXNlcjpwYXNzd29yZA=="): only a value with a digit or + / =, so a phrase
-        // such as "Digest authentication" stays readable.
-        Regex("""(?i)\b(basic|bearer|digest|negotiate|ntlm)\s+(?=[A-Za-z0-9+/=._~-]*[0-9+/=])[A-Za-z0-9+/=._~-]{8,}""") to
+        // A sign-in's parameters, as Digest sends them (username="…", realm, nonce, response…); the schemes' rules below
+        // then leave "Digest username=[redacted]" as it is.
+        Regex("""(?i)\b(username|user|password|passwd|pass|realm|nonce|cnonce|response|opaque|token)\s*=\s*(?:"[^"]*"?|[^\s,;]+)""") to
+            { match -> "${match.groupValues[1]}=[redacted]" },
+        // Basic and Bearer credentials: whatever follows the scheme but the few words a phrase has there ("HTTP Basic
+        // authentication", "a Bearer token"), so a value that looks like a word is redacted too.
+        Regex("""\b((?i:basic|bearer))\s+([A-Za-z0-9+/=._~-]{4,})(?![=\[])""") to { match ->
+            if (match.groupValues[2].lowercase(Locale.ROOT) in PHRASE_WORDS) match.value else "${match.groupValues[1]} [redacted]"
+        },
+        // Other schemes' tokens: only a value with a digit or + / =, so a phrase such as "Digest authentication" stays readable.
+        Regex("""\b((?i:digest|negotiate|ntlm))\s+(?=[A-Za-z0-9+/=._~-]*[0-9+/=])[A-Za-z0-9+/=._~-]{8,}(?![=\[])""") to
             { match -> "${match.groupValues[1]} [redacted]" },
-        // Followed by a full stop that ends a sentence it is still an address; followed by ".5" it is a longer number.
-        Regex("""(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)(?::\d{1,5})?""") to { _ -> "[address]" },
+        // Next to letters too ("ip_203.0.113.7", "203.0.113.7ms"); followed by a full stop that ends a sentence it is still
+        // an address, followed by ".5" it is a longer number.
+        Regex("""(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?!\d|\.\d)(?::\d{1,5})?""") to { _ -> "[address]" },
         COLONS to { match -> if ("::" in match.value || match.value.count { it == ':' } >= 5) "[address]" else match.value },
-        // A dotted name, "*.provider.net" and "my_proxy.example.com" too; not the tail of a longer one.
-        Regex("""(?<!$W|-)(?<!(?:$W|-)\.)(?:$W(?:(?:$W|-){0,61}$W)?\.)+\p{L}(?:\p{L}|\p{N}|-){1,62}(?!$W|-)(?::\d{1,5})?""") to
+        // A dotted name, "*.provider.net", "my_proxy.example.com" and "--proxy.example.com" too; not the tail of a longer one.
+        Regex("""(?<!$W)(?<!(?:$W|-)\.)(?:$W(?:(?:$W|-){0,61}$W)?\.)+\p{L}(?:\p{L}|\p{N}|-){1,62}(?!$W|-)(?::\d{1,5})?""") to
             { _ -> "[host]" },
         // A name with a port but no dot ("myproxy:8080"). A bare one-word name ("squid") can't be told from a word.
         Regex("""(?<!$W|[.:-])\p{L}(?:$W|-)*:\d{1,5}(?!$W|[.:])""") to { _ -> "[host]" },
         Regex("""[A-Za-z0-9+/_=-]{24,}""") to { _ -> "[redacted]" },
     )
+
+    /** What a phrase may have after "Basic" or "Bearer"; anything else there is taken for a credential. */
+    private val PHRASE_WORDS = setOf("auth", "authentication", "authorization", "credentials", "scheme", "token", "username", "usernames")
 
     /** [raw] made safe to keep: see the class comment. */
     fun text(raw: String): String {

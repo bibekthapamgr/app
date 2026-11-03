@@ -23,12 +23,16 @@ class FakeLogRepository(initial: List<LogEntry> = emptyList()) : LogRepository {
     override val entries: Flow<List<LogEntry>> = state
     var purges = 0
         private set
+    override var generation = 0L
+        private set
 
-    override suspend fun append(entries: List<LogEntry>) {
+    override suspend fun append(entries: List<LogEntry>, generation: Long) {
+        if (generation < this.generation) return
         state.update { kept -> entries.mapIndexed { i, e -> e.copy(id = (kept.maxOfOrNull { it.id } ?: 0) + i + 1) } + kept }
     }
 
     override suspend fun clear() {
+        generation++
         state.value = emptyList()
     }
 

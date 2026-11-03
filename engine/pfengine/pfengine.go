@@ -327,7 +327,7 @@ func newEngine(fd int, cfg config, dialer tunnel.TunnelDialer, p Platform) (*tun
 func protector(p Platform) adapters.Protector {
 	return func(fd uintptr) error {
 		if !p.Protect(int64(fd)) {
-			return errors.New("VpnService.protect returned false")
+			return errors.New("the VPN service did not protect the socket")
 		}
 		return nil
 	}

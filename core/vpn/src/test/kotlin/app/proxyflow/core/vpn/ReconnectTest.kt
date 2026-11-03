@@ -570,7 +570,11 @@ class ReconnectTest {
         assertFalse(host.tuns.single().closed)
     }
 
-    /** An engine that fails keeps the traffic it carried in the session's counters: they never go back. */
+    /**
+     * The traffic of an engine that failed stays in the session's counters, while Blocked and after a restart (the next
+     * engine's is added to it): they never go back. The fake engine reports a failed engine's counters until it is
+     * stopped, as the real one does — which [aFailedEnginesCountersAreStillRead] checks of the real one.
+     */
     @Test
     fun anEngineFailureKeepsItsTrafficInTheSession() {
         connect()

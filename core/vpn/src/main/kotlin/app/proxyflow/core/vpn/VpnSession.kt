@@ -296,6 +296,8 @@ class VpnSession(
         if (sessionTotals?.profileId.let { it != null && it != profile.id }) closeSession() // a switch ends the old profile's session
         if (!connectedOnce) closeInterface() // an attempt that never connected leaves nothing behind
         val reconnecting = tun != null
+        // The interface stays with no engine: from now traffic is held (a switch's, or a restart's while connected).
+        if (reconnecting && heldSinceMillis == null) heldSinceMillis = clock()
         log("connect ${profile.id}${if (reconnecting) " (reconnect)" else ""}")
         attemptStartedMillis = clock()
         val previous = state.value

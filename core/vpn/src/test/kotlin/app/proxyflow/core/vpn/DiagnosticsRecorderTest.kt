@@ -46,9 +46,9 @@ class DiagnosticsRecorderTest {
         val release = CountDownLatch(1)
         val delegate = InMemoryLogRepository(clock = { now.get() })
         val log = object : LogRepository by delegate {
-            override suspend fun append(entries: List<LogEntry>) {
+            override suspend fun append(entries: List<LogEntry>, generation: Long) {
                 release.await(5, TimeUnit.SECONDS) // the disk is slow: the writer is stuck on its first batch
-                delegate.append(entries)
+                delegate.append(entries, generation)
             }
         }
         val recorder = DiagnosticsRecorder(log, scope, clock = { now.get() }, capacity = 10)
@@ -88,17 +88,38 @@ class DiagnosticsRecorderTest {
     }
 
     @Test
-    fun aCountGatheredBeforeTheLogWasClearedGoesWithIt() {
-        val log = InMemoryLogRepository(clock = { now.get() })
+    fun whatHappenedBeforeTheLogWasClearedGoesWithItEvenWhenItIsWrittenAfter() {
+        val release = CountDownLatch(1)
+        val delegate = InMemoryLogRepository(clock = { now.get() })
+        val log = object : LogRepository by delegate {
+            override suspend fun append(entries: List<LogEntry>, generation: Long) {
+                release.await(5, TimeUnit.SECONDS) // the writer is held while the log is cleared
+                delegate.append(entries, generation)
+            }
+        }
         val recorder = DiagnosticsRecorder(log, scope, clock = { now.get() })
+        recorder.record(entry(1))
+        Thread.sleep(100) // the writer took entry 1 and waits
+        recorder.record(entry(2)) // queued
         recorder.connectionFailed("TARGET_UNREACHABLE", "p1")
+        recorder.connectionFailed("TARGET_REFUSED", "p2")
 
-        now.addAndGet(1_000)
         runBlocking { log.clear() }
+        now.addAndGet(1_000)
+        repeat(5) { recorder.connectionFailed("TARGET_UNREACHABLE", "p1") }
         recorder.flushProblems()
-        recorder.record(entry(5_000))
+        recorder.record(entry(3))
+        release.countDown()
 
-        assertEquals(listOf(LogEvent.Connected), awaitEntries(log, 1).map { it.event })
+        awaitEntries(log, 2)
+        Thread.sleep(100) // nothing else comes
+        val written = runBlocking { log.entries.first() }
+        assertEquals("only what happened after Clear: $written", 2, written.size)
+        assertEquals("p3", written.single { it.event == LogEvent.Connected }.profileId)
+        val counted = written.single { it.event == LogEvent.ConnectionProblems }
+        assertEquals("p1" to "TARGET_UNREACHABLE", counted.profileId to counted.code)
+        assertEquals("the failures after Clear, counted afresh", "5", counted.details[LogDetail.COUNT])
+        assertEquals("dated when the first of them failed", NOW + 1_000, counted.timeMillis)
     }
 
     @Test
@@ -106,9 +127,9 @@ class DiagnosticsRecorderTest {
         val failures = AtomicInteger()
         val delegate = InMemoryLogRepository(clock = { now.get() })
         val log = object : LogRepository by delegate {
-            override suspend fun append(entries: List<LogEntry>) {
+            override suspend fun append(entries: List<LogEntry>, generation: Long) {
                 if (failures.getAndIncrement() == 0) throw IllegalStateException("disk full")
-                delegate.append(entries)
+                delegate.append(entries, generation)
             }
         }
         val recorder = DiagnosticsRecorder(log, scope, clock = { now.get() })

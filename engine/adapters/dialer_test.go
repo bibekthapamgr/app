@@ -318,7 +318,33 @@ func TestSOCKS5ConnectReplyNotInTimeIsTheSites(t *testing.T) {
 	if _, err := d.Dial(ctx, Target{Host: "a.test", Port: 80}); CodeOf(err) != CodeCanceled {
 		t.Fatalf("cancelled: got %v, want CANCELED", err)
 	}
+
+	// A caller's deadline earlier than the handshake's that passes while the reply is awaited (the tunnel's per-flow
+	// limit, a check's timeout): the caller's timeout, never the site's. The connection's deadline can pass a moment
+	// before the caller's context notices its own; deadlineOnly holds that moment open, so this is not left to timing.
+	soon := deadlineOnly{context.Background(), time.Now().Add(100 * time.Millisecond)}
+	if _, err := d.Dial(soon, Target{Host: "a.test", Port: 80}); CodeOf(err) != CodeTimeout {
+		t.Fatalf("a caller's deadline not yet noticed: got %v, want HANDSHAKE_TIMEOUT", err)
+	}
+	for i := 0; i < 20; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		_, err := d.Dial(ctx, Target{Host: "a.test", Port: 80})
+		cancel()
+		if CodeOf(err) == CodeTargetUnreachable || !IsTimeout(err) {
+			t.Fatalf("a caller's deadline (%d): got %v, want the caller's timeout", i, err)
+		}
+	}
+	waitFor(t, func() bool { return stalled.Active() == 0 }, "the stalled proxy connections to be closed")
 }
+
+// deadlineOnly reports a deadline it never enforces: a caller's context in the moment after its deadline has passed
+// on a connection and before its own timer has ended it.
+type deadlineOnly struct {
+	context.Context
+	at time.Time
+}
+
+func (c deadlineOnly) Deadline() (time.Time, bool) { return c.at, true }
 
 // The app's diagnostics count proxy timeouts (IsTimeout): connecting to the proxy or
 // its handshake took too long. Other failures, and a slow lookup of the proxy's own

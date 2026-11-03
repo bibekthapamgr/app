@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import androidx.activity.compose.LocalActivity
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -106,9 +107,11 @@ internal fun LogsRoute(viewModel: LogsViewModel, appVersion: String) {
     val copied = stringResource(R.string.logs_copied)
     val notHandedOver = stringResource(R.string.logs_not_handed_over)
     // Each time the screen is shown (back from another tab too) the log's bounds are applied; leaving it closes the
-    // detail sheet and the Clear confirmation, so they don't come back with it.
+    // detail sheet and the Clear confirmation, so they don't come back with it. A rotation, the dark theme or another
+    // language builds the activity and the screen again without leaving: what was open stays open.
+    val activity = LocalActivity.current
     LifecycleEventEffect(Lifecycle.Event.ON_START) { viewModel.onShown() }
-    DisposableEffect(viewModel) { onDispose { viewModel.onLeft() } }
+    DisposableEffect(viewModel) { onDispose { if (activity?.isChangingConfigurations != true) viewModel.onLeft() } }
     val tell: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
     val copy: (String) -> Unit = { text ->
         if (runCatching { copyToClipboard(context, text) }.isFailure) {

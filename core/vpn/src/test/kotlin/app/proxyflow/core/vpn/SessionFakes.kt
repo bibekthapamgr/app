@@ -110,6 +110,7 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
         trafficNow = null
     }
 
+    // Until it is stopped, after a failure too, as ProxyTunnelEngine reads the engine's (ReconnectTest.aFailedEnginesCountersAreStillRead).
     override fun traffic(): EngineTraffic? = if (running) trafficNow else null
 
     override fun consecutiveProxyFailures(): Long = if (running) inARow else 0

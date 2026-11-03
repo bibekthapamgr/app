@@ -30,9 +30,11 @@ interface DiagnosticsSink {
 /**
  * Writes the session's entries to the [LogRepository] in order, off the session's thread and in
  * batches, so logging never slows a transition; a backlog past [capacity] drops the oldest unwritten
- * entries. Sites' connection failures — as many as an app makes — are counted per code and profile
- * and written as one [LogEvent.ConnectionProblems] entry each per [windowMillis], dated when the first
- * of them failed (so a count gathered before the log was cleared is dropped with it).
+ * entries. Each entry carries the log's [LogRepository.generation] from when its event happened, so
+ * one still queued when the log is cleared is dropped with the rest. Sites' connection failures — as
+ * many as an app makes — are counted per code and profile and written as one
+ * [LogEvent.ConnectionProblems] entry each per [windowMillis], dated when the first of them failed; a
+ * count from before a Clear goes with it, and the failures after it are counted afresh.
  */
 class DiagnosticsRecorder(
     private val repository: LogRepository,
@@ -41,7 +43,7 @@ class DiagnosticsRecorder(
     private val windowMillis: Long = 60_000,
     capacity: Int = 1_000,
 ) : DiagnosticsSink {
-    private val queue = Channel<LogEntry>(capacity, BufferOverflow.DROP_OLDEST)
+    private val queue = Channel<Pending>(capacity, BufferOverflow.DROP_OLDEST)
     private val counts = mutableMapOf<Pair<String?, String>, Problems>()
 
     init {
@@ -50,7 +52,10 @@ class DiagnosticsRecorder(
             for (first in queue) {
                 val batch = mutableListOf(first)
                 while (batch.size < BATCH) batch += queue.tryReceive().getOrNull() ?: break
-                runCatching { repository.append(batch) }
+                // By the log generation they were recorded in, in order: a Clear while they waited splits the batch.
+                for ((generation, entries) in batch.groupBy { it.generation }) {
+                    runCatching { repository.append(entries.map { it.entry }, generation) }
+                }
             }
         }
         scope.launch(quiet) {
@@ -62,21 +67,23 @@ class DiagnosticsRecorder(
     }
 
     override fun record(entry: LogEntry) {
-        queue.trySend(entry)
+        queue.trySend(Pending(repository.generation, entry))
     }
 
     override fun connectionFailed(code: String, profileId: String?) {
         val now = clock()
+        val generation = repository.generation
         synchronized(counts) {
             val key = profileId to code
-            counts[key] = counts[key]?.let { it.copy(count = it.count + 1) } ?: Problems(firstMillis = now, count = 1)
+            val counting = counts[key]?.takeIf { it.generation == generation } // one from before a Clear starts again
+            counts[key] = counting?.let { it.copy(count = it.count + 1) } ?: Problems(generation, firstMillis = now, count = 1)
         }
     }
 
     override fun flushProblems() {
         val gathered = synchronized(counts) { counts.toMap().also { counts.clear() } }
         for ((key, problems) in gathered.entries.sortedBy { it.key.second }) {
-            record(
+            val entry =
                 LogEntry(
                     timeMillis = problems.firstMillis,
                     level = LogEntry.Level.Warning,
@@ -88,12 +95,14 @@ class DiagnosticsRecorder(
                         LogDetail.COUNT to problems.count.toString(),
                         LogDetail.WINDOW_S to (windowMillis / 1_000).toString(),
                     ),
-                ),
-            )
+                )
+            queue.trySend(Pending(problems.generation, entry)) // of when they failed: dropped if the log was cleared since
         }
     }
 
-    private data class Problems(val firstMillis: Long, val count: Long)
+    private class Pending(val generation: Long, val entry: LogEntry)
+
+    private data class Problems(val generation: Long, val firstMillis: Long, val count: Long)
 
     private companion object {
         const val BATCH = 100

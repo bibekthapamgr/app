@@ -493,8 +493,10 @@ func partialTimeout(remaining time.Duration, addrsLeft int) time.Duration {
 // HandshakeTimeout and interrupted at once when ctx ends.
 func (d *Dialer) handshake(ctx context.Context, raw net.Conn, target Target) (net.Conn, error) {
 	deadline := time.Now().Add(d.cfg.HandshakeTimeout)
+	ownDeadline := true // whether the deadline in force is the handshake's own, not the caller's
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
 		deadline = dl
+		ownDeadline = false
 	}
 	if err := raw.SetDeadline(deadline); err != nil {
 		return nil, newErr(CodeProxyUnreachable, "the proxy connection closed", err)
@@ -524,6 +526,12 @@ func (d *Dialer) handshake(ctx context.Context, raw net.Conn, target Target) (ne
 		return nil, handshakeCtxErr(ctx)
 	}
 	if err != nil {
+		// A SOCKS5 proxy that answered the method selection but not the connection request is still trying to
+		// reach the site — when the deadline that passed was the handshake's own. A caller's earlier deadline can
+		// pass on the connection a moment before the caller's context notices; that is the caller's timeout.
+		if errors.Is(err, errConnectReplyLate) && ownDeadline && ctx.Err() == nil {
+			return nil, newErr(CodeTargetUnreachable, "the proxy did not reach the site in time", err)
+		}
 		return nil, classifyHandshakeError(ctx, err)
 	}
 	if err := raw.SetDeadline(time.Time{}); err != nil {

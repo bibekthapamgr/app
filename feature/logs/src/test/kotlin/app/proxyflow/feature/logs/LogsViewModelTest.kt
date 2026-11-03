@@ -10,14 +10,20 @@ import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.testing.FakeLogRepository
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
+import java.util.Collections
 import kotlin.coroutines.EmptyCoroutineContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -85,6 +91,27 @@ class LogsViewModelTest {
         vm.requestClear()
         vm.confirmClear()
         assertFalse(vm.uiState.value.confirmingClear)
+    }
+
+    /** As the app builds it: the log is read, sorted and filtered on [Dispatchers.Default], never where the screen collects it. */
+    @Test
+    fun theListIsReadAndFilteredOffTheMainThread() = runTest {
+        val threads = Collections.synchronizedSet(mutableSetOf<String>())
+        val watched = object : LogRepository by repository {
+            override val entries: Flow<List<LogEntry>> = repository.state.onEach { threads += Thread.currentThread().name }
+        }
+        repository.state.value = listOf(entry(1, 1_000), entry(2, 2_000, level = LogEntry.Level.Error, code = "AUTH_FAILED"))
+        val vm = LogsViewModel(watched, profiles)
+        observe(vm) // collected here, on the test's thread
+        vm.setFilter(LogFilter.Errors)
+
+        val shown = withContext(Dispatchers.Default) {
+            withTimeout(5_000) { vm.uiState.first { !it.loading && it.filter == LogFilter.Errors } }
+        }
+
+        assertEquals(listOf(2L), shown.entries.map { it.id })
+        assertEquals(2, shown.total)
+        assertTrue("read on $threads", threads.isNotEmpty() && threads.all { it.startsWith("DefaultDispatcher-worker") })
     }
 
     @Test

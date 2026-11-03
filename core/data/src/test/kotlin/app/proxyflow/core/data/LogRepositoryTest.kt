@@ -10,6 +10,9 @@ import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -102,31 +105,69 @@ class LogRepositoryTest {
     }
 
     @Test
-    fun entriesDatedFarAheadOfTheClockAreDropped() = runTest {
+    fun entriesDatedFarAheadOfTheClockAreHiddenWhenReadAndDroppedByThePurge() = runTest {
         for (repository in repositories()) {
-            // Written while the phone's clock was a day ahead, then the clock was set right.
-            val ahead = now + DAY
-            val soon = now + LogRepository.FUTURE_MARGIN_MILLIS / 2
-            repository.append(listOf(entry(ahead), entry(soon), entry(now)))
+            val right = now
+            val soon = right + LogRepository.FUTURE_MARGIN_MILLIS / 2
+            now += DAY // written while the phone's clock was a day ahead
+            val ahead = now
+            repository.append(listOf(entry(ahead), entry(soon)))
+            now = right // then the clock was set right, with no write or purge since
 
-            assertEquals("hidden when read", listOf(soon, now), repository.entries.first().map { it.timeMillis })
+            assertEquals("hidden when read", listOf(soon), repository.entries.first().map { it.timeMillis })
+            if (repository is RoomLogRepository) {
+                assertEquals(
+                    "still in the database until the purge",
+                    2,
+                    opened.last().logEventDao().count(),
+                )
+            }
             repository.purge()
+            if (repository is RoomLogRepository) assertEquals("deleted by the purge", 1, opened.last().logEventDao().count())
             now += DAY // the day it was dated: dropped by the purge, it never shows
             assertFalse(repository.entries.first().any { it.timeMillis == ahead })
         }
     }
 
     @Test
-    fun entriesFromBeforeClearThatArriveAfterItAreDropped() = runTest {
+    fun entriesOfEventsFromBeforeClearAreDroppedWhenTheyArriveAfterIt() = runTest {
         for (repository in repositories()) {
-            repository.append(listOf(entry(now - 5_000)))
+            val before = repository.generation
+            repository.append(listOf(entry(now - 5_000)), before)
             repository.clear()
             // A batch the session's writer had on its way, and the minute's count gathered before Clear.
-            repository.append(listOf(entry(now - 3_000), entry(now - 1)))
+            repository.append(listOf(entry(now - 3_000), entry(now - 1)), before)
             now += 1_000
-            repository.append(listOf(entry(now)))
+            repository.append(listOf(entry(now)), repository.generation)
 
             assertEquals(listOf(now), repository.entries.first().map { it.timeMillis })
+        }
+    }
+
+    @Test
+    fun aClockSetBackAfterClearLosesNothingWrittenAfterIt() = runTest {
+        for (repository in repositories()) {
+            val right = now
+            now += DAY // the phone's clock a day ahead when the log is cleared
+            repository.clear()
+            now = right // then set right by the network
+
+            repository.append(listOf(entry(now - 1_000), entry(now)))
+
+            assertEquals(listOf(now, now - 1_000), repository.entries.first().map { it.timeMillis })
+        }
+    }
+
+    @Test
+    fun aBatchTakenBeforeClearNeverLandsAfterIt() = runTest {
+        val repository = room()
+        repeat(20) { round ->
+            val before = repository.generation
+            val writes = (1..10).map { i -> async(Dispatchers.IO) { repository.append(listOf(entry(now - i)), before) } }
+            val clear = async(Dispatchers.IO) { repository.clear() }
+            (writes + clear).awaitAll()
+
+            assertEquals("round $round", emptyList<LogEntry>(), repository.entries.first())
         }
     }
 
