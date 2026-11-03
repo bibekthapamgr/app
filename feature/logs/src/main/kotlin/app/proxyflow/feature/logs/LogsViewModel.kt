@@ -10,7 +10,7 @@ import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogFilter
 import java.util.Locale
-import kotlinx.coroutines.CoroutineDispatcher
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -48,7 +48,7 @@ data class LogsUiState(
  * Clear removes every entry. Sorting, filtering and searching thousands of entries happen on
  * [work], off the main thread; a log that can't be read shows as empty rather than taking the app down.
  */
-class LogsViewModel(private val logs: LogRepository, profiles: ProfileRepository, work: CoroutineDispatcher = Dispatchers.Default) :
+class LogsViewModel(private val logs: LogRepository, profiles: ProfileRepository, work: CoroutineContext = Dispatchers.Default) :
     ViewModel() {
     private val filter = MutableStateFlow(LogFilter.All)
     private val query = MutableStateFlow("")

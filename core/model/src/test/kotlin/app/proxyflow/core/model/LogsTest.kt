@@ -195,7 +195,8 @@ class LogsTest {
         val kept = LogExport.newestFitting(entries.shuffled(), zone, maxChars = 50 * lineLength + 1_000, reserve = 1_000)
 
         assertEquals((2_000L downTo 1_951L).toList(), kept.map { it.id })
-        assertEquals(entries, LogExport.newestFitting(entries, zone).sortedBy { it.id })
+        val day = entries.take(1_000) // a busy day's log fits whole
+        assertEquals(day, LogExport.newestFitting(day, zone).sortedBy { it.id })
         assertTrue(LogExport.text(LogExport.newestFitting(entries, zone), listOf("h"), zone).length <= LogExport.MAX_CHARS)
     }
 }

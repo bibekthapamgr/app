@@ -10,7 +10,7 @@ import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.testing.FakeLogRepository
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
-import kotlinx.coroutines.Dispatchers
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
@@ -77,7 +77,7 @@ class LogsViewModelTest {
 
             override suspend fun clear() = throw IllegalStateException("database or disk is full")
         }
-        val vm = LogsViewModel(broken, profiles, work = Dispatchers.Main)
+        val vm = LogsViewModel(broken, profiles, work = EmptyCoroutineContext)
         observe(vm)
 
         assertFalse(vm.uiState.value.loading)
@@ -186,8 +186,8 @@ class LogsViewModelTest {
         assertTrue(vm.uiState.value.entries.isEmpty())
     }
 
-    /** Filtering on the test's main dispatcher, so each change shows at once. */
-    private fun viewModel() = LogsViewModel(repository, profiles, work = Dispatchers.Main)
+    /** Filtering where the test runs, so each change shows at once. */
+    private fun viewModel() = LogsViewModel(repository, profiles, work = EmptyCoroutineContext)
 
     private fun TestScope.observe(vm: LogsViewModel) {
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }

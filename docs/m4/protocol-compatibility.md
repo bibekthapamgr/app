@@ -114,7 +114,7 @@ Each app connection gets its own proxy connection; nothing is pooled or reused.
 | Setting | Default | What happens at the limit |
 |---|---|---|
 | Connect to the proxy (all its addresses) | 10 s | `PROXY_UNREACHABLE` |
-| TLS and proxy handshake | 10 s | `HANDSHAKE_TIMEOUT` |
+| TLS and proxy handshake | 10 s | `HANDSHAKE_TIMEOUT`; since M7, a SOCKS5 proxy that answered the method selection (and the sign-in) but not the connection request is still reaching the site: `TARGET_UNREACHABLE` (ADR-0012 §6) |
 | Whole tunnel set-up per app connection | 15 s | the earlier of the two above applies |
 | Cancellation (Stop, ResetFlows) | at once | blocked reads and writes are interrupted by a past deadline; `CANCELED` (counted, never shown, never a proxy failure) |
 | Concurrent TCP flows, set-ups included | 1 024 | new connections refused with a RST, `CONNECTION_LIMIT` |
@@ -152,7 +152,7 @@ Stable strings shared with the UI catalogue (`docs/m1/04-ux-screens-and-error-st
 | `AUTH_REQUIRED` / `AUTH_FAILED` | proxy | see §3 and §4 |
 | `TLS_UNTRUSTED` / `TLS_HOSTNAME` / `TLS_EXPIRED` / `TLS_HANDSHAKE` | proxy | see §5 |
 | `PROTOCOL_ERROR` | proxy | not a SOCKS5/HTTP proxy, malformed or oversized answer, proxy closed or reset during the handshake |
-| `HANDSHAKE_TIMEOUT` | proxy | the proxy accepted TCP but did not finish in time |
+| `HANDSHAKE_TIMEOUT` | proxy | the proxy accepted TCP but did not finish in time (not a SOCKS5 proxy's late reply to the connection request, since M7: `TARGET_UNREACHABLE`) |
 | `TARGET_NOT_ALLOWED` / `TARGET_UNREACHABLE` / `TARGET_REFUSED` / `TARGET_UNSUPPORTED` / `PROXY_GENERAL_FAILURE` | target | the proxy works but refused or could not reach one destination |
 | `STALE_DNS_MAPPING` / `CONNECTION_LIMIT` / `APP_HANDSHAKE_FAILED` / `INTERNAL` | target | engine-local, per connection |
 | `CANCELED` | internal | a set-up interrupted by Stop or ResetFlows; never shown |

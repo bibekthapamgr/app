@@ -41,7 +41,7 @@ HOLD_SECONDS = 60
 FLOW = re.compile(r"ProxyFlowE2E\s*:\s*traffic (\S+) (up|down) flow up=(\d+|null)/(\d+) down=(\d+|null)/(\d+)")
 SESSION = re.compile(r"ProxyFlowE2E\s*:\s*traffic (\S+) session up=(\d+)/(\d+) down=(\d+)/(\d+)")
 HELD = re.compile(r"ProxyFlowE2E\s*:\s*network change: held connection ENDED (\d+) (\w+)")
-LOG_CHECKS = re.compile(r"ProxyFlowE2E\s*:\s*(log checked .*|log cleared .*)$")
+LOG_CHECKS = re.compile(r"ProxyFlowE2E\s*:\s*(log checked .*|log cleared.*)$")
 VPN = re.compile(r"ProxyFlowVpn\s*:\s*(.*)$")
 
 
@@ -232,8 +232,9 @@ def main(argv: list[str]) -> int:
         problems += more_problems
     checks = [m.group(1) for line in logcat if (m := LOG_CHECKS.search(line))]
     facts.append(f"diagnostic log: {len(checks)} checks: " + "; ".join(checks[:4]))
-    if not checks:
-        problems.append("no log check in logcat: the diagnostic log tests did not run")
+    for kind, what in (("log checked", "the log's checks of a failure and a session"), ("log cleared", "the log's Clear check")):
+        if not any(check.startswith(kind) for check in checks):
+            problems.append(f"no \"{kind}\" line in logcat: {what} did not run")
 
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, "m7-evidence.txt"), "w", encoding="utf-8") as f:

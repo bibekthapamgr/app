@@ -822,6 +822,7 @@ class M7EvidenceTest(unittest.TestCase):
                     self.E2E + "traffic SOCKS5 session up=1048600/1048600 down=4194317/4194317",
                     self.E2E + "network change: held connection ENDED 412 reset",
                     self.E2E + "log checked 6 entries of a refused sign-in",
+                    self.E2E + "log cleared: no entry left, nothing readable in logs.db ({journal_mode=truncate, secure_delete=1})",
                     self.VPN + "network: wifi (first report)",
                     self.VPN + "reconnecting: proxy_failures PROXY_UNREACHABLE",
                     self.VPN + "reconnect attempt 1 of 8",
@@ -833,6 +834,7 @@ class M7EvidenceTest(unittest.TestCase):
             with open(os.path.join(out, "m7-evidence.txt")) as f:
                 written = f.read()
             self.assertIn("the session heard of the phone's network 1 times: wifi (first report)", written)
+            self.assertIn("diagnostic log: 2 checks", written)
             self.assertNotIn("PROBLEM", written)
 
 
