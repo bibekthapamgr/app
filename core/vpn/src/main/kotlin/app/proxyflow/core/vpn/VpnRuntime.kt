@@ -5,8 +5,10 @@ import android.content.Intent
 import android.net.VpnService
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.InMemoryLogRepository
+import app.proxyflow.core.data.InMemoryProtectionStore
 import app.proxyflow.core.data.LogRepository
 import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.data.ProtectionStore
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.RoutingDiagnostics
@@ -46,6 +48,8 @@ import kotlinx.coroutines.launch
  * @param logs where the session's diagnostic log entries go (the Logs screen's).
  * @param retry how the session reconnects on its own, read each time it starts to. Only the device
  *   tests pass one (shorter waits); the app always uses [RetryPolicy]'s default.
+ * @param protection what outlives the process about the connection (M8, ADR-0013): Android's kill switch as last
+ *   reported, the connected marker, an interrupted connection the user has not seen yet.
  */
 class VpnRuntime(
     context: Context,
@@ -54,6 +58,7 @@ class VpnRuntime(
     proxyTrust: (() -> X509TrustManager)? = null,
     logs: LogRepository = InMemoryLogRepository(),
     retry: () -> RetryPolicy = { RetryPolicy() },
+    val protection: ProtectionStore = InMemoryProtectionStore(),
     private val engine: TunnelEngine = if (proxyTrust == null) ProxyTunnelEngine() else ProxyTunnelEngine(trust = proxyTrust),
 ) {
     private val appContext = context.applicationContext
@@ -80,6 +85,8 @@ class VpnRuntime(
         log = log::add,
         retry = retry,
         diagnostics = recorder,
+        protection = protection,
+        history = AndroidProcessHistory(appContext),
     )
 
     val controller: ConnectionController = VpnConnectionController(this)
@@ -189,4 +196,6 @@ internal class VpnConnectionController(private val runtime: VpnRuntime) : Connec
     override val traffic: Flow<TrafficStats?> get() = runtime.traffic
 
     override fun retryNow() = runtime.session.retryNow()
+
+    override fun checkSystemKillSwitch() = runtime.session.checkSystemKillSwitch()
 }

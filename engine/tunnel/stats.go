@@ -46,6 +46,8 @@ type Event struct {
 	BytesDown  int64     `json:"bytes_down,omitempty"`
 	DurationMs int64     `json:"duration_ms,omitempty"`
 	Count      int       `json:"count,omitempty"`
+	// Unanswered marks a failed connection a SOCKS5 proxy left unanswered (adapters.IsUnanswered, M8).
+	Unanswered bool `json:"unanswered,omitempty"`
 }
 
 type stats struct {
@@ -65,9 +67,15 @@ type stats struct {
 	lastProxy        *ErrorInfo
 	lastFailure      *ErrorInfo
 	consecutive      int64
+	unanswered       int64               // SOCKS5 connection requests left unanswered in a row (M8)
+	unansweredSites  map[uint64]struct{} // hashes of their sites, at most maxUnansweredSites
 }
 
+// maxUnansweredSites bounds the sites remembered for the unanswered count: the session needs a few, never more.
+const maxUnansweredSites = 8
+
 func (s *stats) init() {
+	s.unansweredSites = map[uint64]struct{}{}
 	s.failures = map[string]int64{}
 	s.hostnameFailures = map[string]int64{}
 	s.dns = map[string]int64{}
@@ -115,18 +123,39 @@ func (s *stats) udpRejectedByPort(p uint16) {
 	s.mu.Unlock()
 }
 
-// proxyResult tracks proxy health for the escalation rule (docs/m1/04 §4): a
-// success resets the count, a proxy-level failure increments it, target-level
-// failures and CANCELED leave it alone.
-func (s *stats) proxyResult(code adapters.Code) {
+// proxyResult tracks proxy health for the escalation rules (docs/m1/04 §4, M8). A success resets both counts. A
+// proxy-level failure adds one to the consecutive count. A SOCKS5 connection request left unanswered (unanswered) adds
+// one to the unanswered count and remembers the site (site, a hash of the target); any other target-level failure is an
+// answer from the proxy, so it starts the unanswered count over. CANCELED and the engine's own refusals leave both alone.
+func (s *stats) proxyResult(code adapters.Code, unanswered bool, site uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
 	case code == "":
 		s.consecutive = 0
+		s.resetUnanswered()
 	case code.IsProxyLevel():
 		s.consecutive++
+	case unanswered:
+		s.unanswered++
+		if _, seen := s.unansweredSites[site]; seen || len(s.unansweredSites) < maxUnansweredSites {
+			s.unansweredSites[site] = struct{}{}
+		}
+	case code.IsTargetAnswer():
+		s.resetUnanswered()
 	}
+}
+
+func (s *stats) resetUnanswered() {
+	s.unanswered = 0
+	clear(s.unansweredSites)
+}
+
+// siteKey identifies a target for the unanswered count without keeping it: a hash of its name or address and port.
+func siteKey(t adapters.Target) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(strings.ToLower(t.HostPort())))
+	return h.Sum64()
 }
 
 // Snapshot is a point-in-time copy of the engine's state and counters.
@@ -139,6 +168,8 @@ type Snapshot struct {
 	LastFailure           *ErrorInfo       `json:"last_failure,omitempty"`     // last failed flow
 	LastProxyError        *ErrorInfo       `json:"last_proxy_error,omitempty"` // last proxy-level failure
 	ConsecutiveProxyFails int64            `json:"consecutive_proxy_failures"` // drives the escalation rule
+	UnansweredRequests    int64            `json:"unanswered_requests"`        // SOCKS5 requests unanswered in a row (M8)
+	UnansweredSites       int              `json:"unanswered_sites"`           // ...to this many different sites
 	Flows                 int              `json:"flows"`                      // tracked flows of every kind
 	TCPConnecting         int              `json:"tcp_connecting"`             // tunnels being set up
 	TCPActive             int64            `json:"tcp_active"`                 // flows relaying bytes
@@ -182,6 +213,8 @@ type Status struct {
 	LastError             *ErrorInfo `json:"last_error,omitempty"`
 	LastProxyError        *ErrorInfo `json:"last_proxy_error,omitempty"`
 	ConsecutiveProxyFails int64      `json:"consecutive_proxy_failures"`
+	UnansweredRequests    int64      `json:"unanswered_requests"`
+	UnansweredSites       int        `json:"unanswered_sites"`
 	Flows                 int        `json:"flows"`
 	TCPActive             int64      `json:"tcp_active"`
 }
@@ -204,6 +237,8 @@ func (e *Engine) Status() Status {
 		st.LastProxyError = &c
 	}
 	st.ConsecutiveProxyFails = e.stats.consecutive
+	st.UnansweredRequests = e.stats.unanswered
+	st.UnansweredSites = len(e.stats.unansweredSites)
 	e.stats.mu.Unlock()
 	return st
 }
@@ -267,6 +302,8 @@ func (e *Engine) Stats() Snapshot {
 		snap.LastFailure = &c
 	}
 	snap.ConsecutiveProxyFails = s.consecutive
+	snap.UnansweredRequests = s.unanswered
+	snap.UnansweredSites = len(s.unansweredSites)
 	s.mu.Unlock()
 
 	if st := e.stack.Load(); st != nil {

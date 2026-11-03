@@ -117,6 +117,8 @@ class ReconnectTest {
                 LogEvent.StageReached,
                 LogEvent.StageReached,
                 LogEvent.Connected,
+                // M8: what Android said of its kill switch, the first time (FakeHost: off).
+                LogEvent.SystemKillSwitch,
             ),
             entries.map { it.event },
         )

@@ -2,7 +2,41 @@
 <resources>
     <!-- Settings (board E1). Only settings that work in this build are shown. -->
     <string name="settings_title">Settings</string>
-    <string name="settings_coming">Reconnect, log and kill switch settings will appear here in a later version.</string>
+    <string name="settings_coming">Reconnect and log settings will appear here in a later version.</string>
+
+    <!-- M8: the two kill switches (boards E1, E1b). Neither is a switch here: ProxyFlow's is always on while connected,
+         and only the user can turn Android's on, in its VPN settings. -->
+    <string name="settings_section_kill_switch">Kill switch</string>
+    <string name="settings_in_app_kill_switch">In-app kill switch</string>
+    <string name="settings_in_app_kill_switch_summary">Always on: while connected, traffic is blocked whenever the proxy isn\'t working.</string>
+    <string name="settings_system_kill_switch">System kill switch</string>
+    <string name="settings_kill_switch_on">On · Android blocks traffic whenever ProxyFlow isn\'t running</string>
+    <string name="settings_kill_switch_always_on_only">Always-on VPN without blocking · Set up</string>
+    <string name="settings_kill_switch_off">Off · Set up</string>
+    <string name="settings_kill_switch_unknown">Not checked yet · Set up</string>
+    <string name="settings_kill_switch_checked_now">As Android says now, while ProxyFlow is connected.</string>
+    <string name="settings_kill_switch_checked_at">As Android said at %1$s, while ProxyFlow was connected.</string>
+    <string name="settings_kill_switch_never">Android tells ProxyFlow only while it\'s connected.</string>
+    <string name="settings_kill_switch_on_note">With the system kill switch on, apps have no internet while ProxyFlow is off. Turn it off in Android\'s VPN settings to use your normal network.</string>
+
+    <!-- M8: the guide to Android's kill switch (board E2). -->
+    <string name="guide_title">System kill switch</string>
+    <string name="guide_intro">ProxyFlow already blocks traffic while it\'s running. If Android stops ProxyFlow, or another VPN takes over, only Android itself can keep blocking.</string>
+    <string name="guide_status">Status: %1$s</string>
+    <string name="guide_status_on">on</string>
+    <string name="guide_status_always_on_only">Always-on VPN without blocking</string>
+    <string name="guide_status_off">not set up</string>
+    <string name="guide_status_unknown">not checked yet</string>
+    <string name="guide_step_1">Tap Open VPN settings below.</string>
+    <string name="guide_step_2">Tap the settings icon next to ProxyFlow.</string>
+    <string name="guide_step_3">Turn on Always-on VPN.</string>
+    <string name="guide_step_4">Turn on Block connections without VPN.</string>
+    <string name="guide_vary">Menu names vary by phone maker. With blocking on, apps can\'t go online while ProxyFlow is off — turn it off again in the same place to use your normal network.</string>
+    <string name="guide_only_you">ProxyFlow can\'t turn this on for you: only you can, in Android\'s settings. Android tells ProxyFlow whether it\'s on only while ProxyFlow is connected.</string>
+    <string name="guide_not_restarted">If Android stops ProxyFlow — to free memory, say — it may not start it again: with blocking on, apps then stay offline until you open ProxyFlow and connect.</string>
+    <string name="guide_system_traffic">Android lets some of its own services reach the network outside any VPN, also with blocking on.</string>
+    <string name="guide_open_settings">Open VPN settings</string>
+    <string name="guide_later">Later</string>
     <string name="settings_section_app">App</string>
     <string name="settings_theme">Theme</string>
     <string name="settings_theme_system">System default</string>

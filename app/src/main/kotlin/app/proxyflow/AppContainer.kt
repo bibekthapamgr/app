@@ -13,11 +13,13 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.ConnectionTester
+import app.proxyflow.core.data.DataStoreProtectionStore
 import app.proxyflow.core.data.DataStoreSettingsRepository
 import app.proxyflow.core.data.LogRepository
 import app.proxyflow.core.data.LogStorage
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.data.ProfileStorage
+import app.proxyflow.core.data.ProtectionStore
 import app.proxyflow.core.data.SettingsRepository
 import app.proxyflow.core.data.UnavailableConnectionTester
 import app.proxyflow.core.data.crypto.AndroidKeystoreSecretKeyStore
@@ -67,6 +69,17 @@ class AppContainer(
 
     private val profiles = ProfileStorage.repository(appContext, settingsStore, credentialKeys)
 
+    /**
+     * What outlives the process about the protection (M8, ADR-0013): Android's kill switch as last reported, the
+     * connected marker, an interrupted connection. Its own file, so a damaged one never costs the settings.
+     */
+    val protectionStore: ProtectionStore = DataStoreProtectionStore(
+        PreferenceDataStoreFactory.create(
+            corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+            produceFile = { appContext.preferencesDataStoreFile(PROTECTION_FILE) },
+        ),
+    )
+
     val settingsRepository: SettingsRepository = DataStoreSettingsRepository(settingsStore)
     val profileRepository: ProfileRepository = profiles
 
@@ -74,7 +87,8 @@ class AppContainer(
     val logRepository: LogRepository = LogStorage.repository(appContext)
 
     /** The VPN layer: the session, and the service's way back to it (ProxyFlowApplication is its provider). */
-    val vpnRuntime = VpnRuntime(appContext, profiles, appScope, proxyTrust, logs = logRepository, retry = retry)
+    val vpnRuntime =
+        VpnRuntime(appContext, profiles, appScope, proxyTrust, logs = logRepository, retry = retry, protection = protectionStore)
     val connectionController: ConnectionController = vpnRuntime.controller
     val connectionTester: ConnectionTester = UnavailableConnectionTester()
 
@@ -93,15 +107,16 @@ class AppContainer(
 
     /** Creates every screen's ViewModel; navigation passes it to each destination. */
     val viewModelFactory: ViewModelProvider.Factory = viewModelFactory {
-        initializer { HomeViewModel(profileRepository, connectionController) }
+        initializer { HomeViewModel(profileRepository, connectionController, protectionStore) }
         initializer { ProfilesViewModel(profileRepository, connectionController) }
         initializer { AddEditProxyViewModel(createSavedStateHandle(), profileRepository, connectionTester) }
-        initializer { SettingsViewModel(settingsRepository) }
+        initializer { SettingsViewModel(settingsRepository, protectionStore, connectionController) }
         initializer { LogsViewModel(logRepository, profileRepository) }
     }
 
     private companion object {
         const val SETTINGS_FILE = "settings"
+        const val PROTECTION_FILE = "protection"
         const val LOG_PURGE_INTERVAL_MS = 60 * 60 * 1_000L
     }
 }

@@ -307,6 +307,9 @@ func TestSOCKS5ConnectReplyNotInTimeIsTheSites(t *testing.T) {
 	if CodeOf(err) != CodeTargetUnreachable || CodeOf(err).IsProxyLevel() || IsTimeout(err) {
 		t.Fatalf("got %v, want TARGET_UNREACHABLE (the site's, not a proxy timeout)", err)
 	}
+	if !IsUnanswered(err) {
+		t.Fatalf("the proxy's silence must be marked, so the tunnel can count it (M8): %v", err)
+	}
 	if el := time.Since(start); el < 250*time.Millisecond || el > 2*time.Second {
 		t.Fatalf("the handshake timeout was not what ended it (%v)", el)
 	}
@@ -323,8 +326,8 @@ func TestSOCKS5ConnectReplyNotInTimeIsTheSites(t *testing.T) {
 	// limit, a check's timeout): the caller's timeout, never the site's. The connection's deadline can pass a moment
 	// before the caller's context notices its own; deadlineOnly holds that moment open, so this is not left to timing.
 	soon := deadlineOnly{context.Background(), time.Now().Add(100 * time.Millisecond)}
-	if _, err := d.Dial(soon, Target{Host: "a.test", Port: 80}); CodeOf(err) != CodeTimeout {
-		t.Fatalf("a caller's deadline not yet noticed: got %v, want HANDSHAKE_TIMEOUT", err)
+	if _, err := d.Dial(soon, Target{Host: "a.test", Port: 80}); CodeOf(err) != CodeTimeout || IsUnanswered(err) {
+		t.Fatalf("a caller's deadline not yet noticed: got %v, want HANDSHAKE_TIMEOUT, not marked unanswered", err)
 	}
 	for i := 0; i < 20; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)

@@ -1,6 +1,7 @@
 package app.proxyflow.core.designsystem.component
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -11,7 +12,9 @@ import androidx.compose.ui.Modifier
 
 /**
  * Confirmation dialog. With [destructive] the confirm label is shown in the
- * error colour (delete, discard), matching boards C3 and D8.
+ * error colour (delete, discard), matching boards C3 and D8, and taps on it that
+ * pass through another app's window are dropped ([refusingObscuredTouches], M8).
+ * [neutralLabel] adds a third button (H1's "Open VPN settings").
  */
 @Composable
 fun PfConfirmDialog(
@@ -23,20 +26,31 @@ fun PfConfirmDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     destructive: Boolean = false,
+    neutralLabel: String? = null,
+    onNeutral: () -> Unit = {},
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(text) },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
+            TextButton(onClick = onConfirm, modifier = if (destructive) Modifier.refusingObscuredTouches() else Modifier) {
                 Text(
                     confirmLabel,
                     color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                 )
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(dismissLabel) } },
+        dismissButton = {
+            if (neutralLabel == null) {
+                TextButton(onClick = onDismiss) { Text(dismissLabel) }
+            } else {
+                Row {
+                    TextButton(onClick = onNeutral) { Text(neutralLabel) }
+                    TextButton(onClick = onDismiss) { Text(dismissLabel) }
+                }
+            }
+        },
         modifier = modifier,
     )
 }

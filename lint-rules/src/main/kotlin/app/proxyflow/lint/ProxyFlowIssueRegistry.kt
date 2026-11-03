@@ -7,7 +7,7 @@ import com.android.tools.lint.detector.api.Issue
 
 /** ProxyFlow's own Lint checks, applied to the app and every module it uses. */
 class ProxyFlowIssueRegistry : IssueRegistry() {
-    override val issues: List<Issue> = listOf(LogSecretDetector.ISSUE)
+    override val issues: List<Issue> = listOf(LogSecretDetector.ISSUE, LogSecretDetector.EXCEPTION_ISSUE)
 
     override val api: Int = CURRENT_API
 

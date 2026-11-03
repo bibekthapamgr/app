@@ -57,6 +57,12 @@ interface ConnectionController {
 
     /** While ProxyFlow reconnects on its own (board B5), runs the next attempt now instead of after its wait. */
     fun retryNow() = Unit
+
+    /**
+     * Asks Android about its kill switch now, while ProxyFlow's VPN runs (Android says nothing otherwise): a screen that
+     * shows the status calls it when it is shown (M8). The answer arrives through [ProtectionStore.killSwitch].
+     */
+    fun checkSystemKillSwitch() = Unit
 }
 
 /** For builds and tests without a VPN service: always disconnected, connecting is not available. */

@@ -24,11 +24,14 @@ import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.DnsProblems
+import app.proxyflow.core.model.ExitReason
+import app.proxyflow.core.model.Interruption
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.model.ReconnectInfo
 import app.proxyflow.core.model.ReconnectReason
 import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.SystemKillSwitch
 import app.proxyflow.core.model.TlsMode
 import app.proxyflow.core.model.TlsProblems
 import app.proxyflow.core.model.TrafficStats
@@ -59,6 +62,9 @@ class HomeScreenTest {
         onRetryNow = { calls += "retry now" },
         onOpenLogs = { calls += "logs" },
         onOpenDateSettings = { calls += "date settings" },
+        onOpenKillSwitchGuide = { calls += "kill switch guide" },
+        onOpenVpnSettings = { calls += "vpn settings" },
+        onDismissInterruption = { calls += "dismiss interruption" },
     )
 
     @Test
@@ -278,9 +284,95 @@ class HomeScreenTest {
     fun aRevokedVpnSaysAndroidRemovedIt() {
         show(ready(ConnectionState(profileId = "p1", error = ConnectionError(ConnectionError.VPN_REVOKED))))
         compose.onNodeWithText("Disconnected by Android").assertIsDisplayed()
-        scrolledTo("Your apps are now using your normal network.").assertIsDisplayed()
+        scrolledTo("Your apps no longer go through your proxy.").assertIsDisplayed()
         scrolledTo("Reconnect").performClick()
         assertEquals(listOf("connect"), calls)
+    }
+
+    /** Board B6d (M8): only Android's own kill switch keeps traffic blocked when the VPN goes away; once it's on, no card. */
+    @Test
+    fun aRevokedVpnPointsToAndroidsKillSwitchUntilItIsOn() {
+        val revoked = ConnectionState(profileId = "p1", error = ConnectionError(ConnectionError.VPN_REVOKED))
+        var state by mutableStateOf(ready(revoked))
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
+        scrolledTo("Prevent this next time").assertIsDisplayed()
+        scrolledTo("Set up system kill switch").performClick()
+        assertEquals(listOf("kill switch guide"), calls)
+
+        state = ready(revoked, killSwitch = KILL_SWITCH_ON)
+        compose.waitForIdle()
+        compose.onNodeWithText("Prevent this next time").assertDoesNotExist()
+    }
+
+    /** Board B2 (M8): what happens if ProxyFlow stops, as Android last told it, and the way to Android's kill switch. */
+    @Test
+    fun disconnectedSaysWhatHappensIfProxyFlowStops() {
+        var state by mutableStateOf(ready(ConnectionState.Idle))
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
+        compose.onNodeWithText("Apps are using your normal network").assertIsDisplayed()
+        scrolledTo("If ProxyFlow stops, only Android's system kill switch keeps apps off your normal network.").assertIsDisplayed()
+        scrolledTo("Set up system kill switch").performClick()
+
+        state = ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON)
+        compose.waitForIdle()
+        compose.onNodeWithText("Apps have no internet: Android's system kill switch is on").assertIsDisplayed()
+        shown("System kill switch is on: while ProxyFlow isn't connected, apps have no internet.", substring = true)
+        scrolledTo("As Android last told ProxyFlow, at", substring = true).assertIsDisplayed()
+        scrolledTo("About the system kill switch").performClick()
+
+        state = ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON.copy(alwaysOn = false, blocksWithoutVpn = false))
+        compose.waitForIdle()
+        compose.onNodeWithText("Apps are using your normal network").assertIsDisplayed()
+        scrolledTo("System kill switch is off: if ProxyFlow stops, apps use your normal network.", substring = true).assertIsDisplayed()
+
+        state = ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON.copy(blocksWithoutVpn = false))
+        compose.waitForIdle()
+        scrolledTo("Always-on VPN is on without blocking", substring = true).assertIsDisplayed()
+        assertEquals(listOf("kill switch guide", "kill switch guide"), calls)
+    }
+
+    /** With Android's kill switch on, stopping and a failed check say apps have no internet, not the normal network. */
+    @Test
+    fun withAndroidsKillSwitchOnStoppingSaysAppsHaveNoInternet() {
+        val blocked = ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.ENGINE_STOPPED))
+        var state by mutableStateOf(ready(blocked, dialog = HomeDialog.ConfirmStop, killSwitch = KILL_SWITCH_ON))
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
+        compose.onNodeWithText("Android's system kill switch is on, so apps will have no internet until you connect again.")
+            .assertIsDisplayed()
+
+        state = ready(ConnectionState(profileId = "p1", error = ConnectionError("PROXY_UNREACHABLE")), killSwitch = KILL_SWITCH_ON)
+        compose.waitForIdle()
+        scrolledTo("You're not connected — with Android's system kill switch on, apps have no internet.").assertIsDisplayed()
+    }
+
+    /** M8: the last process ended while connected; Home says when and why, and what that meant for apps, until seen. */
+    @Test
+    fun anInterruptedConnectionIsExplainedUntilSeen() {
+        val interruption =
+            Interruption("p1", connectedSinceMillis = 0, endedAtMillis = 60_000, ExitReason.LowMemory, detectedAtMillis = 120_000)
+        var state by mutableStateOf(ready(ConnectionState.Idle, interruption = interruption))
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
+        shown("ProxyFlow was stopped while connected")
+        shown("Android closed ProxyFlow to free memory at", substring = true)
+        shown("Android removed the VPN with it, so apps used your normal network from then on.", substring = true)
+        scrolledTo("OK").performClick()
+        assertEquals(listOf("dismiss interruption"), calls)
+
+        // Android's kill switch on, as last seen: apps had no internet, and there is nothing to set up.
+        val undated = interruption.copy(endedAtMillis = null, reason = ExitReason.Unknown)
+        state = ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON, interruption = undated)
+        compose.waitForIdle()
+        shown("ProxyFlow stopped some time after it connected at", substring = true)
+        shown("Android's system kill switch was on when ProxyFlow last checked", substring = true)
+        compose.onNodeWithText("Set up system kill switch").assertDoesNotExist()
+
+        // Connected again since: said so.
+        val connected = ConnectionState(ConnectionStatus.Connected, "p1", "Office", connectedSinceMillis = 0)
+        state = ready(connected, interruption = interruption.copy(reason = ExitReason.PhoneRestarted))
+        compose.waitForIdle()
+        shown("Your phone restarted at", substring = true)
+        shown("After a restart ProxyFlow connects by itself only as your Always-on VPN", substring = true)
+        shown("ProxyFlow is connected again.", substring = true)
     }
 
     @Test
@@ -295,9 +387,44 @@ class HomeScreenTest {
     fun aRefusedPermissionShowsH1() {
         show(ready(ConnectionState.Idle, dialog = HomeDialog.VpnPermissionDenied))
         compose.onNodeWithText("VPN permission needed").assertIsDisplayed()
+        // H2's way out (M8): Android closes its consent screen without asking while another app is Always-on VPN.
+        compose.onNodeWithText("another app may be set as Always-on VPN", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Not now").performClick()
         compose.onNodeWithText("Try again").performClick()
-        assertEquals(listOf("dismiss", "connect"), calls)
+        compose.onNodeWithText("Open VPN settings").performClick()
+        assertEquals(listOf("dismiss", "connect", "vpn settings"), calls)
+    }
+
+    /** Android started ProxyFlow as Always-on VPN with no proxy chosen (M8): said whichever profile Home shows. */
+    @Test
+    fun alwaysOnWithoutAChosenProxySaysWhatToDo() {
+        show(ready(ConnectionState(error = ConnectionError(ConnectionError.ALWAYS_ON_NO_PROFILE))))
+        scrolledTo("Choose a proxy for Always-on VPN").assertIsDisplayed()
+        scrolledTo("Connect once with the proxy Always-on VPN should use.", substring = true).assertIsDisplayed()
+    }
+
+    /** Board B5's two reasons of M8: unanswered requests are the proxy's failure, whatever the last site. */
+    @Test
+    fun reconnectingForUnansweredRequestsOrAnAlwaysOnStartSaysSo() {
+        val unanswered = ReconnectInfo(
+            ReconnectReason.ProxyUnanswered,
+            attempt = 1,
+            maxAttempts = 8,
+            nextAttemptAtMillis = null,
+            lastError = ConnectionError("TARGET_UNREACHABLE", "proxy did not answer the connection request"),
+        )
+        var state by mutableStateOf(
+            ready(ConnectionState(ConnectionStatus.Reconnecting, "p1", "Office", connectedSinceMillis = 0, reconnect = unanswered)),
+        )
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
+        scrolledTo("Your proxy isn't answering").assertIsDisplayed()
+        scrolledTo("Your proxy stopped answering connection requests to several sites.", substring = true).assertIsDisplayed()
+
+        val alwaysOn = unanswered.copy(reason = ReconnectReason.AlwaysOnStart, lastError = null)
+        state = ready(ConnectionState(ConnectionStatus.Reconnecting, "p1", "Office", connectedSinceMillis = 0, reconnect = alwaysOn))
+        compose.waitForIdle()
+        scrolledTo("Starting as Always-on VPN").assertIsDisplayed()
+        scrolledTo("Android started ProxyFlow as your Always-on VPN.", substring = true).assertIsDisplayed()
     }
 
     /** B4's counters (ADR-0012): the session's data sent and received, and the connections open now. */
@@ -451,11 +578,20 @@ class HomeScreenTest {
         dialog: HomeDialog? = null,
         diagnostics: RoutingDiagnostics? = null,
         traffic: TrafficStats? = null,
-    ) = HomeUiState.Ready(profile, connection, canConnect, dialog, diagnostics, traffic)
+        killSwitch: SystemKillSwitch? = null,
+        interruption: Interruption? = null,
+    ) = HomeUiState.Ready(profile, connection, canConnect, dialog, diagnostics, traffic, killSwitch, interruption)
 
     private fun show(state: HomeUiState, now: Long = 0L) {
         compose.setContent { ProxyFlowTheme { HomeScreen(state, actions, nowMillis = now) } }
     }
 
-    private fun scrolledTo(text: String): SemanticsNodeInteraction = compose.onNodeWithText(text).performScrollTo()
+    private fun scrolledTo(text: String, substring: Boolean = false): SemanticsNodeInteraction =
+        compose.onNodeWithText(text, substring = substring).performScrollTo()
+
+    private fun shown(text: String, substring: Boolean = false) = scrolledTo(text, substring).assertIsDisplayed()
+
+    private companion object {
+        val KILL_SWITCH_ON = SystemKillSwitch(alwaysOn = true, blocksWithoutVpn = true, checkedAtMillis = 0)
+    }
 }

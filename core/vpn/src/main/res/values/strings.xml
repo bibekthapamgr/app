@@ -25,7 +25,9 @@
     <string name="vpn_notification_disconnected">Not connected</string>
     <string name="vpn_notification_disconnected_text">Apps are using your normal network</string>
     <string name="vpn_notification_revoked">Disconnected by Android</string>
-    <string name="vpn_notification_revoked_text">Another VPN app was turned on or the permission was removed. Your apps now use the normal network.</string>
+    <string name="vpn_notification_revoked_text">Another VPN app was turned on or the permission was removed. Your apps no longer go through your proxy.</string>
+    <string name="vpn_notification_no_profile">Choose a proxy for Always-on VPN</string>
+    <string name="vpn_notification_no_profile_text">Android started ProxyFlow as your Always-on VPN, but no proxy is chosen, so ProxyFlow didn\'t connect. Open ProxyFlow and choose one. With \u201cBlock connections without VPN\u201d on, apps have no internet until then.</string>
 
     <string name="vpn_action_cancel">Cancel</string>
     <string name="vpn_action_disconnect">Disconnect</string>

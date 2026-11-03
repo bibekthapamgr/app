@@ -530,7 +530,7 @@ func (d *Dialer) handshake(ctx context.Context, raw net.Conn, target Target) (ne
 		// reach the site — when the deadline that passed was the handshake's own. A caller's earlier deadline can
 		// pass on the connection a moment before the caller's context notices; that is the caller's timeout.
 		if errors.Is(err, errConnectReplyLate) && ownDeadline && ctx.Err() == nil {
-			return nil, newErr(CodeTargetUnreachable, "the proxy did not reach the site in time", err)
+			return nil, newUnansweredErr("the proxy did not reach the site in time", err)
 		}
 		return nil, classifyHandshakeError(ctx, err)
 	}

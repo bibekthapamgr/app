@@ -3,14 +3,18 @@ package app.proxyflow.feature.home
 import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.data.ConnectionController
+import app.proxyflow.core.data.InMemoryProtectionStore
 import app.proxyflow.core.data.UnavailableConnectionController
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.ExitReason
+import app.proxyflow.core.model.Interruption
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ReconnectInfo
 import app.proxyflow.core.model.ReconnectReason
 import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.SystemKillSwitch
 import app.proxyflow.core.model.TrafficStats
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
@@ -18,6 +22,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -265,6 +270,58 @@ class HomeViewModelTest {
         assertNull(ready(viewModel).traffic)
     }
 
+    /** M8: connecting the profile Home shows makes it the user's choice (Always-on VPN connects only that one). */
+    @Test
+    fun connectingMakesTheShownProfileTheChosenOneAndTheInterruptionSeen() = runTest {
+        val controller = RecordingController()
+        val protection = InMemoryProtectionStore(interruption = Interruption("p0", 0, null, ExitReason.Unknown, 0))
+        val saved = profiles.save(null, ProxyProfileInput(server = "proxy.example.com", port = "1080"))
+        val viewModel = HomeViewModel(profiles, controller, protection)
+        observe(viewModel)
+        assertNull("shown as the only profile, but never chosen", profiles.chosenProfileId.first())
+
+        viewModel.connect()
+
+        assertEquals(listOf(saved.id), controller.connects)
+        assertEquals(saved.id, profiles.chosenProfileId.first())
+        assertNull("connecting again is seeing it", protection.interruption.first())
+    }
+
+    @Test
+    fun androidsKillSwitchAndAnInterruptionReachHomeUntilDismissed() = runTest {
+        val killSwitch = SystemKillSwitch(alwaysOn = true, blocksWithoutVpn = true, checkedAtMillis = 5)
+        val interruption = Interruption("p1", connectedSinceMillis = 1, endedAtMillis = 2, reason = ExitReason.Crash, detectedAtMillis = 3)
+        val protection = InMemoryProtectionStore(killSwitch = killSwitch, interruption = interruption)
+        profiles.save(null, ProxyProfileInput(server = "proxy.example.com", port = "1080"))
+        val controller = RecordingController()
+        val viewModel = HomeViewModel(profiles, controller, protection)
+        observe(viewModel)
+        assertEquals(killSwitch, ready(viewModel).killSwitch)
+        assertEquals(interruption, ready(viewModel).interruption)
+
+        viewModel.dismissInterruption()
+        assertNull(ready(viewModel).interruption)
+        assertNull(protection.interruption.first())
+        assertEquals("what Android said stays", killSwitch, ready(viewModel).killSwitch)
+
+        viewModel.checkKillSwitch()
+        assertEquals(listOf("checkSystemKillSwitch"), controller.calls)
+    }
+
+    /** Android started ProxyFlow as Always-on VPN with no proxy chosen: no profile's error, shown whichever profile Home shows. */
+    @Test
+    fun alwaysOnWithoutAChosenProxyIsShownOnAnyProfile() = runTest {
+        val controller = RecordingController()
+        profiles.save(null, ProxyProfileInput(server = "proxy.example.com", port = "1080"))
+        val viewModel = HomeViewModel(profiles, controller)
+        observe(viewModel)
+        controller.current.value = ConnectionState(error = ConnectionError(ConnectionError.ALWAYS_ON_NO_PROFILE))
+        assertEquals(ConnectionError.ALWAYS_ON_NO_PROFILE, ready(viewModel).error?.code)
+
+        controller.current.value = ConnectionState(profileId = "another", error = ConnectionError("AUTH_FAILED"))
+        assertNull("another profile's error is not this one's", ready(viewModel).error)
+    }
+
     @Test
     fun retryNowIsForwarded() = runTest {
         val controller = RecordingController()
@@ -315,6 +372,10 @@ class HomeViewModelTest {
 
         override fun retryNow() {
             calls += "retryNow"
+        }
+
+        override fun checkSystemKillSwitch() {
+            calls += "checkSystemKillSwitch"
         }
     }
 }

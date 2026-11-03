@@ -98,9 +98,58 @@ class LogSecretDetectorTest : LintDetectorTest() {
         ).expectClean()
     }
 
-    private fun check(source: String) = lint()
+    // --- ExceptionSecret (M8): an exception's message reaches Android's crash report and the phone's log ---------
+
+    fun testExceptionMessagesWithSecretsAreErrors() {
+        check(
+            """
+            package test
+            class Form {
+                fun f(username: String, host: String, e: Exception, count: Int) {
+                    if (count < 0) throw IllegalArgumentException("bad user " + username)
+                    require(count > 0) { "cannot reach ${'$'}host" }
+                    check(count < 10) { "failed: ${'$'}{e.message}" }
+                    error("signing in as ${'$'}username")
+                }
+            }
+            """,
+            LogSecretDetector.EXCEPTION_ISSUE,
+        ).expectErrorCount(4)
+    }
+
+    fun testExceptionMessagesOfCodesAndCausesAreFine() {
+        check(
+            """
+            package test
+            class CredentialUnreadableException(val permanent: Boolean, message: String, cause: Throwable? = null) :
+                Exception(message, cause)
+            class Cipher {
+                fun f(user: ByteArray, pass: ByteArray, e: Exception, version: Int) {
+                    require(user.size <= 255 && pass.size <= 255) { "credential too long" }
+                    check(version > 0)
+                    if (version != 1) throw CredentialUnreadableException(permanent = true, "unknown format ${'$'}version")
+                    throw IllegalStateException("decryption failed: ${'$'}{e.javaClass.simpleName}", e)
+                }
+            }
+            """,
+            LogSecretDetector.EXCEPTION_ISSUE,
+        ).expectClean()
+    }
+
+    fun testOnlyExceptionsMessagesAreChecked() {
+        check(
+            """
+            package test
+            class Model(val host: String)
+            fun make(host: String) = Model(host)
+            """,
+            LogSecretDetector.EXCEPTION_ISSUE,
+        ).expectClean()
+    }
+
+    private fun check(source: String, issue: Issue = LogSecretDetector.ISSUE) = lint()
         .files(kotlin(source).indented(), *STUBS)
-        .issues(LogSecretDetector.ISSUE)
+        .issues(issue)
         .allowMissingSdk()
         .testModes(TestMode.DEFAULT)
         .run()

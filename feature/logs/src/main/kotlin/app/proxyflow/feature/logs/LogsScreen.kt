@@ -67,6 +67,7 @@ import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.designsystem.theme.Spacing
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionStage
+import app.proxyflow.core.model.ExitReason
 import app.proxyflow.core.model.Formats
 import app.proxyflow.core.model.LogDetail
 import app.proxyflow.core.model.LogEntry
@@ -453,9 +454,10 @@ internal fun eventTitle(entry: LogEntry): String {
     fun number(key: String) = details[key]?.toLongOrNull()
     return when (entry.event) {
         LogEvent.ConnectRequested -> stringResource(
-            when (details[LogDetail.SWITCH]) {
-                "restart" -> R.string.logs_event_restart_requested
-                "other_profile" -> R.string.logs_event_switch_requested
+            when {
+                details[LogDetail.BY] == "always_on" -> R.string.logs_event_always_on_requested
+                details[LogDetail.SWITCH] == "restart" -> R.string.logs_event_restart_requested
+                details[LogDetail.SWITCH] == "other_profile" -> R.string.logs_event_switch_requested
                 else -> R.string.logs_event_connect_requested
             },
         )
@@ -468,6 +470,8 @@ internal fun eventTitle(entry: LogEntry): String {
             when (details[LogDetail.REASON]) {
                 "network_back" -> R.string.logs_event_reconnect_network_back
                 "network_changed" -> R.string.logs_event_reconnect_network_changed
+                "proxy_unanswered" -> R.string.logs_event_reconnect_unanswered
+                "always_on_start" -> R.string.logs_event_reconnect_always_on
                 else -> R.string.logs_event_reconnect_proxy
             },
         )
@@ -501,6 +505,26 @@ internal fun eventTitle(entry: LogEntry): String {
             Formats.bytes(number(LogDetail.BYTES_DOWN) ?: 0),
         )
         LogEvent.ConnectionProblems -> count(R.plurals.logs_event_connection_problems, number(LogDetail.COUNT) ?: 0)
+        LogEvent.SessionInterrupted -> stringResource(
+            when (ExitReason.of(details[LogDetail.REASON])) {
+                ExitReason.LowMemory -> R.string.logs_event_interrupted_low_memory
+                ExitReason.Crash, ExitReason.NativeCrash -> R.string.logs_event_interrupted_crash
+                ExitReason.NotResponding -> R.string.logs_event_interrupted_not_responding
+                ExitReason.Killed -> R.string.logs_event_interrupted_killed
+                ExitReason.ForceStopped -> R.string.logs_event_interrupted_force_stopped
+                ExitReason.Updated -> R.string.logs_event_interrupted_updated
+                ExitReason.PermissionChanged -> R.string.logs_event_interrupted_permission
+                ExitReason.PhoneRestarted -> R.string.logs_event_interrupted_restart
+                ExitReason.Other, ExitReason.Unknown -> R.string.logs_event_interrupted
+            },
+        )
+        LogEvent.SystemKillSwitch -> stringResource(
+            when {
+                details[LogDetail.BLOCKS_WITHOUT_VPN] == "yes" -> R.string.logs_event_kill_switch_on
+                details[LogDetail.ALWAYS_ON] == "yes" -> R.string.logs_event_kill_switch_always_on_only
+                else -> R.string.logs_event_kill_switch_off
+            },
+        )
     }
 }
 
@@ -517,6 +541,7 @@ private fun count(plural: Int, value: Long): String {
  */
 @Composable
 private fun hint(entry: LogEntry): String? {
+    if (entry.event == LogEvent.SessionInterrupted) return stringResource(R.string.logs_hint_interrupted)
     val code = entry.code ?: return null
     val error = ConnectionError(code, entry.details[LogDetail.DETAIL])
     val oneConnection = entry.event == LogEvent.ConnectionProblems
@@ -543,6 +568,7 @@ private fun hint(entry: LogEntry): String? {
         ConnectionError.VPN_REVOKED -> R.string.logs_hint_revoked
         ConnectionError.VPN_PERMISSION_DENIED -> R.string.logs_hint_permission
         ConnectionError.PROFILE_DELETED -> R.string.logs_hint_profile_deleted
+        ConnectionError.ALWAYS_ON_NO_PROFILE -> R.string.logs_hint_always_on_no_profile
         else -> return null
     }
     return stringResource(hint)

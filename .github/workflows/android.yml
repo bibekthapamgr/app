@@ -304,6 +304,11 @@ jobs:
   #   own -tcpdump, and tcpdump inside it when the image allows) are checked by
   #   scripts/m5_evidence.py and scripts/m6_evidence.py: nothing reached a destination,
   #   a UDP sink or a DNS server around a proxy, and nothing went to a TLS proxy unencrypted.
+  # - M8 failure injection (scripts/m8_failure_injection.sh, after the tests): the process
+  #   killed while connected, with and without Android's Always-on VPN and "Block connections
+  #   without VPN" (set through the test APK's device owner), and a crash with a planted
+  #   sign-in; scripts/m8_evidence.py checks the lab's witness (reached only around
+  #   ProxyFlow), the captures and Android's crash report against the steps.
   device:
     needs: engine
     if: ${{ !cancelled() }}
@@ -385,7 +390,7 @@ jobs:
         run: |
           sudo chmod -R a+rX /tmp/pf
           status=0
-          for check in m5_evidence m6_evidence m7_evidence; do
+          for check in m5_evidence m6_evidence m7_evidence m8_evidence; do
             python3 "scripts/$check.py" --api ${{ matrix.api-level }} --pf /tmp/pf \
               --out "$RUNNER_TEMP/m5-api${{ matrix.api-level }}" --host-pcap "$RUNNER_TEMP/emulator-uplink.pcap" || status=1
           done

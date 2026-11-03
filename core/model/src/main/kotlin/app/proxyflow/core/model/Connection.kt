@@ -64,6 +64,18 @@ enum class ReconnectReason {
 
     /** The phone moved to another network while ProxyFlow was already reconnecting: the attempts start over. */
     NetworkChanged,
+
+    /**
+     * A SOCKS5 proxy left connection requests to different sites unanswered several times in a row, with nothing
+     * working between them (M8): its own way out is probably broken.
+     */
+    ProxyUnanswered,
+
+    /**
+     * Android started ProxyFlow for Always-on VPN and connecting failed in a way that may pass (M8, ADR-0013):
+     * traffic is held from the start, and attempts go on as after a connection that broke.
+     */
+    AlwaysOnStart,
 }
 
 /**
@@ -94,6 +106,12 @@ data class ConnectionError(val code: String, val detail: String? = null) {
 
         /** The profile a connection used was deleted while traffic was held: it stays held until the user stops. */
         const val PROFILE_DELETED = "PROFILE_DELETED"
+
+        /**
+         * Android started ProxyFlow for Always-on VPN, but no profile is chosen (M8): ProxyFlow never picks one for the
+         * user, so it connects nothing and says so.
+         */
+        const val ALWAYS_ON_NO_PROFILE = "ALWAYS_ON_NO_PROFILE"
         const val INTERNAL = "INTERNAL"
 
         /**

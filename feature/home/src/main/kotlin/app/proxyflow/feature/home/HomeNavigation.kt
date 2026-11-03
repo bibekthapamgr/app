@@ -16,6 +16,7 @@ fun NavGraphBuilder.homeScreen(
     onChangeProfile: () -> Unit,
     onEditProfile: (String) -> Unit,
     onOpenLogs: () -> Unit,
+    onOpenKillSwitchGuide: () -> Unit = {},
 ) {
     composable<HomeDestination> {
         HomeRoute(
@@ -24,6 +25,7 @@ fun NavGraphBuilder.homeScreen(
             onChangeProfile = onChangeProfile,
             onEditProfile = onEditProfile,
             onOpenLogs = onOpenLogs,
+            onOpenKillSwitchGuide = onOpenKillSwitchGuide,
         )
     }
 }

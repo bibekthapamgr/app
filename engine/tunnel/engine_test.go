@@ -854,6 +854,75 @@ func TestProxyOutageFailsClosed(t *testing.T) {
 	}
 }
 
+// A SOCKS5 proxy that answers its sign-in but no connection request (M8): each connection fails as the site's, marked
+// unanswered and counted apart from the proxy-level failures, by site.
+func TestUnansweredSOCKS5RequestsAreCountedApart(t *testing.T) {
+	proxytest.CheckLeaks(t)
+	stalled := proxytest.NewServer(t, proxytest.Config{Protocol: proxytest.SOCKS5, StallConnect: true})
+	dialer, err := adapters.NewDialer(adapters.ProxyConfig{Kind: adapters.KindSOCKS5, Host: stalled.Host(), Port: stalled.Port(),
+		HandshakeTimeout: 300 * time.Millisecond}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _ := startEngine(t, dialer)
+	for i, name := range []string{"a.test", "b.test", "a.test", "c.test"} {
+		if _, err := dialTCP(e.cs, resolve(t, e.cs, name), 443); !isRefused(err) {
+			t.Fatalf("connection %d to %s: got %v, want refused", i+1, name, err)
+		}
+	}
+	st := e.Status()
+	if st.UnansweredRequests != 4 || st.UnansweredSites != 3 || st.ConsecutiveProxyFails != 0 {
+		t.Fatalf("want 4 unanswered to 3 sites and no proxy-level failure: %+v", st)
+	}
+	if got := e.Stats().Failures["TARGET_UNREACHABLE"]; got != 4 {
+		t.Fatalf("each is a site's failure: %d", got)
+	}
+	waitFor(t, func() bool { return e.events.count(EvConnFail) >= 4 }, "the four failures to be reported")
+	for _, ev := range e.events.all() {
+		if ev.Type == EvConnFail && (!ev.Unanswered || ev.Code != "TARGET_UNREACHABLE") {
+			t.Fatalf("every failure is reported as unanswered: %+v", ev)
+		}
+	}
+}
+
+// The unanswered count (M8) starts over on anything that works and on any answer from the proxy about a site, goes on
+// through proxy-level failures, and remembers a bounded number of sites.
+func TestUnansweredCountStartsOverOnAnAnswer(t *testing.T) {
+	var s stats
+	s.init()
+	unanswered := func(site uint64) { s.proxyResult(adapters.CodeTargetUnreachable, true, site) }
+	check := func(what string, requests int64, sites int) {
+		t.Helper()
+		if s.unanswered != requests || len(s.unansweredSites) != sites {
+			t.Fatalf("%s: %d unanswered to %d sites, want %d to %d", what, s.unanswered, len(s.unansweredSites), requests, sites)
+		}
+	}
+	unanswered(1)
+	unanswered(2)
+	s.proxyResult(adapters.CodeProxyUnreachable, false, 0)
+	s.proxyResult(adapters.CodeCanceled, false, 0)
+	s.proxyResult(adapters.CodeLimit, false, 0)
+	check("proxy-level failures and the engine's own refusals leave it", 2, 2)
+	if s.consecutive != 1 {
+		t.Fatalf("the proxy-level failure is counted on its own: %d", s.consecutive)
+	}
+	s.proxyResult(adapters.CodeTargetRefused, false, 3)
+	check("a site refused by the proxy is an answer", 0, 0)
+	unanswered(4)
+	s.proxyResult(adapters.CodeTargetUnreachable, false, 4)
+	check("an explicit 'unreachable' reply is an answer too", 0, 0)
+	unanswered(5)
+	s.proxyResult("", false, 0)
+	check("a working connection starts it over", 0, 0)
+	if s.consecutive != 0 {
+		t.Fatalf("and the proxy-level count: %d", s.consecutive)
+	}
+	for i := 0; i < 100; i++ {
+		unanswered(uint64(i))
+	}
+	check("sites are bounded", 100, maxUnansweredSites)
+}
+
 func TestIdleTimeoutCountsBothDirections(t *testing.T) {
 	proxytest.CheckLeaks(t)
 	e, d := startEngine(t, nil, func(c *Config) { c.IdleTimeout = 500 * time.Millisecond })
