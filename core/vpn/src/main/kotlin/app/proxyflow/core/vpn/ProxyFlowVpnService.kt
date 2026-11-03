@@ -107,7 +107,8 @@ class ProxyFlowVpnService :
             .setMtu(config.mtu)
             // ProxyFlow's own sockets (the engine's, the pre-flight check's) bypass the VPN; they are protected too.
             .addDisallowedApplication(packageName)
-            // The default network until M7's network monitor names it; metered when it is.
+            // Whichever network is the default (null): Android follows it as it changes, and setMetered(false) makes the VPN
+            // as metered as that network is. The session hears of the changes from NetworkMonitor (ADR-0012).
             .setUnderlyingNetworks(null)
             .setMetered(false)
             .setBlocking(false) // the engine polls the descriptor

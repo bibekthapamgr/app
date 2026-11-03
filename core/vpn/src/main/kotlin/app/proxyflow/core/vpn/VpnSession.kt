@@ -7,9 +7,17 @@ import app.proxyflow.core.engine.EngineException
 import app.proxyflow.core.engine.EngineSecret
 import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
+import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.LogDetail
+import app.proxyflow.core.model.LogEntry
+import app.proxyflow.core.model.LogEvent
 import app.proxyflow.core.model.ProxyProfile
+import app.proxyflow.core.model.ReconnectInfo
+import app.proxyflow.core.model.ReconnectReason
+import app.proxyflow.core.model.TrafficStats
+import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -28,9 +36,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * The connection state machine (ADR-0010): one per process. Every transition —
+ * The connection state machine (ADR-0010, ADR-0012): one per process. Every transition —
  * connect, pre-flight result, establish, engine start, Android routing apps into
- * the interface, engine failure, revocation, disconnect — is an event handled one
+ * the interface, engine failure, a connection failing at the proxy, a network change,
+ * a reconnection attempt, revocation, disconnect — is an event handled one
  * at a time by one coroutine on [scope], which must be serial (one thread, or
  * `limitedParallelism(1)`), so no two transitions can interleave. Blocking engine
  * calls happen there, never on the main thread; only the pre-flight check and the
@@ -38,8 +47,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * never stuck behind them.
  *
  * The session owns the VPN interface — one per connection: the engine reads it, the
- * session closes it after the engine has stopped. A switch or a restart stops the
- * engine and starts the next one on the same interface, which keeps holding apps'
+ * session closes it after the engine has stopped. A switch, a restart or a reconnection
+ * stops the engine and starts the next one on the same interface, which keeps holding apps'
  * traffic meanwhile; a new interface would make Android bring the old one down before
  * the new one's routes exist, and Android's fall-through rule would send apps to the
  * normal network in between. Connected is reported only once the engine runs and
@@ -48,9 +57,21 @@ import kotlinx.coroutines.withTimeoutOrNull
  * a failure never removes it: traffic stays held until the user restarts or
  * disconnects ("Stop and use normal network", docs/m1/03-user-journeys.md).
  *
+ * Once connected (ADR-0012): connections failing at the proxy three times in a row, or the phone
+ * getting a network back, make the session reconnect on its own — the engine stops, traffic is held,
+ * and attempts follow [retry] with growing waits until one passes the pre-flight check (Connected
+ * again, the session's time and traffic going on) or the attempts run out (Blocked). Only one
+ * reconnection runs at a time: every transition cancels it, and "Retry now" only shortens its wait.
+ * An answer no retry changes — the sign-in or the certificate refused — blocks at once. With no
+ * network the session waits Offline, traffic held; a move to another network ends the engine's
+ * connections so apps reconnect on the new one.
+ *
  * @param state written only here; the screens and the notification read it.
  * @param services starts [ProxyFlowVpnService], which then attaches itself as the [VpnHost].
- * @param log the lifecycle, without credentials, server names or payloads.
+ * @param log the lifecycle for logcat, without credentials, server names or payloads.
+ * @param retry the reconnection policy, read when a reconnection starts.
+ * @param random jitter for the reconnection waits, 0 ≤ random() < 1.
+ * @param diagnostics the diagnostic log the Logs screen shows (sanitized again when written).
  */
 class VpnSession(
     private val profiles: ProfileRepository,
@@ -62,6 +83,9 @@ class VpnSession(
     private val clock: () -> Long = System::currentTimeMillis,
     private val timing: Timing = Timing(),
     private val log: (String) -> Unit = {},
+    private val retry: () -> RetryPolicy = { RetryPolicy() },
+    private val random: () -> Double = Math::random,
+    private val diagnostics: DiagnosticsSink = DiagnosticsSink.None,
 ) {
     /** Starts the VPN service; false when Android refused (for example, the app is in the background). */
     fun interface ServiceStarter {
@@ -81,6 +105,9 @@ class VpnSession(
         val routingPollMillis: Long = 50,
     )
 
+    /** The phone's network as Android reports it to the service ([underlyingNetwork]). */
+    data class NetworkInfo(val id: String, val transport: String)
+
     private val events = Channel<Event>(Channel.UNLIMITED)
 
     // A job that fails in a way nothing caught must not take the process down with it (which would drop held
@@ -88,20 +115,41 @@ class VpnSession(
     // Every job catches what it expects; this is the last resort.
     private fun failuresOf(attempt: Long) = CoroutineExceptionHandler { _, e -> send(Event.JobFailed(attempt, e.javaClass.simpleName)) }
 
-    // Touched only by the event loop.
+    // Touched only by the event loop, except where @Volatile says otherwise.
     private var host: VpnHost? = null
     private var pending: ProxyProfile? = null
     private var serviceWait: Job? = null
     private var serviceToken = 0L
     private var attempt = 0L
+    private var attemptStartedMillis = 0L
     private var preflight: Job? = null
     private var routing: Job? = null
     private var tun: TunInterface? = null
-    private var engineRunning = false
+
+    @Volatile private var engineRunning = false
     private var engineGeneration = 0L
 
     /** The user has been connected since the session last ended: failures hold traffic instead of releasing it. */
     private var connectedOnce = false
+
+    /** Set while the session reconnects on its own. */
+    private var recovery: Recovery? = null
+    private var retryWait: Job? = null
+    private var retryToken = 0L
+
+    /** The phone's network: its id, or null without one; [networkKnown] once Android has said. */
+    private var network: String? = null
+    private var networkKnown = false
+
+    /** The phone's network as last reported, or null (none, or not reported yet). For device tests and diagnosis. */
+    @Volatile var lastNetwork: NetworkInfo? = null
+        private set
+
+    /** The connected session's time and the traffic of the engines it already stopped (read by [traffic] from any thread). */
+    @Volatile private var sessionTotals: SessionTotals? = null
+
+    /** Makes [traffic]'s look at the totals and the running engine one step, so an engine's stop never shows as a dip. */
+    private val trafficLock = Any()
 
     init {
         // dispatch() turns every failure into a failed attempt; should the loop still end, the process stays up.
@@ -116,11 +164,14 @@ class VpnSession(
     /** Runs the connect sequence again for the blocked profile (Restart, Try again). */
     fun restart() = send(Event.Restart)
 
-    /** Disconnects, cancels a connection being set up, or stops a blocked one. */
+    /** Disconnects, cancels a connection being set up or a reconnection, or stops a blocked one. */
     fun disconnect() = send(Event.Disconnect)
 
     /** Forgets the last error after a connection attempt ended; a blocked connection keeps its error. */
     fun clearError() = send(Event.ClearError)
+
+    /** While reconnecting on its own, runs the next attempt now ("Retry now", board B5). */
+    fun retryNow() = send(Event.RetryNow)
 
     /** The service started (or Android started it for Always-on VPN) and can establish interfaces. */
     fun attach(host: VpnHost, alwaysOn: Boolean) = send(Event.Attached(host, alwaysOn))
@@ -134,11 +185,26 @@ class VpnSession(
     /** A profile was deleted; when it is the connection's, its credentials are no longer used (J11). */
     fun profileDeleted(profileId: String) = send(Event.ProfileDeleted(profileId))
 
+    /** The phone's default network as Android reports it to the service: null when it has none. */
+    fun underlyingNetwork(network: NetworkInfo?) = send(Event.Network(network))
+
+    /**
+     * What the connection carried since it was established, the running engine's counters added to
+     * those of the engines it already stopped; null without a connection. Safe from any thread: the
+     * engine is read directly, never through the event loop.
+     */
+    fun traffic(): TrafficStats? = synchronized(trafficLock) {
+        val totals = sessionTotals ?: return null
+        val live = if (engineRunning) runCatching { engine.traffic() }.getOrNull() else null
+        val sum = live?.let { totals.carried + it } ?: totals.carried
+        TrafficStats(sum.bytesUp, sum.bytesDown, live?.activeConnections ?: 0, totals.sinceMillis)
+    }
+
     /**
      * Coroutines the session runs besides its event loop and that have not finished: the
      * pre-flight check (also a cancelled one whose engine call is still returning), the wait
-     * for Android's routing and the wait for the service. 0 whenever no connection is being
-     * set up (lifecycle tests).
+     * for Android's routing, the wait for the service and the wait before a reconnection
+     * attempt. 0 whenever no connection is being set up (lifecycle tests).
      */
     @VisibleForTesting
     fun activeJobs(): Int = (scope.coroutineContext[Job]?.children?.count { !it.isCompleted } ?: 1) - 1
@@ -161,14 +227,18 @@ class VpnSession(
                 Event.Restart -> onRestart()
                 Event.Disconnect -> onDisconnect()
                 Event.ClearError -> if (state.value.status == ConnectionStatus.Disconnected) publish(state.value.copy(error = null))
+                Event.RetryNow -> onRetryNow()
                 is Event.Attached -> onAttached(event.host, event.alwaysOn)
                 is Event.Detached -> onDetached(event.host)
                 is Event.Revoked -> onRevoked()
                 is Event.ProfileDeleted -> onProfileDeleted(event.profileId)
+                is Event.Network -> onNetwork(event.network)
                 is Event.PreflightDone -> onPreflightDone(event)
                 is Event.Routed -> onRouted(event.attempt)
                 is Event.RoutingTimedOut -> onRoutingTimedOut(event.attempt)
                 is Event.EngineFailed -> onEngineFailed(event)
+                is Event.ProxyFailure -> onProxyFailure(event)
+                is Event.RetryDue -> onRetryDue(event.token)
                 is Event.JobFailed -> onJobFailed(event)
                 is Event.ServiceStartTimedOut -> onServiceStartTimedOut(event.token)
                 is Event.Barrier -> event.done.complete(Unit)
@@ -190,7 +260,7 @@ class VpnSession(
 
     private suspend fun onConnect(profileId: String) {
         val current = state.value
-        if (current.profileId == profileId && current.status in BUSY) return
+        if (current.profileId == profileId && current.status in BUSY && recovery == null) return
         beginConnect(profileId)
     }
 
@@ -209,20 +279,39 @@ class VpnSession(
         // Looked up before anything is stopped: a profile that is gone leaves a running connection alone.
         val profile = profiles.get(profileId) ?: return profileMissing(profileId)
         cancelAttempt()
+        recovery = null
         // Switching or restarting: flows end now. Once connected, the interface stays, so traffic is held until the next engine runs on it.
         stopEngine()
+        if (sessionTotals?.profileId.let { it != null && it != profile.id }) closeSession() // a switch ends the old profile's session
         if (!connectedOnce) closeInterface() // an attempt that never connected leaves nothing behind
         val reconnecting = tun != null
         log("connect ${profile.id}${if (reconnecting) " (reconnect)" else ""}")
+        attemptStartedMillis = clock()
+        val previous = state.value
         publish(
             ConnectionState(
                 status = if (reconnecting) ConnectionStatus.Reconnecting else ConnectionStatus.Connecting,
                 profileId = profile.id,
                 profileName = profile.displayName,
                 profile = profile,
-                step = ConnectStep.CheckingProxy,
+                step = ConnectStep.Starting,
             ),
         )
+        note(
+            LogEntry.Level.Info,
+            LogEvent.ConnectRequested,
+            details = mapOf(
+                LogDetail.PROTOCOL to profile.protocol.name,
+                LogDetail.TLS to if (profile.useTls) "on" else "off",
+                LogDetail.SIGN_IN to if (profile.requiresSignIn) "yes" else "no",
+                LogDetail.SWITCH to when {
+                    !reconnecting -> null
+                    previous.profileId == profile.id -> "restart"
+                    else -> "other_profile"
+                },
+            ),
+        )
+        stageReached()
         val current = host
         if (current == null) waitForService(profile) else runPreflight(current, profile)
     }
@@ -284,19 +373,23 @@ class VpnSession(
         host = null
         // Android keeps a VPN service bound while its interface exists, so this happens with a
         // connection only on the way to process death; release what is left.
-        if (tun != null || preflight != null || routing != null || pending != null) {
+        if (tun != null || preflight != null || routing != null || pending != null || recovery != null) {
             log("service destroyed during a connection")
             end(ConnectionError(ConnectionError.INTERNAL, "the VPN service stopped"))
         }
     }
 
     private fun runPreflight(current: VpnHost, profile: ProxyProfile) {
+        publish(state.value.copy(step = ConnectStep.VpnPermission))
+        if (recovery == null) stageReached()
         // No consent: the user withdrew it, so Android holds no VPN of ours that could hold traffic. (Another VPN app
         // taking over arrives as a revocation instead; for an app the user allowed before, prepare() takes it back.)
         if (!current.hasConsent()) return end(ConnectionError(ConnectionError.VPN_PERMISSION_DENIED))
         current.clearProblem()
+        publish(state.value.copy(step = ConnectStep.ProxyHandshake))
+        if (recovery == null) stageReached()
         if (!current.showStatus(state.value)) {
-            return fail(ConnectionError(ConnectionError.INTERNAL, "Android did not allow the foreground service"))
+            return failAttempt(ConnectionError(ConnectionError.INTERNAL, "Android did not allow the foreground service"))
         }
         val id = ++attempt
         val guard = current.socketGuard()
@@ -356,20 +449,21 @@ class VpnSession(
         val profile = event.profile
         when (val check = event.check) {
             Check.ProfileChanged -> return checkAgain(profile.id)
-            is Check.Failed -> return fail(check.error)
+            is Check.Failed -> return failAttempt(check.error)
             is Check.Answered -> {
                 log("check ${profile.id}: ${check.answer.code ?: "ok"}")
-                if (!check.answer.passes) return fail(check.answer.error)
+                if (!check.answer.passes) return failAttempt(check.answer.error)
             }
         }
-        val current = host ?: return fail(ConnectionError(ConnectionError.INTERNAL, "the VPN service stopped"))
-        publish(state.value.copy(step = ConnectStep.StartingProtection))
+        val current = host ?: return failAttempt(ConnectionError(ConnectionError.INTERNAL, "the VPN service stopped"))
+        publish(state.value.copy(step = ConnectStep.Authenticated))
+        if (recovery == null) stageReached()
         current.showStatus(state.value)
 
         // Read before the interface exists, so nothing can fail between establishing it and starting the engine but the engine.
         val secret = when (val read = readSecret(profile)) {
             is SecretRead.Ok -> read.secret
-            is SecretRead.Failed -> return fail(read.error)
+            is SecretRead.Failed -> return failAttempt(read.error)
             SecretRead.Changed -> return checkAgain(profile.id)
         }
         try {
@@ -390,7 +484,7 @@ class VpnSession(
 
     private fun startProtection(current: VpnHost, profile: ProxyProfile, secret: EngineSecret?) {
         val config = engine.tunConfig()
-        // A switch or a restart keeps the interface; only a first connect creates one.
+        // A switch, a restart or a reconnection keeps the interface; only a first connect creates one.
         val existing = tun
         if (existing != null) {
             // Held means dropped: what apps sent meanwhile must not reach the next proxy later.
@@ -404,14 +498,14 @@ class VpnSession(
                 current.vpnNetworks()
             } catch (e: Exception) {
                 // Without Android's view from before the interface exists, a network still being torn down could pass for its.
-                return fail(ConnectionError(ConnectionError.INTERNAL, "Android's networks could not be read"))
+                return failAttempt(ConnectionError(ConnectionError.INTERNAL, "Android's networks could not be read"))
             }
         }
         val interfaceForEngine = existing ?: run {
             val fresh = try {
                 current.establish(config)
             } catch (e: Exception) {
-                return fail(ConnectionError(ConnectionError.INTERNAL, "Android could not create the VPN interface"))
+                return failAttempt(ConnectionError(ConnectionError.INTERNAL, "Android could not create the VPN interface"))
             }
             // Not prepared any more: the user withdrew consent, or another VPN app took over (its revocation follows).
             if (fresh == null) return end(ConnectionError(ConnectionError.VPN_PERMISSION_DENIED))
@@ -421,9 +515,15 @@ class VpnSession(
         }
 
         val generation = ++engineGeneration
+        val profileId = profile.id
         val notStarted = try {
-            engine.start(interfaceForEngine, config, profile, secret, current::protectSocket) { error ->
-                send(Event.EngineFailed(generation, error))
+            engine.start(interfaceForEngine, config, profile, secret, current::protectSocket) { signal ->
+                when (signal) {
+                    is EngineSignal.Failed -> send(Event.EngineFailed(generation, signal.error))
+                    is EngineSignal.ProxyFailure -> send(Event.ProxyFailure(generation, signal.error))
+                    // Counted for the log straight away: as many as apps make, and nothing the session acts on.
+                    is EngineSignal.ConnectionFailure -> diagnostics.connectionFailed(signal.code, profileId)
+                }
             }
             null
         } catch (e: EngineException) {
@@ -435,7 +535,7 @@ class VpnSession(
         }
         if (notStarted != null) {
             log("engine did not start: ${notStarted.code}")
-            return fail(notStarted)
+            return failAttempt(notStarted)
         }
         engineRunning = true
         awaitRouting(current, interfaceForEngine, before)
@@ -444,8 +544,8 @@ class VpnSession(
     /**
      * `establish()` returns before Android has created the VPN network and its routing rules,
      * so apps' traffic still takes the normal network for a moment. Connected waits until
-     * Android reports the interface's network ready — at once on a switch or a restart, whose
-     * interface Android already routes apps into.
+     * Android reports the interface's network ready — at once on a switch, a restart or a
+     * reconnection, whose interface Android already routes apps into.
      */
     private fun awaitRouting(current: VpnHost, routedTun: TunInterface, before: List<VpnNetwork>) {
         val id = attempt
@@ -469,8 +569,40 @@ class VpnSession(
         if (id != attempt || routing == null) return
         routing = null
         connectedOnce = true
-        log("connected ${state.value.profileId}")
-        publish(state.value.copy(status = ConnectionStatus.Connected, step = null, connectedSinceMillis = clock(), error = null))
+        val now = clock()
+        val profileId = state.value.profileId
+        val totals =
+            sessionTotals?.takeIf { it.profileId == profileId } ?: SessionTotals(profileId, sinceMillis = now).also { sessionTotals = it }
+        val recovered = recovery
+        recovery = null
+        if (recovered != null) {
+            log("reconnected $profileId after ${recovered.attempt} attempts")
+            sessionTotals = totals.copy(reconnects = totals.reconnects + 1)
+        } else {
+            log("connected $profileId")
+        }
+        publish(
+            state.value.copy(
+                status = ConnectionStatus.Connected,
+                step = null,
+                connectedSinceMillis = totals.sinceMillis,
+                error = null,
+                reconnect = null,
+            ),
+        )
+        if (recovered != null) {
+            note(
+                LogEntry.Level.Info,
+                LogEvent.Reconnected,
+                details = mapOf(
+                    LogDetail.REASON to recovered.reason.key,
+                    LogDetail.ATTEMPT to recovered.attempt.toString(),
+                    LogDetail.OUTAGE_MS to (now - recovered.startedMillis).toString(),
+                ),
+            )
+        } else {
+            note(LogEntry.Level.Info, LogEvent.Connected, details = mapOf(LogDetail.SETUP_MS to (now - attemptStartedMillis).toString()))
+        }
         host?.showStatus(state.value)
     }
 
@@ -478,7 +610,7 @@ class VpnSession(
         if (id != attempt || routing == null) return
         routing = null
         log("Android did not route apps into the interface")
-        fail(ConnectionError(ConnectionError.INTERNAL, "Android did not route apps into the VPN"))
+        failAttempt(ConnectionError(ConnectionError.INTERNAL, "Android did not route apps into the VPN"))
     }
 
     private fun onEngineFailed(event: Event.EngineFailed) {
@@ -487,11 +619,29 @@ class VpnSession(
         fail(event.error)
     }
 
+    /**
+     * The escalation rule (docs/m1/04 §4, ADR-0012): a refused sign-in or certificate blocks at once;
+     * other failures at the proxy make the session reconnect once three came in a row, as the engine
+     * counts them (a working connection resets its count).
+     */
+    private fun onProxyFailure(event: Event.ProxyFailure) {
+        if (event.generation != engineGeneration || !engineRunning || state.value.status != ConnectionStatus.Connected) return
+        val error = event.error
+        if (error.code in RetryPolicy.BLOCK_AT_ONCE) {
+            log("proxy refused while connected: ${error.code}")
+            return block(error)
+        }
+        val inARow = engine.consecutiveProxyFailures()
+        if (inARow < RetryPolicy.ESCALATION_FAILURES) return
+        log("proxy failing while connected: ${error.code} ($inARow in a row)")
+        startRecovery(ReconnectReason.ProxyFailures, error, immediate = false, inARow = inARow)
+    }
+
     private fun onJobFailed(event: Event.JobFailed) {
         log("unexpected ${event.type} in a session job${if (event.attempt != attempt) " of an attempt that is over" else ""}")
         // A cancelled or replaced attempt's job failing late must not touch the connection that followed.
         if (event.attempt != attempt) return
-        fail(ConnectionError(ConnectionError.INTERNAL, "unexpected ${event.type} in a background job"))
+        failAttempt(ConnectionError(ConnectionError.INTERNAL, "unexpected ${event.type} in a background job"))
     }
 
     private fun onRevoked() {
@@ -509,7 +659,184 @@ class VpnSession(
         log("profile $profileId deleted")
         // Its credentials are never used again: the engine stops. Once connected, traffic stays held until the user
         // stops; the profile list's "Disconnect and delete" disconnects first, so this is a safety net.
-        if (connectedOnce) block(ConnectionError(ConnectionError.PROFILE_DELETED)) else end(error = null)
+        if (connectedOnce) block(ConnectionError(ConnectionError.PROFILE_DELETED)) else end(error = null, stoppedBy = "profile_deleted")
+    }
+
+    // --- reconnecting on its own (ADR-0012) -------------------------------------------------------------------
+
+    /**
+     * Starts reconnecting: the engine stops (traffic held at the interface), and attempt 1 runs after its wait,
+     * or at once when [immediate]. A reconnection already running is replaced, its attempts starting over.
+     */
+    private fun startRecovery(reason: ReconnectReason, error: ConnectionError?, immediate: Boolean, inARow: Long? = null) {
+        if (state.value.profile == null || tun == null) return block(error ?: ConnectionError(ConnectionError.INTERNAL))
+        cancelAttempt()
+        stopEngine()
+        val policy = retry()
+        recovery = Recovery(reason, policy, startedMillis = clock(), attempt = 1, lastError = error)
+        log("reconnecting: ${reason.key}${error?.let { " ${it.code}" } ?: ""}")
+        note(
+            LogEntry.Level.Warning,
+            LogEvent.ReconnectStarted,
+            stage = ConnectionStage.Reconnecting,
+            code = error?.code,
+            details = mapOf(
+                LogDetail.REASON to reason.key,
+                LogDetail.CONSECUTIVE to inARow?.toString(),
+                LogDetail.MAX_ATTEMPTS to policy.maxAttempts.toString(),
+            ),
+        )
+        scheduleAttempt(if (immediate) 0 else policy.delayBefore(1, random()))
+    }
+
+    private fun scheduleAttempt(waitMillis: Long) {
+        val r = recovery ?: return
+        val token = ++retryToken
+        publishRecovery(r, nextAttemptAtMillis = clock() + waitMillis)
+        host?.showStatus(state.value)
+        retryWait = scope.launch(failuresOf(attempt)) {
+            delay(waitMillis)
+            send(Event.RetryDue(token))
+        }
+    }
+
+    private fun publishRecovery(r: Recovery, nextAttemptAtMillis: Long?) {
+        publish(
+            state.value.copy(
+                status = ConnectionStatus.Reconnecting,
+                step = if (nextAttemptAtMillis == null) ConnectStep.ProxyHandshake else null,
+                error = null,
+                reconnect = ReconnectInfo(r.reason, r.attempt, r.policy.maxAttempts, nextAttemptAtMillis, r.lastError),
+            ),
+        )
+    }
+
+    private fun onRetryDue(token: Long) {
+        val r = recovery ?: return
+        if (token != retryToken) return
+        retryWait = null
+        val profile = state.value.profile ?: return block(ConnectionError(ConnectionError.INTERNAL, PROFILE_GONE))
+        val current = host ?: return block(ConnectionError(ConnectionError.INTERNAL, "the VPN service stopped"))
+        log("reconnect attempt ${r.attempt} of ${r.policy.maxAttempts}")
+        publishRecovery(r, nextAttemptAtMillis = null)
+        runPreflight(current, profile)
+    }
+
+    private fun onRetryNow() {
+        if (recovery == null || preflight != null || routing != null) return // nothing waiting, or an attempt is running
+        retryWait?.cancel()
+        retryWait = null
+        onRetryDue(retryToken)
+    }
+
+    /** An attempt failed: the next one after its wait, or — with no attempt left, or an answer no retry changes — blocked. */
+    private fun attemptFailed(r: Recovery, error: ConnectionError) {
+        log("reconnect attempt ${r.attempt} failed: ${error.code}")
+        if (!RetryPolicy.recoverable(error.code)) {
+            recovery = null
+            return block(error)
+        }
+        if (r.attempt >= r.policy.maxAttempts) {
+            recovery = null
+            log("reconnecting stopped after ${r.attempt} attempts")
+            note(
+                LogEntry.Level.Error,
+                LogEvent.ReconnectGaveUp,
+                stage = ConnectionStage.Reconnecting,
+                code = error.code,
+                details = mapOf(LogDetail.ATTEMPT to r.attempt.toString(), LogDetail.DETAIL to error.detail),
+            )
+            return block(error.copy(detail = "reconnecting stopped after ${r.attempt} attempts"), logged = true)
+        }
+        val wait = r.policy.delayBefore(r.attempt + 1, random())
+        note(
+            LogEntry.Level.Warning,
+            LogEvent.ReconnectAttemptFailed,
+            stage = ConnectionStage.Reconnecting,
+            code = error.code,
+            details = mapOf(
+                LogDetail.ATTEMPT to r.attempt.toString(),
+                LogDetail.MAX_ATTEMPTS to r.policy.maxAttempts.toString(),
+                LogDetail.NEXT_TRY_MS to wait.toString(),
+                LogDetail.DETAIL to error.detail,
+            ),
+        )
+        r.attempt++
+        r.lastError = error
+        stopEngine() // an attempt that started its engine and then failed leaves none running
+        scheduleAttempt(wait)
+    }
+
+    // --- the phone's network ----------------------------------------------------------------------------------
+
+    private fun onNetwork(info: NetworkInfo?) {
+        val previous = network
+        val known = networkKnown
+        network = info?.id
+        networkKnown = true
+        lastNetwork = info
+        if (info?.id != previous || !known) log("network: ${info?.transport ?: "none"}${if (known) "" else " (first report)"}")
+        if (!known) return // Android's first report says where the phone is, not that anything changed
+        val status = state.value.status
+        val heldForRetry = status == ConnectionStatus.Blocked && tun != null && RetryPolicy.recoverable(state.value.error?.code)
+        if (info == null) {
+            if (status == ConnectionStatus.Connected || recovery != null || heldForRetry) goOffline()
+            return
+        }
+        if (info.id == previous) return
+        when {
+            status == ConnectionStatus.Offline -> {
+                noteNetwork(info, reset = null)
+                startRecovery(ReconnectReason.NetworkBack, error = null, immediate = true)
+            }
+            recovery != null || heldForRetry -> {
+                noteNetwork(info, reset = null)
+                startRecovery(ReconnectReason.NetworkChanged, recovery?.lastError ?: state.value.error, immediate = true)
+            }
+            status == ConnectionStatus.Connected && engineRunning -> {
+                // The engine keeps running; its connections end so apps make new ones, which go out on the new network.
+                val reset = engine.resetFlows()
+                log("network changed: $reset connections reset")
+                noteNetwork(info, reset)
+            }
+        }
+    }
+
+    private fun noteNetwork(info: NetworkInfo, reset: Int?) {
+        note(
+            LogEntry.Level.Info,
+            LogEvent.NetworkChanged,
+            details = mapOf(
+                LogDetail.NETWORK to info.transport,
+                LogDetail.RESET to reset?.toString(),
+            ),
+        )
+    }
+
+    /** No network: the engine stops and traffic is held at the interface until one is back (board B7). */
+    private fun goOffline() {
+        cancelAttempt()
+        recovery = null
+        stopEngine()
+        log("offline")
+        publish(
+            state.value.copy(
+                status = ConnectionStatus.Offline,
+                step = null,
+                error = ConnectionError(ConnectionError.OFFLINE),
+                reconnect = null,
+            ),
+        )
+        note(LogEntry.Level.Warning, LogEvent.Offline, stage = ConnectionStage.Reconnecting, code = ConnectionError.OFFLINE)
+        host?.showStatus(state.value)
+    }
+
+    // --- endings ------------------------------------------------------------------------------------------------
+
+    /** An attempt failed: the next reconnection attempt while reconnecting, otherwise as [fail]. */
+    private fun failAttempt(error: ConnectionError) {
+        val r = recovery
+        if (r != null) attemptFailed(r, error) else fail(error)
     }
 
     /** Fails the current attempt: blocked once the user has been connected, otherwise back to Disconnected with nothing left. */
@@ -518,26 +845,91 @@ class VpnSession(
     }
 
     /** The interface stays up with no engine reading it: apps' traffic is held, never sent around the proxy. */
-    private fun block(error: ConnectionError) {
+    private fun block(error: ConnectionError, logged: Boolean = false) {
+        val stage = state.value.stage
         cancelAttempt()
+        recovery = null
         stopEngine()
         log("blocked: ${error.code}")
-        publish(state.value.copy(status = ConnectionStatus.Blocked, step = null, connectedSinceMillis = null, error = error))
+        publish(
+            state.value.copy(status = ConnectionStatus.Blocked, step = null, connectedSinceMillis = null, error = error, reconnect = null),
+        )
+        if (!logged) {
+            note(
+                LogEntry.Level.Error,
+                LogEvent.Blocked,
+                stage = stage,
+                code = error.code,
+                details = mapOf(LogDetail.DETAIL to error.detail),
+            )
+        }
         host?.showStatus(state.value)
     }
 
     /** Back to the normal network: engine stopped, interfaces closed, service stopped. */
-    private fun end(error: ConnectionError?) {
+    private fun end(error: ConnectionError?, stoppedBy: String = "user") {
+        val before = state.value
         cancelAttempt()
+        recovery = null
         pending = null
         serviceWait?.cancel()
         serviceWait = null
         stopEngine()
         closeInterface()
         connectedOnce = false
-        if (state.value.status != ConnectionStatus.Disconnected) log("disconnected${error?.let { ": ${it.code}" } ?: ""}")
-        publish(state.value.copy(status = ConnectionStatus.Disconnected, step = null, connectedSinceMillis = null, error = error))
+        if (before.status != ConnectionStatus.Disconnected) log("disconnected${error?.let { ": ${it.code}" } ?: ""}")
+        publish(
+            before.copy(status = ConnectionStatus.Disconnected, step = null, connectedSinceMillis = null, error = error, reconnect = null),
+        )
+        if (before.status != ConnectionStatus.Disconnected) {
+            when {
+                error == null -> note(
+                    LogEntry.Level.Info,
+                    LogEvent.Stopped,
+                    stage = ConnectionStage.Stopped,
+                    details = mapOf(LogDetail.BY to stoppedBy),
+                )
+                error.code == ConnectionError.VPN_REVOKED -> note(
+                    LogEntry.Level.Warning,
+                    LogEvent.Revoked,
+                    stage = ConnectionStage.Stopped,
+                    code = error.code,
+                )
+                else -> note(
+                    LogEntry.Level.Error,
+                    LogEvent.ConnectFailed,
+                    stage = before.stage,
+                    code = error.code,
+                    details = mapOf(LogDetail.DETAIL to error.detail),
+                )
+            }
+        }
+        closeSession()
         releaseHost()
+    }
+
+    /** Logs the summary of the connected session that ends (its time and traffic) and forgets it. */
+    private fun closeSession() {
+        val totals = sessionTotals ?: return
+        sessionTotals = null
+        diagnostics.flushProblems()
+        val t = totals.carried
+        note(
+            LogEntry.Level.Info,
+            LogEvent.SessionSummary,
+            stage = ConnectionStage.Stopped,
+            profileId = totals.profileId,
+            details = mapOf(
+                LogDetail.DURATION_MS to (clock() - totals.sinceMillis).toString(),
+                LogDetail.BYTES_UP to t.bytesUp.toString(),
+                LogDetail.BYTES_DOWN to t.bytesDown.toString(),
+                LogDetail.OPENED to t.opened.toString(),
+                LogDetail.FAILED to t.failed.toString(),
+                LogDetail.UDP_BLOCKED to t.udpBlocked.toString(),
+                LogDetail.PINGS_DROPPED to t.pingsDropped.toString(),
+                LogDetail.RECONNECTS to totals.reconnects.toString(),
+            ),
+        )
     }
 
     private fun cancelAttempt() {
@@ -546,11 +938,23 @@ class VpnSession(
         preflight = null
         routing?.cancel()
         routing = null
+        retryWait?.cancel()
+        retryWait = null
+        retryToken++
     }
 
+    /**
+     * Stops the engine, its traffic counted into the session's first: read while it still runs (a stopped
+     * engine has no counters), and in one step with [traffic]'s readers, so the counters never go back.
+     */
     private fun stopEngine() {
         if (!engineRunning) return
-        engineRunning = false
+        synchronized(trafficLock) {
+            val last = runCatching { engine.traffic() }.getOrNull()
+            engineRunning = false
+            val totals = sessionTotals
+            if (last != null && totals != null) sessionTotals = totals.copy(carried = totals.carried + last)
+        }
         runCatching { engine.stop() }
     }
 
@@ -566,6 +970,32 @@ class VpnSession(
 
     private fun publish(next: ConnectionState) {
         state.value = next
+    }
+
+    private fun stageReached() {
+        note(LogEntry.Level.Info, LogEvent.StageReached)
+    }
+
+    /** One entry of the diagnostic log, at the current stage and for the current profile unless told otherwise. */
+    private fun note(
+        level: LogEntry.Level,
+        event: LogEvent,
+        stage: ConnectionStage? = state.value.stage,
+        code: String? = null,
+        profileId: String? = state.value.profileId,
+        details: Map<String, String?> = emptyMap(),
+    ) {
+        diagnostics.record(
+            LogEntry(
+                timeMillis = clock(),
+                level = level,
+                event = event,
+                stage = stage,
+                code = code,
+                profileId = profileId,
+                details = details.filterValues { it != null }.mapValues { it.value!! },
+            ),
+        )
     }
 
     private suspend fun readSecret(profile: ProxyProfile): SecretRead = when (val read = profiles.readCredentials(profile.id, profile)) {
@@ -601,6 +1031,23 @@ class VpnSession(
         data object ProfileChanged : Check
     }
 
+    /** A reconnection in progress: its policy, when it started, the attempt next or running, and the last attempt's error. */
+    private class Recovery(
+        val reason: ReconnectReason,
+        val policy: RetryPolicy,
+        val startedMillis: Long,
+        var attempt: Int,
+        var lastError: ConnectionError?,
+    )
+
+    /** The connected session: its profile, since when, the traffic of the engines it stopped, and its reconnections. */
+    private data class SessionTotals(
+        val profileId: String?,
+        val sinceMillis: Long,
+        val carried: EngineTraffic = EngineTraffic(),
+        val reconnects: Int = 0,
+    )
+
     private sealed interface Event {
         data class Connect(val profileId: String) : Event
 
@@ -610,6 +1057,8 @@ class VpnSession(
 
         data object ClearError : Event
 
+        data object RetryNow : Event
+
         class Attached(val host: VpnHost, val alwaysOn: Boolean) : Event
 
         class Detached(val host: VpnHost) : Event
@@ -618,6 +1067,8 @@ class VpnSession(
 
         data class ProfileDeleted(val profileId: String) : Event
 
+        class Network(val network: NetworkInfo?) : Event
+
         class PreflightDone(val attempt: Long, val profile: ProxyProfile, val check: Check) : Event
 
         class Routed(val attempt: Long) : Event
@@ -625,6 +1076,10 @@ class VpnSession(
         class RoutingTimedOut(val attempt: Long) : Event
 
         class EngineFailed(val generation: Long, val error: ConnectionError) : Event
+
+        class ProxyFailure(val generation: Long, val error: ConnectionError) : Event
+
+        class RetryDue(val token: Long) : Event
 
         class JobFailed(val attempt: Long, val type: String) : Event
 
@@ -657,3 +1112,7 @@ class VpnSession(
         }
     }
 }
+
+/** The key a reconnect reason is logged with. */
+internal val ReconnectReason.key: String
+    get() = name.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase(Locale.ROOT)

@@ -4,10 +4,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import app.proxyflow.core.data.ConnectionController
+import app.proxyflow.core.data.InMemoryLogRepository
+import app.proxyflow.core.data.LogRepository
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.TrafficStats
 import javax.net.ssl.X509TrustManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,21 +33,27 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * The VPN layer of one process (ADR-0010): the connection state, the one
- * [VpnSession], and the [ConnectionController] the screens use. The app
- * builds it once (AppContainer) and hands it to [ProxyFlowVpnService], which
- * Android creates, through the [Provider] its Application implements.
+ * The VPN layer of one process (ADR-0010, ADR-0012): the connection state, the one
+ * [VpnSession], the diagnostic log it writes, the phone's network it is told about, and
+ * the [ConnectionController] the screens use. The app builds it once (AppContainer) and
+ * hands it to [ProxyFlowVpnService], which Android creates, through the [Provider] its
+ * Application implements.
  *
  * @param scope the app's scope; the session runs on a serial view of the I/O dispatcher inside it.
  * @param proxyTrust replaces the platform trust manager that checks TLS proxies' certificates.
  *   Only the device tests pass one (a platform trust manager that also trusts their run's test
  *   CA, ADR-0011); the app never does, so certificates are always checked as ADR-0005 says.
+ * @param logs where the session's diagnostic log entries go (the Logs screen's).
+ * @param retry how the session reconnects on its own, read each time it starts to. Only the device
+ *   tests pass one (shorter waits); the app always uses [RetryPolicy]'s default.
  */
 class VpnRuntime(
     context: Context,
     private val profiles: ProfileRepository,
     scope: CoroutineScope,
     proxyTrust: (() -> X509TrustManager)? = null,
+    logs: LogRepository = InMemoryLogRepository(),
+    retry: () -> RetryPolicy = { RetryPolicy() },
     private val engine: TunnelEngine = if (proxyTrust == null) ProxyTunnelEngine() else ProxyTunnelEngine(trust = proxyTrust),
 ) {
     private val appContext = context.applicationContext
@@ -56,6 +65,12 @@ class VpnRuntime(
     /** The session's and the service's lifecycle, for diagnosis (no credentials, server names or payloads). */
     val log = VpnLog()
 
+    /** Writes the session's entries off its thread, in batches (ADR-0012). */
+    private val recorder = DiagnosticsRecorder(
+        repository = logs,
+        scope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]) + Dispatchers.IO),
+    )
+
     val session = VpnSession(
         profiles = profiles,
         engine = engine,
@@ -63,6 +78,8 @@ class VpnRuntime(
         state = mutableState,
         scope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]) + SERIAL),
         log = log::add,
+        retry = retry,
+        diagnostics = recorder,
     )
 
     val controller: ConnectionController = VpnConnectionController(this)
@@ -89,7 +106,33 @@ class VpnRuntime(
         }
         .flowOn(Dispatchers.IO)
 
+    /**
+     * Home's session counters (ADR-0012): while there is a connected session — also while it reconnects
+     * on its own or waits for a network — what it carried, read once a second for as long as someone
+     * collects; null otherwise. Reading never waits for the session.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val traffic: Flow<TrafficStats?> = state
+        .map { it.connectedSinceMillis != null }
+        .distinctUntilChanged()
+        .flatMapLatest { live ->
+            if (!live) {
+                flowOf<TrafficStats?>(null)
+            } else {
+                flow<TrafficStats?> {
+                    while (true) {
+                        emit(session.traffic())
+                        delay(TRAFFIC_INTERVAL_MS)
+                    }
+                }
+            }
+        }
+        .flowOn(Dispatchers.IO)
+
     init {
+        // The phone's network, for the life of the process: the session reconnects when it changes (ADR-0012).
+        if (!NetworkMonitor(appContext).start(session::underlyingNetwork)) log.add("network changes are not reported")
+
         // A deleted profile's credentials must not stay in use: the connection using it stops its engine (J11).
         // Room is watched only while a connection exists.
         scope.launch {
@@ -122,6 +165,7 @@ class VpnRuntime(
         val SERIAL = Dispatchers.IO.limitedParallelism(1)
 
         const val DIAGNOSTICS_INTERVAL_MS = 1_000L
+        const val TRAFFIC_INTERVAL_MS = 1_000L
     }
 }
 
@@ -141,4 +185,8 @@ internal class VpnConnectionController(private val runtime: VpnRuntime) : Connec
     override fun clearError() = runtime.session.clearError()
 
     override val diagnostics: Flow<RoutingDiagnostics?> get() = runtime.diagnostics
+
+    override val traffic: Flow<TrafficStats?> get() = runtime.traffic
+
+    override fun retryNow() = runtime.session.retryNow()
 }

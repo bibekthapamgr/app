@@ -2,7 +2,9 @@ package app.proxyflow.e2e
 
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
+import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.TrafficStats
 import java.io.ByteArrayInputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -16,9 +18,10 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
 /**
- * The M6 part of the lab on the CI runner (scripts/e2e_env.sh), read from the same file as
+ * The M6 and M7 part of the lab on the CI runner (scripts/e2e_env.sh), read from the same file as
  * [E2eConfig]: TLS fronts, the gate, the destinations by address, over IPv6 and on the LAN
- * address, the HTTPS destination, the UDP sinks, and the lab's CA certificate (pushed beside it).
+ * address, the HTTPS destination, the UDP sinks, the bulk server for the traffic counters'
+ * controlled transfers, and the lab's CA certificate (pushed beside it).
  */
 data class LabConfig(
     val proxyHost: String,
@@ -42,6 +45,7 @@ data class LabConfig(
     val httpsPort: Int,
     val httpsSha256: String,
     val udpPort: Int,
+    val bulkPort: Int,
     val caPath: String,
 ) {
     /** The lab's CA (scripts/e2e_pki.py), for [TestTrust]. */
@@ -78,6 +82,7 @@ data class LabConfig(
                 httpsPort = port("https.port"),
                 httpsSha256 = value("https.sha256"),
                 udpPort = port("udp.port"),
+                bulkPort = port("bulk.port"),
                 caPath = value("ca.path"),
             )
         }
@@ -144,6 +149,13 @@ object FromShell {
     }
 
     fun tls(host: String, port: Int, caPath: String, line: String): String = run("tls", host, port, caPath, line, 10_000)
+
+    /** Sends [bytes] to the bulk server ("SENT n REPLY GOT n") or has it send them ("RECEIVED n"). */
+    fun bulk(host: String, port: Int, up: Boolean, bytes: Long, timeoutMillis: Int = 30_000): String =
+        run("bulk", host, port, if (up) "up" else "down", bytes, timeoutMillis)
+
+    /** Holds one connection to the bulk server open for at most [seconds]: "ENDED <ms> closed|reset|data|timeout". */
+    fun hold(host: String, port: Int, seconds: Int): String = run("hold", host, port, seconds)
 }
 
 /**
@@ -185,6 +197,25 @@ fun App.awaitDiagnostics(what: String, condition: (RoutingDiagnostics) -> Boolea
     return checkNotNull(last)
 }
 
+/** What Home's counters show (ADR-0012), read through the app's own path, once it satisfies [condition]. */
+fun App.awaitTraffic(what: String, condition: (TrafficStats) -> Boolean): TrafficStats = runBlocking {
+    try {
+        withTimeout(TRAFFIC_WAIT_MS) { runtime.traffic.filterNotNull().first(condition) }
+    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+        throw AssertionError("timed out waiting for $what; the session's traffic is ${runtime.session.traffic()}", e)
+    }
+}
+
+/** The newest diagnostic log entry that satisfies [condition], once the session's writer has stored it. */
+fun App.awaitLog(what: String, condition: (LogEntry) -> Boolean): LogEntry {
+    var found: LogEntry? = null
+    eventually("the log has $what", timeoutMillis = LOG_WAIT_MS, diagnose = { "log: ${runBlocking { logs.entries.first() }.take(20)}" }) {
+        found = runBlocking { logs.entries.first() }.firstOrNull(condition)
+        found != null
+    }
+    return checkNotNull(found)
+}
+
 /**
  * Lines the M6 tests send, logged for scripts/m6_evidence.py: "sent <line> to <host>:<port>" must arrive at
  * that destination exactly once, "refused <line> to <host>:<port>" nowhere at all.
@@ -201,3 +232,5 @@ object Lines {
 
 const val LAB_TAG = "ProxyFlowE2E"
 private const val DIAGNOSTICS_WAIT_MS = 15_000L
+private const val TRAFFIC_WAIT_MS = 15_000L
+private const val LOG_WAIT_MS = 10_000L

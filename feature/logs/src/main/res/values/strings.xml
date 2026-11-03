@@ -1,10 +1,110 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Logs (board F1). Retention (24 hours) is promised only once M7 implements it. -->
+    <!-- Logs (boards F1–F3, ADR-0012). What the log keeps and never keeps is stated where it is read. -->
     <string name="logs_title">Logs</string>
     <string name="logs_empty_title">No events yet</string>
-    <string name="logs_empty_body">Connection events and errors will appear here. Logs stay on this phone and never include passwords or page content.</string>
+    <string name="logs_empty_body">Connection events and errors will appear here. Logs stay on this phone for 24 hours and never include passwords, server or site names, or page content.</string>
+    <string name="logs_no_match_title">No matching events</string>
+    <string name="logs_no_match_body">Try another filter, or search for something else.</string>
+    <string name="logs_kept">Kept on this phone for 24 hours, at most 5,000 events. Never includes passwords, server or site names, addresses or page content.</string>
     <string name="logs_level_info">Info</string>
     <string name="logs_level_warning">Warning</string>
     <string name="logs_level_error">Error</string>
+
+    <!-- F2: filters (docs/m1/03 J10), search and actions -->
+    <string name="logs_filter_all">All</string>
+    <string name="logs_filter_errors">Errors</string>
+    <string name="logs_filter_connection">Connection</string>
+    <string name="logs_filter_blocked">Blocked</string>
+    <string name="logs_search">Search codes, events or profiles</string>
+    <string name="logs_search_clear">Clear search</string>
+    <string name="logs_copy">Copy log</string>
+    <string name="logs_copied">Log copied</string>
+    <string name="logs_export">Export log</string>
+    <string name="logs_clear">Clear log</string>
+    <string name="logs_clear_title">Clear the log?</string>
+    <string name="logs_clear_message">This removes every event kept on this phone. It can\'t be undone.</string>
+    <string name="logs_clear_confirm">Clear</string>
+    <string name="logs_cancel">Cancel</string>
+
+    <!-- What Copy and Export hand over: these lines first, then one line per event with stable keys. -->
+    <string name="logs_export_title">ProxyFlow diagnostic log</string>
+    <string name="logs_export_app">App %1$s · Android %2$s (API %3$d)</string>
+    <string name="logs_export_when">Exported %1$s</string>
+    <string name="logs_export_count">Events: %1$d of %2$d · filter: %3$s</string>
+    <string name="logs_export_count_search">Events: %1$d of %2$d · filter: %3$s · search: %4$s</string>
+    <string name="logs_export_privacy">Never includes passwords, server or site names, addresses or page content.</string>
+
+    <!-- One line per event (F2) and the detail sheet's title (F3) -->
+    <string name="logs_event_connect_requested">Connection requested</string>
+    <string name="logs_event_restart_requested">Restart requested</string>
+    <string name="logs_event_switch_requested">Switch to another profile</string>
+    <string name="logs_event_stage">Stage: %1$s</string>
+    <string name="logs_event_connected">Connected</string>
+    <string name="logs_event_connected_in">Connected in %1$s</string>
+    <string name="logs_event_connect_failed">Couldn\'t connect</string>
+    <string name="logs_event_blocked">Traffic blocked</string>
+    <string name="logs_event_reconnect_proxy">Reconnecting: connections to the proxy kept failing</string>
+    <string name="logs_event_reconnect_network_back">Reconnecting: the phone has a network again</string>
+    <string name="logs_event_reconnect_network_changed">Reconnecting: the phone moved to another network</string>
+    <string name="logs_event_attempt_failed">Attempt %1$d of %2$d failed</string>
+    <plurals name="logs_event_reconnected">
+        <item quantity="one">Reconnected after %d attempt</item>
+        <item quantity="other">Reconnected after %d attempts</item>
+    </plurals>
+    <plurals name="logs_event_gave_up">
+        <item quantity="one">Stopped reconnecting after %d attempt — traffic held</item>
+        <item quantity="other">Stopped reconnecting after %d attempts — traffic held</item>
+    </plurals>
+    <string name="logs_event_offline">No network — traffic held</string>
+    <string name="logs_event_network_changed">Network changed to %1$s</string>
+    <string name="logs_event_stopped">Disconnected</string>
+    <string name="logs_event_stopped_profile_deleted">Disconnected: the profile was deleted</string>
+    <string name="logs_event_revoked">Disconnected by Android</string>
+    <string name="logs_event_session_summary">Session ended · %1$s · ↑ %2$s ↓ %3$s</string>
+    <plurals name="logs_event_connection_problems">
+        <item quantity="one">%d connection to a site failed in a minute</item>
+        <item quantity="other">%d connections to sites failed in a minute</item>
+    </plurals>
+
+    <string name="logs_stage_starting">Starting</string>
+    <string name="logs_stage_vpn_permission">VPN permission</string>
+    <string name="logs_stage_proxy_handshake">Proxy handshake</string>
+    <string name="logs_stage_authenticated">Authenticated</string>
+    <string name="logs_stage_connected">Connected</string>
+    <string name="logs_stage_reconnecting">Reconnecting</string>
+    <string name="logs_stage_failed">Failed</string>
+    <string name="logs_stage_stopped">Stopped</string>
+
+    <string name="logs_network_wifi">Wi-Fi</string>
+    <string name="logs_network_cellular">mobile data</string>
+    <string name="logs_network_ethernet">Ethernet</string>
+    <string name="logs_network_other">another network</string>
+
+    <!-- F3 -->
+    <string name="logs_detail_time">Time</string>
+    <string name="logs_detail_level">Level</string>
+    <string name="logs_detail_stage">Stage</string>
+    <string name="logs_detail_code">Code</string>
+    <string name="logs_detail_profile">Profile</string>
+    <string name="logs_detail_details">Details</string>
+    <string name="logs_detail_hint">What you can do</string>
+    <string name="logs_copy_event">Copy this event</string>
+
+    <!-- What to do about a code, by kind (docs/m1/04 §4): sign-in, certificate, DNS, timeout, protocol and the rest. -->
+    <string name="logs_hint_auth">Check the username and password with your proxy provider, then edit the profile.</string>
+    <string name="logs_hint_auth_unsupported">This proxy only offers a sign-in method ProxyFlow doesn\'t support. Ask your provider for Basic sign-in, or use a SOCKS5 proxy.</string>
+    <string name="logs_hint_tls">The proxy\'s certificate didn\'t pass the check. Check the server name in the profile, or ask your provider for a valid certificate. ProxyFlow never skips the check.</string>
+    <string name="logs_hint_tls_expired">Check your phone\'s date and time. If they\'re right, the proxy\'s certificate has expired: contact your provider.</string>
+    <string name="logs_hint_tls_handshake">The proxy didn\'t complete TLS. Check the port, and whether your provider offers TLS on it. ProxyFlow never falls back to an unencrypted connection.</string>
+    <string name="logs_hint_dns">The proxy\'s address wasn\'t found. Check its spelling in the profile, or use its IP address.</string>
+    <string name="logs_hint_timeout">The proxy accepted the connection but didn\'t answer in time. Try again later, or check with your provider.</string>
+    <string name="logs_hint_unreachable">Check the address and port in the profile, and that the proxy is online.</string>
+    <string name="logs_hint_protocol">Check the protocol (HTTP or SOCKS5) and the port in the profile.</string>
+    <string name="logs_hint_no_connect">This HTTP proxy doesn\'t allow tunnels (CONNECT). Check the port, or ask your provider for a proxy that allows them.</string>
+    <string name="logs_hint_target">Your proxy couldn\'t reach some sites or refused them. Other connections are unaffected. If it goes on, check with your provider.</string>
+    <string name="logs_hint_offline">ProxyFlow reconnects when your phone has a network again. Apps stay paused meanwhile.</string>
+    <string name="logs_hint_engine">Restart the connection from Home. If it happens again, export this log for support.</string>
+    <string name="logs_hint_credentials">Enter the password again in the profile.</string>
+    <string name="logs_hint_revoked">Another VPN app was turned on, or ProxyFlow\'s VPN permission was removed. Reconnect from Home.</string>
 </resources>

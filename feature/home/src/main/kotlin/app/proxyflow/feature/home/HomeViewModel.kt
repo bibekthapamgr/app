@@ -10,6 +10,7 @@ import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.TrafficStats
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,12 +24,14 @@ sealed interface HomeUiState {
     data object NoProfile : HomeUiState
 
     /**
-     * Boards B2–B4, B6b, B6d and the blocked layout (B6a's), from [connection].
+     * Boards B2–B7, from [connection].
      *
      * @param profile while a connection exists (connecting, connected, reconnecting or blocked), the
      *   settings it runs with — its own copy, unchanged by later edits and still there when the saved
      *   profile was deleted; otherwise the active profile, so Home never shows one proxy and connects another.
      * @param diagnostics while connected, what the connection did so far (B4, ADR-0011); null until read.
+     * @param traffic while there is a connected session (B4, and on through B5 and B7), what it carried
+     *   so far (ADR-0012); null until read.
      */
     data class Ready(
         val profile: ProxyProfile,
@@ -36,6 +39,7 @@ sealed interface HomeUiState {
         val canConnect: Boolean,
         val dialog: HomeDialog? = null,
         val diagnostics: RoutingDiagnostics? = null,
+        val traffic: TrafficStats? = null,
     ) : HomeUiState {
         val status: ConnectionStatus get() = connection.status
 
@@ -59,10 +63,14 @@ class HomeViewModel(profiles: ProfileRepository, private val connection: Connect
     private val dialog = MutableStateFlow<HomeDialog?>(null)
     private var notificationRequestTaken = false
 
-    // The connection and, while connected, its diagnostics: read from the engine only while Home is
-    // shown (and for STOP_TIMEOUT_MS after), never shown for a connection that is gone.
-    private val live = combine(connection.state, connection.diagnostics) { state, read ->
-        Live(state, read.takeIf { state.status == ConnectionStatus.Connected })
+    // The connection and, while connected, its diagnostics and traffic: read from the engine only while
+    // Home is shown (and for STOP_TIMEOUT_MS after), never shown for a connection that is gone.
+    private val live = combine(connection.state, connection.diagnostics, connection.traffic) { state, read, traffic ->
+        Live(
+            connection = state,
+            diagnostics = read.takeIf { state.status == ConnectionStatus.Connected },
+            traffic = traffic.takeIf { state.connectedSinceMillis != null && it?.sinceMillis == state.connectedSinceMillis },
+        )
     }
 
     val uiState: StateFlow<HomeUiState> =
@@ -71,7 +79,11 @@ class HomeViewModel(profiles: ProfileRepository, private val connection: Connect
             val active = list.firstOrNull { it.id == activeId } ?: list.firstOrNull()
             val running = current.profile?.takeIf { current.active }
             val shown = running ?: active
-            if (shown == null) HomeUiState.NoProfile else HomeUiState.Ready(shown, current, connection.canConnect, dialog, now.diagnostics)
+            if (shown == null) {
+                HomeUiState.NoProfile
+            } else {
+                HomeUiState.Ready(shown, current, connection.canConnect, dialog, now.diagnostics, now.traffic)
+            }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), HomeUiState.Loading)
 
     /**
@@ -105,6 +117,9 @@ class HomeViewModel(profiles: ProfileRepository, private val connection: Connect
     /** Disconnect (B4) and Cancel (B3). */
     fun disconnect() = connection.disconnect()
 
+    /** "Retry now" while ProxyFlow reconnects on its own (B5): the next attempt runs at once. */
+    fun retryNow() = connection.retryNow()
+
     /** "Stop and use normal network" while traffic is held: asks first. */
     fun requestStop() {
         dialog.value = HomeDialog.ConfirmStop
@@ -135,7 +150,7 @@ class HomeViewModel(profiles: ProfileRepository, private val connection: Connect
         return take
     }
 
-    private data class Live(val connection: ConnectionState, val diagnostics: RoutingDiagnostics?)
+    private data class Live(val connection: ConnectionState, val diagnostics: RoutingDiagnostics?, val traffic: TrafficStats?)
 
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L

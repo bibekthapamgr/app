@@ -83,6 +83,8 @@ data class EngineStats(
     @SerialName("tcp_opened") val tcpOpened: Long = 0,
     @SerialName("tcp_failed") val tcpFailed: Long = 0,
     val canceled: Long = 0,
+    /** ResetFlows calls (the phone moved to another network, M7). */
+    val resets: Long = 0,
     @SerialName("bytes_up") val bytesUp: Long = 0,
     @SerialName("bytes_down") val bytesDown: Long = 0,
     @SerialName("udp_rejected") val udpRejected: Long = 0,

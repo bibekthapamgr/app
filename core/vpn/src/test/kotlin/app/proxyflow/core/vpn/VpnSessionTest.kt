@@ -117,8 +117,8 @@ class VpnSessionTest {
         assertEquals(0, host.aborts.get())
         assertEquals(TunConfig("198.18.0.1", "fd00:66::1", "198.18.0.2", mtu = 9000), host.lastConfig)
         assertEquals(
-            "status before Connected: checking, then starting protection",
-            listOf(ConnectStep.CheckingProxy, ConnectStep.StartingProtection),
+            "status before Connected: the brief's stages, in order (ADR-0012)",
+            listOf(ConnectStep.Starting, ConnectStep.VpnPermission, ConnectStep.ProxyHandshake, ConnectStep.Authenticated),
             state.history.filter { it.status == ConnectionStatus.Connecting }.map { it.step }.distinct(),
         )
         assertEquals(ConnectionStatus.Connected, host.statuses.last().status)
@@ -738,7 +738,7 @@ class VpnSessionTest {
         awaitLog("start ${profile.id} fd=100 mtu=9000")
         Thread.sleep(200)
         assertEquals("the engine runs, but apps still use the normal network", ConnectionStatus.Connecting, state.value.status)
-        assertEquals(ConnectStep.StartingProtection, state.value.step)
+        assertEquals(ConnectStep.Authenticated, state.value.step)
 
         host.routes = true
         val connected = awaitStatus(ConnectionStatus.Connected)

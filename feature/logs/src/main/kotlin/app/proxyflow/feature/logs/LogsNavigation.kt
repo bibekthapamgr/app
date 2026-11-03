@@ -10,8 +10,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 data object LogsDestination
 
-fun NavGraphBuilder.logsScreen(viewModelFactory: ViewModelProvider.Factory) {
+/** @param appVersion the app's version, for the header of what Copy and Export hand over. */
+fun NavGraphBuilder.logsScreen(viewModelFactory: ViewModelProvider.Factory, appVersion: String) {
     composable<LogsDestination> {
-        LogsRoute(viewModel = viewModel(factory = viewModelFactory))
+        LogsRoute(viewModel = viewModel(factory = viewModelFactory), appVersion = appVersion)
     }
 }

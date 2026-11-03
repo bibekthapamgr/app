@@ -15,6 +15,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import app.proxyflow.ProxyFlowApplication
 import app.proxyflow.core.data.ConnectionController
+import app.proxyflow.core.data.LogRepository
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.engine.ProxyEngine
 import app.proxyflow.core.model.ConnectionError
@@ -259,6 +260,9 @@ class App {
     val profiles: ProfileRepository = container.profileRepository
     val controller: ConnectionController = container.connectionController
     val runtime = container.vpnRuntime
+
+    /** The diagnostic log the Logs screen shows (ADR-0012). */
+    val logs: LogRepository = container.logRepository
     val packageName: String = context.packageName
 
     fun save(name: String, protocol: ProxyProtocol, host: String, port: Int, user: String = "", password: String = ""): ProxyProfile =

@@ -17,8 +17,22 @@ class FakeSettingsRepository(initial: UserSettings = UserSettings()) : SettingsR
     override suspend fun setTheme(theme: ThemePreference) = state.update { it.copy(theme = theme) }
 }
 
-/** A log whose entries a test can set directly. */
+/** A log whose entries a test can set directly; appends get ids, and purges are counted. */
 class FakeLogRepository(initial: List<LogEntry> = emptyList()) : LogRepository {
     val state = MutableStateFlow(initial)
     override val entries: Flow<List<LogEntry>> = state
+    var purges = 0
+        private set
+
+    override suspend fun append(entries: List<LogEntry>) {
+        state.update { kept -> entries.mapIndexed { i, e -> e.copy(id = (kept.maxOfOrNull { it.id } ?: 0) + i + 1) } + kept }
+    }
+
+    override suspend fun clear() {
+        state.value = emptyList()
+    }
+
+    override suspend fun purge() {
+        purges++
+    }
 }

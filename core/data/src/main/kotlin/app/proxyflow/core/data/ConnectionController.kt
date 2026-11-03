@@ -3,6 +3,7 @@ package app.proxyflow.core.data
 import android.content.Intent
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.TrafficStats
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +47,16 @@ interface ConnectionController {
      * a second for as long as it is collected; null whenever it isn't connected.
      */
     val diagnostics: Flow<RoutingDiagnostics?> get() = flowOf(null)
+
+    /**
+     * What the connection carried since it was established (M7, ADR-0012), read about once a second
+     * for as long as it is collected: it goes on while ProxyFlow reconnects on its own or waits for a
+     * network; null when there is no connection.
+     */
+    val traffic: Flow<TrafficStats?> get() = flowOf(null)
+
+    /** While ProxyFlow reconnects on its own (board B5), runs the next attempt now instead of after its wait. */
+    fun retryNow() = Unit
 }
 
 /** For builds and tests without a VPN service: always disconnected, connecting is not available. */

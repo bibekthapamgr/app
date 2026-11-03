@@ -13,6 +13,9 @@
     <string name="vpn_notification_starting_protection">Starting the VPN</string>
     <string name="vpn_notification_reconnecting">Reconnecting… traffic paused</string>
     <string name="vpn_notification_reconnecting_text">ProxyFlow sends nothing around your proxy.</string>
+    <string name="vpn_notification_reconnecting_attempt">Attempt %1$d of %2$d · ProxyFlow sends nothing around your proxy meanwhile.</string>
+    <string name="vpn_notification_offline">Waiting for a network · traffic paused</string>
+    <string name="vpn_notification_offline_text">ProxyFlow reconnects when the phone has a network again.</string>
     <string name="vpn_notification_connected">Connected</string>
     <string name="vpn_notification_connected_text">Apps\' TCP goes through your proxy · UDP and ping blocked</string>
     <string name="vpn_notification_blocked">Traffic blocked</string>

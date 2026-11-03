@@ -1,8 +1,10 @@
 package app.proxyflow.e2e
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import app.proxyflow.core.engine.ProxyEngine
+import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.ConnectionState
+import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.LogEvent
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
@@ -24,7 +26,7 @@ import org.junit.runner.RunWith
  * shipped trusts no private CA. A certificate that is not trusted, names another host, has
  * expired, or a proxy that does not speak TLS never connects, and nothing then goes to the proxy
  * unencrypted (the packet captures show every connection to a TLS port opening with a TLS record);
- * a certificate that changes while connected is refused connection by connection.
+ * a certificate that changes while connected is refused and blocks traffic at once (M7, ADR-0012).
  */
 @RunWith(AndroidJUnit4::class)
 class TlsEndToEndTest {
@@ -98,13 +100,15 @@ class TlsEndToEndTest {
 
     /**
      * Connected through the gate to a proxy with a valid certificate, which then presents one from a CA nothing
-     * trusts: each new connection is refused (nothing unencrypted, nothing around the proxy), Home counts the TLS
-     * failures and says which check failed, and traffic flows again once the valid certificate is back.
+     * trusts: the first connection after the change is refused and, since no retry changes a certificate, traffic is
+     * blocked at once (docs/m1/04 §4, ADR-0012) — nothing unencrypted, nothing around the proxy; the log names the
+     * stage and the code; with the valid certificate back, Try again connects on the same interface.
      */
     @Test(timeout = TEST_TIMEOUT_MS)
-    fun aCertificateThatChangesWhileConnectedIsRefusedForEachConnection() {
+    fun aCertificateThatChangesWhileConnectedBlocksAtOnce() {
         gate.forward(lab.tlsHttpPort)
-        app.connect(tlsProfile(ProxyProtocol.HTTP, lab.gatePort).id)
+        val profile = tlsProfile(ProxyProtocol.HTTP, lab.gatePort)
+        app.connect(profile.id)
         assertSent("tls-gate-up")
 
         gate.forward(lab.tlsUntrustedPort)
@@ -115,11 +119,18 @@ class TlsEndToEndTest {
             val result = FromShell.tcp(host, port, line)
             assertTrue("a connection through an untrusted certificate must fail: $result", result.startsWith("ERROR"))
         }
-        eventually("the engine counted the refused certificate") { (ProxyEngine().stats().failures["TLS_UNTRUSTED"] ?: 0) >= 1 }
-        val diagnostics = app.awaitDiagnostics("a TLS failure") { it.tls.failures >= 1 }
-        assertEquals("TLS_UNTRUSTED", diagnostics.tls.lastCode)
+        val blocked = app.await(what = "blocked by the refused certificate") { it.status == ConnectionStatus.Blocked }
+        assertEquals("TLS_UNTRUSTED", blocked.error?.code)
+        assertEquals("the interface stays, so traffic is held", 1, Descriptors.tun().size)
+        assertTrue("Android keeps the VPN network", networks.present())
+        val logged = app.awaitLog("the block") { it.event == LogEvent.Blocked && it.profileId == profile.id }
+        assertEquals(ConnectionStage.Connected, logged.stage)
+        assertEquals("TLS_UNTRUSTED", logged.code)
 
         gate.forward(lab.tlsHttpPort)
+        app.controller.restart()
+        app.awaitStatus(ConnectionStatus.Connected)
+        assertEquals("the same interface", 1, Descriptors.tun().size)
         assertSent("tls-gate-back")
     }
 

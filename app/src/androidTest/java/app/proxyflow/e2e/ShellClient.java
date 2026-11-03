@@ -43,7 +43,14 @@ import javax.net.ssl.TrustManagerFactory;
  *   dns SERVER NAME TYPE TIMEOUT_MS [tcp]     RCODE n ANSWERS a,b|- | TIMEOUT | ERROR ...
  *   resolve NAME                              ADDRESSES a,b | ERROR ...
  *   tls HOST PORT CA_PEM LINE TIMEOUT_MS      TLS protocol LEAF sha256 REPLY text | ERROR ...
+ *   bulk HOST PORT up BYTES TIMEOUT_MS        SENT n REPLY text | ERROR ...
+ *   bulk HOST PORT down BYTES TIMEOUT_MS      RECEIVED n | ERROR ...
+ *   hold HOST PORT SECONDS                    ENDED ms closed|reset|data|timeout | ERROR ...
  * </pre>
+ *
+ * bulk and hold talk to the lab's bulk server (scripts/e2e_servers.py): up sends BYTES after its
+ * request line and prints the server's count, down reads until the server closes, and hold keeps
+ * one connection open, sending nothing, and prints how long it stayed open and how it ended.
  *
  * TYPE is a DNS record type number (1 A, 28 AAAA, 16 TXT, 65 HTTPS). tls trusts only the CA in
  * CA_PEM and checks the host name, as a browser checks a site: what it prints is the certificate
@@ -76,6 +83,10 @@ public final class ShellClient {
                 return resolve(a[1]);
             case "tls":
                 return tls(a[1], Integer.parseInt(a[2]), a[3], a[4], Integer.parseInt(a[5]));
+            case "bulk":
+                return bulk(a[1], Integer.parseInt(a[2]), a[3], Long.parseLong(a[4]), Integer.parseInt(a[5]));
+            case "hold":
+                return hold(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]));
             default:
                 return "ERROR unknown command";
         }
@@ -86,6 +97,56 @@ public final class ShellClient {
             socket.connect(new InetSocketAddress(host, port), timeout);
             socket.setSoTimeout(timeout);
             return "REPLY " + exchange(socket.getInputStream(), socket.getOutputStream(), line);
+        }
+    }
+
+    private static String bulk(String host, int port, String direction, long bytes, int timeout) throws Exception {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), timeout);
+            socket.setSoTimeout(timeout);
+            OutputStream out = socket.getOutputStream();
+            InputStream in = socket.getInputStream();
+            byte[] buffer = new byte[65536];
+            if (direction.equals("up")) {
+                out.write(("UP " + bytes + "\n").getBytes(StandardCharsets.US_ASCII));
+                for (int i = 0; i < buffer.length; i++) buffer[i] = (byte) i;
+                long left = bytes;
+                while (left > 0) {
+                    int n = (int) Math.min(buffer.length, left);
+                    out.write(buffer, 0, n);
+                    left -= n;
+                }
+                out.flush();
+                ByteArrayOutputStream reply = new ByteArrayOutputStream();
+                int b;
+                while ((b = in.read()) != -1 && b != '\n') reply.write(b);
+                return "SENT " + bytes + " REPLY " + reply.toString("US-ASCII").trim();
+            }
+            out.write(("DOWN " + bytes + "\n").getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            long received = 0;
+            int n;
+            while ((n = in.read(buffer)) != -1) received += n;
+            return "RECEIVED " + received;
+        }
+    }
+
+    private static String hold(String host, int port, int seconds) throws Exception {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), 10_000);
+            socket.setSoTimeout((seconds + 5) * 1000);
+            socket.getOutputStream().write(("HOLD " + seconds + "\n").getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+            long start = System.nanoTime();
+            String how;
+            try {
+                how = socket.getInputStream().read() == -1 ? "closed" : "data";
+            } catch (SocketTimeoutException e) {
+                how = "timeout";
+            } catch (IOException e) {
+                how = "reset";
+            }
+            return "ENDED " + (System.nanoTime() - start) / 1_000_000 + " " + how;
         }
     }
 

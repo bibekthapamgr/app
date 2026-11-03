@@ -22,8 +22,8 @@ import org.junit.runner.RunWith
  * IPv6-only name and to the LAN address; DNS is answered on the phone whatever server an app asks
  * and however (UDP or TCP); UDP and ping are refused on the phone; a name the proxy can't resolve,
  * a proxy that stops answering and a proxy that hangs all fail closed, with nothing sent around
- * the proxy and DNS still answered on the phone; the proxy's own name is the only one the app looks
- * up itself. scripts/m6_evidence.py then checks the lab's logs and the packet captures: every line
+ * the proxy (since M7 a proxy that keeps failing makes ProxyFlow reconnect on its own, traffic held,
+ * ADR-0012); the proxy's own name is the only one the app looks up itself. scripts/m6_evidence.py then checks the lab's logs and the packet captures: every line
  * arrived where it was sent, through a proxy, once; nothing reached a destination, a UDP sink or a
  * DNS server around the proxy.
  */
@@ -198,8 +198,9 @@ class RoutingEndToEndTest {
     }
 
     /**
-     * The proxy goes away while connected: apps' connections fail at once (nothing goes around it), names are still
-     * answered on the phone, Home says what failed, and traffic flows again as soon as the proxy is back.
+     * The proxy goes away while connected: apps' connections fail at once (nothing goes around it, by name or by
+     * address); with three in a row ProxyFlow reconnects on its own, traffic held, saying what failed (ADR-0012);
+     * traffic flows again as soon as the proxy is back.
      */
     @Test(timeout = TEST_TIMEOUT_MS)
     fun whenTheProxyStopsAnsweringNothingGoesAroundIt() {
@@ -212,12 +213,14 @@ class RoutingEndToEndTest {
         // fallback that dialled the address would deliver the line, and the evidence would find it at the destination.
         assertRefused("gate-down-address", lab.addressDestination, lab.addressPort)
         assertRefused("gate-down-ipv6", lab.v6Address, lab.v6Port)
-        assertEquals(DnsAnswer.NOERROR, FromShell.dns(VPN_DNS, env.destinationName, DnsAnswer.A).rcode)
-        val down = app.awaitDiagnostics("the failure counted") { it.lastProblem?.code == "PROXY_UNREACHABLE" }
-        assertEquals("still connected: traffic is held, not let out", ConnectionStatus.Connected, app.controller.state.value.status)
-        assertTrue("$down", down.connectionsFailed >= 1)
+        val reconnecting = app.await(what = "reconnecting on its own after failures in a row") {
+            it.status == ConnectionStatus.Reconnecting && it.reconnect != null || it.status == ConnectionStatus.Blocked
+        }
+        assertEquals("$reconnecting", "PROXY_UNREACHABLE", (reconnecting.reconnect?.lastError ?: reconnecting.error)?.code)
 
         gate.forward(env.socksPort)
+        if (app.controller.state.value.status == ConnectionStatus.Blocked) app.controller.restart()
+        app.awaitStatus(ConnectionStatus.Connected)
         assertSent("gate-back", env.destinationName, env.destinationPort)
     }
 
@@ -229,11 +232,15 @@ class RoutingEndToEndTest {
 
         gate.silent()
         assertRefused("gate-silent", env.destinationName, env.destinationPort, timeoutMillis = HANGING_PROXY_WAIT_MS)
-        assertRefused("gate-silent-address", lab.addressDestination, lab.addressPort, timeoutMillis = HANGING_PROXY_WAIT_MS)
+        // Read after the first timeout: three failures in a row (other apps' count too) make ProxyFlow reconnect, which
+        // stops the engine and its counters (ADR-0012).
         eventually("the engine counted a proxy timeout") { ProxyEngine().stats().proxyTimeouts >= 1 }
         app.awaitDiagnostics("a proxy timeout") { it.proxyTimeouts >= 1 }
+        assertRefused("gate-silent-address", lab.addressDestination, lab.addressPort, timeoutMillis = HANGING_PROXY_WAIT_MS)
 
         gate.forward(env.socksPort)
+        if (app.controller.state.value.status == ConnectionStatus.Blocked) app.controller.restart()
+        app.awaitStatus(ConnectionStatus.Connected, timeoutMillis = RECOVERY_WAIT_MS)
         assertSent("gate-back", env.destinationName, env.destinationPort)
     }
 
@@ -297,5 +304,8 @@ class RoutingEndToEndTest {
 
         /** The engine gives up on a silent proxy after its 10 s handshake timeout. */
         const val HANGING_PROXY_WAIT_MS = 30_000
+
+        /** A reconnection attempt that met the silent proxy runs into the pre-flight check's 15 s limit first. */
+        const val RECOVERY_WAIT_MS = 60_000L
     }
 }
