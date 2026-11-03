@@ -49,7 +49,7 @@ Legend: ✅ in place and checked automatically on every CI run · 🔁 in place,
 | ✅ | VPN service not exported, `BIND_VPN_SERVICE`, `android.net.VpnService` only | `check_release_manifest.py`, `ManifestTest` |
 | ✅ | Nothing exported without a permission but the launcher activity | `check_release_manifest.py` |
 | ✅ | Not debuggable; no cleartext opt-in; network security config: no cleartext, system CAs only, no exceptions | `check_release_manifest.py` (`test_release_manifest.py`) |
-| ✅ | What the release APK ships for the network security config and both backup rule files passes the same checks in every configuration it ships (a library's qualified variant would apply where it matches, the release build type's copy instead of main's) | `check_release_manifest.py` with `aapt2 dump resources` and `dump xmltree` (`test_release_manifest.py`) |
+| ✅ | What the release APK ships for the network security config and both backup rule files passes the same checks in every configuration it ships, read back strictly (a library's qualified variant would apply where it matches, the release build type's copy instead of main's) | `check_release_manifest.py` with `aapt2 dump resources` and `dump xmltree` (`test_release_manifest.py`) |
 | ✅ | `PendingIntent`s immutable | Code review; Lint |
 | ✅ | Taps through another app's window dropped on Disconnect, Stop, Delete, Discard, Clear (S4) | `ObscuredTouchesTest` |
 | ⏳ | Quick Settings tile exported only behind `BIND_QUICK_SETTINGS_TILE` | M9 |

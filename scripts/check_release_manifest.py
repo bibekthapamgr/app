@@ -21,7 +21,7 @@ fails CI unless:
   both backup rule files — passes the same checks, in every configuration it ships (`aapt2 dump resources`, then
   `aapt2 dump xmltree` of each file): a library's resource of the same name and qualifiers loses to the app's, but a
   qualified variant the app lacks (xml-v31/…) ships beside it and applies where it matches, and the release build
-  type's own copy replaces main's.
+  type's own copy replaces main's. aapt2's printout is read strictly: anything these files never hold fails.
 
 Usage: check_release_manifest.py [merged AndroidManifest.xml [release APK]]
 (defaults: the release build's merged manifest under app/build/intermediates and its APK under app/build/outputs;
@@ -243,13 +243,19 @@ def check(manifest_path: str) -> tuple[list[str], list[str]]:
 # `aapt2 dump resources`: a resource's line, then one line per configuration with its file.
 AAPT2_RESOURCE = re.compile(r"^\s*resource 0x[0-9a-fA-F]+ (\w+)/([\w.]+)")
 AAPT2_FILE = re.compile(r"^\s*\(([^)]*)\) \(file\) (\S+)")
-# `aapt2 dump xmltree` (tools/aapt2/Debug.cpp, XmlPrinter): "E: [<namespace>:]<name> (line=N)" for an element, its
-# "A: [<namespace>:]<name>=<value>" attribute lines one level in and its children two; an element that declares
-# namespaces comes after an "N: <prefix>=<uri>" line for each, every one a level deeper, so the first of them is at the
-# element's own depth; text's "T:" lines need nothing here.
-AAPT2_ELEMENT = re.compile(r"^(\s*)E: (\S+) \(line=\d+\)\s*$")
-AAPT2_NAMESPACE = re.compile(r"^(\s*)N: ")
-AAPT2_ATTRIBUTE = re.compile(r"^\s*A: (.*)$")
+# `aapt2 dump xmltree` (tools/aapt2/Debug.cpp, XmlPrinter), read strictly: two spaces a level, an element as
+# "E: <name> (line=N)", its attributes one level in and before its children, which are two levels in; an attribute as
+# `name="value" (Raw: "value")` for a string, `name=false` for a boolean, `name=@0x7f…` for a reference. Nothing else —
+# a namespace's "N:" line, text's "T:", a name or value of another form, a value that runs over lines, a line out of
+# place — is read: the tree then reads as none, and the check fails. These files never hold any of it, and aapt2 prints
+# names, values and text unescaped, so a file could otherwise print lines that read as other elements.
+STRICT_ELEMENT = re.compile(r"(?P<indent>(?:  )*)E: (?P<name>[A-Za-z_][A-Za-z0-9_.-]*) \(line=\d+\)")
+STRICT_ATTRIBUTE = re.compile(
+    r"(?P<indent>(?:  )*)A: (?P<name>[A-Za-z_][A-Za-z0-9_.-]*)="
+    r'''(?:(?P<boolean>true|false)(?: \(Raw: "(?P=boolean)"\))?'''
+    r'''|(?P<reference>@0x[0-9a-fA-F]{8})(?: \(Raw: "[^"\\]*"\))?'''
+    r'''|"(?P<string>[^"\\]*)" \(Raw: "(?P=string)"\))'''
+)
 
 
 def xml_references(manifest_path: str) -> list[tuple[str, str]]:
@@ -269,7 +275,7 @@ def packaged_files(dump: str) -> dict[str, list[tuple[str, str]]]:
     "Flag disabled values:" and the values of build flags that are off, which never apply."""
     files: dict[str, list[tuple[str, str]]] = {}
     current: list[tuple[str, str]] | None = None
-    for line in dump.splitlines():
+    for line in dump.split("\n"):
         if match := AAPT2_RESOURCE.match(line):
             current = files.setdefault(f"{match.group(1)}/{match.group(2)}", [])
         elif line.strip() == "Flag disabled values:":
@@ -280,65 +286,43 @@ def packaged_files(dump: str) -> dict[str, list[tuple[str, str]]]:
     return files
 
 
-def clark(name: str) -> str:
-    """aapt2's `<namespace>:<name>` as ElementTree's `{<namespace>}<name>`; a name without one as it is (a name has no
-    colon of its own: aapt2 compiles no undeclared prefix)."""
-    if ":" not in name:
-        return name
-    namespace, local = name.rsplit(":", 1)
-    return f"{{{namespace}}}{local}"
-
-
-def xml_attribute(text: str) -> tuple[str, str]:
-    """An attribute as `aapt2 dump xmltree` prints it — a string as `name="value" (Raw: "value")`, a boolean as
-    `name=false`, a reference as `name=@0x7f…`, a namespace and resource id around the name — as (name, value), the
-    name in ElementTree's form, the raw value where printed."""
-    head, _, value = text.partition("=")
-    name = clark(re.sub(r"\(0x[0-9a-fA-F]+\)$", "", head))
-    raw = re.search(r' \(Raw: "(.*)"\)$', value)
-    if raw:
-        return name, raw.group(1)
-    if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
-        return name, value[1:-1]
-    return name, value
-
-
 def xmltree_root(dump: str) -> ET.Element | None:
-    """The element tree `aapt2 dump xmltree` printed for one file, attributes and all, namespaced names in
-    ElementTree's form; None if it printed none, or more than one top element (it never does for a file that parsed)."""
+    """The element tree `aapt2 dump xmltree` printed for one file, read strictly (above); None for anything else."""
     root: ET.Element | None = None
-    open_elements: list[tuple[int, ET.Element]] = []
-    declared: int | None = None  # the depth of the "N:" lines just before an element: the element's own
-    for line in dump.splitlines():
-        if namespace := AAPT2_NAMESPACE.match(line):
-            if declared is None:
-                declared = len(namespace.group(1))
-        elif match := AAPT2_ELEMENT.match(line):
-            depth = len(match.group(1)) if declared is None else declared
-            declared = None
+    open_elements: list[tuple[int, ET.Element]] = []  # the elements whose children may still follow, by depth
+    last: tuple[int, ET.Element] | None = None  # the element printed last: only its attributes may follow
+    for line in dump.split("\n"):
+        if line == "":
+            continue
+        if match := STRICT_ELEMENT.fullmatch(line):
+            depth = len(match["indent"])
             while open_elements and open_elements[-1][0] >= depth:
                 open_elements.pop()
-            if open_elements:
-                element = ET.SubElement(open_elements[-1][1], clark(match.group(2)))
-            elif root is None:
-                element = root = ET.Element(clark(match.group(2)))
+            if root is None and depth == 0:
+                element = root = ET.Element(match["name"])
+            elif open_elements and open_elements[-1][0] == depth - 4:
+                element = ET.SubElement(open_elements[-1][1], match["name"])
             else:
-                return None
+                return None  # a second top element, or one at no child's depth
             open_elements.append((depth, element))
-        elif open_elements and (match := AAPT2_ATTRIBUTE.match(line)):
-            name, value = xml_attribute(match.group(1))
-            open_elements[-1][1].set(name, value)
+            last = (depth, element)
+        elif match := STRICT_ATTRIBUTE.fullmatch(line):
+            if last is None or len(match["indent"]) != last[0] + 2 or last[1].find("*") is not None:
+                return None  # not right under the element printed last, or after its children
+            if match["name"] in last[1].attrib:
+                return None
+            value = next(v for v in (match["boolean"], match["reference"], match["string"]) if v is not None)
+            last[1].set(match["name"], value)
+        else:
+            return None
     return root
 
 
 def check_packaged_file(attribute: str, root: ET.Element, where: str) -> list[str]:
-    """The checks the source files get, on what the APK ships; and no namespaced element or attribute, which these
-    files never use and Android would read by its local name (a `<certificates>` or `src` from another namespace)."""
-    namespaced = sorted({name for element in root.iter() for name in (element.tag, *element.attrib) if name.startswith("{")})
-    problems = [f"{where}: names in a namespace, which these files never use: {namespaced}"] if namespaced else []
+    """The checks the source files get, on what the APK ships."""
     if attribute == "networkSecurityConfig":
-        return problems + check_network_security_root(root, where)
-    return problems + check_rules_root(root, where, BACKUP_RULES[attribute])
+        return check_network_security_root(root, where)
+    return check_rules_root(root, where, BACKUP_RULES[attribute])
 
 
 def find_aapt2() -> str | None:
@@ -354,14 +338,17 @@ def find_aapt2() -> str | None:
 
 
 def run_aapt2(tool: str, *args: str) -> tuple[str | None, str]:
-    """aapt2's output, or None and why not."""
+    """aapt2's output as UTF-8, its lines split at "\\n" alone (read strictly above), or None and why not."""
     try:
-        result = subprocess.run([tool, *args], capture_output=True, text=True, timeout=300)
+        result = subprocess.run([tool, *args], capture_output=True, timeout=300)
     except (OSError, subprocess.SubprocessError) as error:
         return None, f"{tool} {' '.join(args)}: {error}"
     if result.returncode != 0:
-        return None, f"{tool} {' '.join(args)} exited {result.returncode}: {result.stderr.strip()[-500:]}"
-    return result.stdout, ""
+        return None, f"{tool} {' '.join(args)} exited {result.returncode}: {result.stderr.decode(errors='replace').strip()[-500:]}"
+    try:
+        return result.stdout.decode("utf-8"), ""
+    except UnicodeDecodeError as error:
+        return None, f"{tool} {' '.join(args)}: its output is not UTF-8 ({error})"
 
 
 def check_apk(references: list[tuple[str, str]], apk: str | None = None, aapt2: str | None = None) -> tuple[list[str], list[str]]:
@@ -396,12 +383,12 @@ def check_apk(references: list[tuple[str, str]], apk: str | None = None, aapt2: 
             tree, failure = run_aapt2(tool, "dump", "xmltree", "--file", path, apks[0])
             root = xmltree_root(tree) if tree is not None else None
             if root is None:
-                problems.append(failure or f"{where}: aapt2 printed no element tree: {(tree or '').strip()[:300]!r}")
+                problems.append(failure or f"{where}: aapt2 printed no tree these files hold (read strictly): {(tree or '').strip()[:300]!r}")
                 continue
             problems += check_packaged_file(attribute, root, where)
         shipped.append(f"@xml/{name} {configurations}")
     tool_version = os.path.basename(os.path.dirname(tool))
-    facts = [f"release APK {apks[0]} (aapt2 {tool_version}), each file read back and checked: " + "; ".join(shipped)]
+    facts = [f"release APK {apks[0]} (aapt2 {tool_version}), each file read back strictly and checked: " + "; ".join(shipped)]
     return problems, facts
 
 
