@@ -216,15 +216,16 @@
     <!-- M8: Android's system kill switch (boards B2, B6d; the guide is E2 in feature/settings). As Android last said:
          it tells ProxyFlow only while ProxyFlow's VPN runs. -->
     <string name="home_no_network_kill_switch">Apps have no internet: Android\'s system kill switch is on</string>
-    <string name="home_kill_switch_off">System kill switch is off: if ProxyFlow stops, apps use your normal network.</string>
-    <string name="home_kill_switch_always_on_only">Always-on VPN is on without blocking: if ProxyFlow stops, apps use your normal network until it connects again.</string>
-    <string name="home_kill_switch_unknown">If ProxyFlow stops, only Android\'s system kill switch keeps apps off your normal network.</string>
+    <string name="home_kill_switch_off">System kill switch is off: if ProxyFlow stops while connected, apps use your normal network.</string>
+    <string name="home_kill_switch_always_on_only">Always-on VPN is on without blocking: if ProxyFlow stops while connected, apps use your normal network until it connects again.</string>
+    <string name="home_kill_switch_unknown">If ProxyFlow stops while connected, only Android\'s system kill switch keeps apps off your normal network.</string>
     <string name="home_kill_switch_on">System kill switch is on: while ProxyFlow isn\'t connected, apps have no internet. To use your normal network, turn it off in Android\'s VPN settings.</string>
     <string name="home_kill_switch_checked">As Android last told ProxyFlow, at %1$s.</string>
     <string name="home_kill_switch_set_up">Set up system kill switch</string>
     <string name="home_kill_switch_details">About the system kill switch</string>
     <string name="home_prevent_title">Prevent this next time</string>
     <string name="home_prevent_message">Turn on Always-on VPN with \u201cBlock connections without VPN\u201d so Android blocks traffic when ProxyFlow isn\'t running.</string>
+    <string name="home_not_connected_note_always_on">Apps have no internet if \u201cBlock connections without VPN\u201d is on in Android\'s VPN settings; otherwise they use your normal network.</string>
     <string name="home_not_connected_note_kill_switch">You\'re not connected — with Android\'s system kill switch on, apps have no internet.</string>
     <string name="home_stop_message_kill_switch">Android\'s system kill switch is on, so apps will have no internet until you connect again.</string>
 

@@ -39,8 +39,9 @@ class SettingsScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("System default").assertIsDisplayed()
-        compose.onNodeWithText("Theme").performClick()
+        // Below the kill switch section (M8): on a small screen the rows are scrolled to first.
+        shown("System default")
+        compose.onNodeWithText("Theme").performScrollTo().performClick()
         compose.onNodeWithText("Light").assertIsDisplayed()
         compose.onNodeWithText("Dark").performClick()
 
@@ -55,7 +56,7 @@ class SettingsScreenTest {
                 SettingsScreen(SettingsUiState(loading = false, theme = ThemePreference.Dark), onThemeChange = {}, onOpenAbout = {})
             }
         }
-        compose.onNodeWithText("Theme").performClick()
+        compose.onNodeWithText("Theme").performScrollTo().performClick()
         // "Dark" is also the row's value; only the dialog option is selectable.
         compose.onNode(hasText("Dark") and isSelectable()).assertIsSelected()
         compose.onNode(hasText("Light") and isSelectable()).assertIsNotSelected()
@@ -140,7 +141,7 @@ class SettingsScreenTest {
         compose.setContent {
             ProxyFlowTheme { SettingsScreen(SettingsUiState(loading = false), onThemeChange = {}, onOpenAbout = { opened++ }) }
         }
-        compose.onNodeWithText("About & privacy").performClick()
+        compose.onNodeWithText("About & privacy").performScrollTo().performClick()
         assertEquals(1, opened)
     }
 

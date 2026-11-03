@@ -21,7 +21,7 @@
 
     <!-- M8: the guide to Android's kill switch (board E2). -->
     <string name="guide_title">System kill switch</string>
-    <string name="guide_intro">ProxyFlow already blocks traffic while it\'s running. If Android stops ProxyFlow, or another VPN takes over, only Android itself can keep blocking.</string>
+    <string name="guide_intro">While connected, ProxyFlow blocks traffic whenever your proxy isn\'t working. If Android stops ProxyFlow, or another VPN takes over, only Android itself can keep blocking.</string>
     <string name="guide_status">Status: %1$s</string>
     <string name="guide_status_on">on</string>
     <string name="guide_status_always_on_only">Always-on VPN without blocking</string>

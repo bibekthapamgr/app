@@ -105,6 +105,11 @@ class CopyClaimsTest {
             "edit_plaintext_body" to listOf("HTTPS pages stay encrypted end to end"),
             "edit_tls_hint" to listOf("HTTPS sites stay encrypted end to end"),
             "vpn_notification_connected_text" to listOf("TCP", "UDP and ping blocked"),
+            // M8 (ADR-0013 §1): Android's kill switch is the user's to turn on, and ProxyFlow knows it only while connected.
+            "guide_only_you" to listOf("can't turn this on for you", "only while ProxyFlow is connected"),
+            "guide_not_restarted" to listOf("may not start it again", "stay offline"),
+            "guide_system_traffic" to listOf("outside any VPN"),
+            "settings_kill_switch_never" to listOf("only while it's connected"),
         )
         val missing = required.flatMap { (name, needles) -> needles.filterNot { it in text(name) }.map { "$name lacks \"$it\"" } }
         assertEquals(missing.joinToString("\n"), emptyList<String>(), missing)
@@ -143,6 +148,7 @@ class CopyClaimsTest {
             "No\u2011logs",
             "A system\u2011wide VPN",
             "Covers all\u2003traffic",
+            "Guarantees nothing leaks",
         )
         val missed = claims.filter { claim -> FORBIDDEN.none { (_, pattern) -> pattern.containsMatchIn(normalized(claim)) } }
         assertEquals("not recognised: $missed", emptyList<String>(), missed)
@@ -157,8 +163,9 @@ class CopyClaimsTest {
             .replace(Regex("[\\u2010-\\u2013\\u2212]"), "-")
             .replace('\u2019', '\'')
 
-        /** Claims ProxyFlow must never make (traffic matrix §5 "Must not say"). */
+        /** Claims ProxyFlow must never make (traffic matrix §5 "Must not say"; M8: no guarantee of blocking). */
         val FORBIDDEN: List<Pair<String, Regex>> = listOf(
+            "guarantee" to Regex("(?i)\\bguarantee"),
             "all traffic" to
                 Regex(
                     "(?i)\\ball\\s+(of\\s+)?(your\\s+|the\\s+|this\\s+)?" +

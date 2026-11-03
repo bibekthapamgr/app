@@ -339,11 +339,19 @@ private fun InterruptionNotice(interruption: Interruption, state: HomeUiState.Re
         tone = BannerTone.Warning,
     )
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        if (state.killSwitch?.status != KillSwitchStatus.On) {
+        // B2 and B6d below already offer it.
+        if (state.killSwitch?.status != KillSwitchStatus.On && !state.showsKillSwitchSetUp()) {
             PfTextButton(text = stringResource(R.string.home_kill_switch_set_up), onClick = actions.onOpenKillSwitchGuide)
         }
         PfTextButton(text = stringResource(R.string.home_interrupted_dismiss), onClick = actions.onDismissInterruption)
     }
+}
+
+/** The screen's own content links to the kill switch guide: B2 (always) and B6d (until the kill switch is on). */
+private fun HomeUiState.Ready.showsKillSwitchSetUp(): Boolean {
+    if (status != ConnectionStatus.Disconnected) return false
+    val code = error?.code
+    return code == null || code == ConnectionError.VPN_PERMISSION_DENIED || code == ConnectionError.VPN_REVOKED
 }
 
 @Composable
@@ -369,10 +377,27 @@ private fun ConnectFailedContent(state: HomeUiState.Ready, error: ConnectionErro
     StatusHeader(stringResource(R.string.home_status_disconnected), StatusTone.Off, null)
     PfBanner(title = errorTitle(error, state.profile), text = errorMessage(error, state.profile), tone = BannerTone.Error)
     val blocking = state.killSwitch?.status == KillSwitchStatus.On
-    Note(stringResource(if (blocking) R.string.home_not_connected_note_kill_switch else R.string.home_not_connected_note))
+    val note = when {
+        // Android started ProxyFlow as Always-on VPN: whether it blocks apps now, Android says only to a running VPN.
+        error.code == ConnectionError.ALWAYS_ON_NO_PROFILE -> R.string.home_not_connected_note_always_on
+        blocking -> R.string.home_not_connected_note_kill_switch
+        else -> R.string.home_not_connected_note
+    }
+    Note(stringResource(note))
     ErrorCode(error)
     ProfileCard(state.profile, actions.onChangeProfile)
-    FixActions(error, state.profile, actions)
+    if (error.code == ConnectionError.ALWAYS_ON_NO_PROFILE) {
+        // What fixes it is connecting once with the proxy Always-on VPN should use: that makes it the chosen one.
+        PfPrimaryButton(
+            text = stringResource(R.string.home_connect),
+            onClick = actions.onConnect,
+            enabled = state.canConnect,
+            icon = PfIcons.Power,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    } else {
+        FixActions(error, state.profile, actions)
+    }
     PfTextButton(
         text = stringResource(R.string.home_use_another_proxy),
         onClick = actions.onChangeProfile,

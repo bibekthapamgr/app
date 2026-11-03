@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -310,7 +311,7 @@ class HomeScreenTest {
         var state by mutableStateOf(ready(ConnectionState.Idle))
         compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
         compose.onNodeWithText("Apps are using your normal network").assertIsDisplayed()
-        scrolledTo("If ProxyFlow stops, only Android's system kill switch keeps apps off your normal network.").assertIsDisplayed()
+        shown("If ProxyFlow stops while connected, only Android's system kill switch keeps apps off your normal network.")
         scrolledTo("Set up system kill switch").performClick()
 
         state = ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON)
@@ -323,7 +324,7 @@ class HomeScreenTest {
         state = ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON.copy(alwaysOn = false, blocksWithoutVpn = false))
         compose.waitForIdle()
         compose.onNodeWithText("Apps are using your normal network").assertIsDisplayed()
-        scrolledTo("System kill switch is off: if ProxyFlow stops, apps use your normal network.", substring = true).assertIsDisplayed()
+        shown("System kill switch is off: if ProxyFlow stops while connected, apps use your normal network.", substring = true)
 
         state = ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON.copy(blocksWithoutVpn = false))
         compose.waitForIdle()
@@ -355,6 +356,7 @@ class HomeScreenTest {
         shown("ProxyFlow was stopped while connected")
         shown("Android closed ProxyFlow to free memory at", substring = true)
         shown("Android removed the VPN with it, so apps used your normal network from then on.", substring = true)
+        compose.onAllNodesWithText("Set up system kill switch").assertCountEquals(1) // B2's own, not a second one
         scrolledTo("OK").performClick()
         assertEquals(listOf("dismiss interruption"), calls)
 
@@ -373,6 +375,7 @@ class HomeScreenTest {
         shown("Your phone restarted at", substring = true)
         shown("After a restart ProxyFlow connects by itself only as your Always-on VPN", substring = true)
         shown("ProxyFlow is connected again.", substring = true)
+        compose.onAllNodesWithText("Set up system kill switch").assertCountEquals(1) // the notice's: B4 has none
     }
 
     @Test
@@ -401,6 +404,11 @@ class HomeScreenTest {
         show(ready(ConnectionState(error = ConnectionError(ConnectionError.ALWAYS_ON_NO_PROFILE))))
         scrolledTo("Choose a proxy for Always-on VPN").assertIsDisplayed()
         scrolledTo("Connect once with the proxy Always-on VPN should use.", substring = true).assertIsDisplayed()
+        // Whether Android blocks apps meanwhile, it tells only a VPN that runs: both cases are said.
+        shown("Apps have no internet if \u201cBlock connections without VPN\u201d is on", substring = true)
+        scrolledTo("Connect").performClick()
+        compose.onNodeWithText("Try again").assertDoesNotExist()
+        assertEquals(listOf("connect"), calls)
     }
 
     /** Board B5's two reasons of M8: unanswered requests are the proxy's failure, whatever the last site. */
