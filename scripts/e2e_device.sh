@@ -26,20 +26,21 @@ restart_adbd() {
     # attempt 3, API 35: "device offline" when the script then asked whether tcpdump still ran): wait until a command
     # really runs as that user. adb itself can lose the device across the restart (run 41690836372, API 35: "adb root"
     # failed and the device stayed offline, so the phone's captures were never pulled): then it connects again and
-    # tries once more, up to three times — all within 4 minutes, so the step's own time limit is never spent here.
+    # tries once more, up to three times — all within 4 minutes (a call starts only if it can end in time), so the
+    # step's own time limit is never spent here.
     local want=0 deadline=$((SECONDS + 240)) _try _
     if [ "$1" = unroot ]; then want=2000; fi
     for _try in 1 2 3; do
-        [ "$SECONDS" -lt "$deadline" ] || break
+        [ $((deadline - SECONDS)) -ge 30 ] || break
         if timeout 30 adb "$1" >/dev/null 2>&1; then
             for _ in $(seq 1 30); do
-                [ "$SECONDS" -lt "$deadline" ] || break
+                [ $((deadline - SECONDS)) -ge 22 ] || break
                 sleep 2
                 timeout 10 adb wait-for-device >/dev/null 2>&1 || continue
                 if [ "$(timeout 10 adb shell id -u 2>/dev/null | tr -d '\r')" = "$want" ]; then return 0; fi
             done
         fi
-        [ "$SECONDS" -lt "$deadline" ] || break
+        [ $((deadline - SECONDS)) -ge 80 ] || break
         timeout 20 adb reconnect >/dev/null 2>&1 || true
         timeout 60 adb wait-for-device >/dev/null 2>&1 || true
     done
@@ -298,8 +299,9 @@ if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
     echo "::error title=M8 failure injection (API $API)::Not run: the device tests ran out of time."
 else
     # Stopped at its limit, it cleans up first (Always-on VPN off, the device owner given up): bash runs its trap once
-    # the adb step it waits for ends — each has its own limit, the longest 150 s — so the kill comes 5 minutes later.
-    timeout --kill-after=5m "${M8_TIMEOUT:-10m}" bash scripts/m8_failure_injection.sh "$API" "$OUT"
+    # the adb step it waits for ends — each has its own limit, the longest 150 s — and the clean-up's own adb calls take
+    # up to about 4 minutes with adb wedged, so the kill comes 8 minutes later.
+    timeout --kill-after=8m "${M8_TIMEOUT:-10m}" bash scripts/m8_failure_injection.sh "$API" "$OUT"
     M8_STATUS=$?
     if [ "$M8_STATUS" = 124 ] || [ "$M8_STATUS" = 137 ] || [ "$M8_STATUS" = 143 ]; then
         echo "::error title=M8 failure injection (API $API)::Stopped after ${M8_TIMEOUT:-10m}: the steps it took are in m8-steps.txt."

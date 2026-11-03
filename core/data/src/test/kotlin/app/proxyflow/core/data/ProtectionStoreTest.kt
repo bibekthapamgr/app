@@ -9,6 +9,7 @@ import app.proxyflow.core.model.ExitReason
 import app.proxyflow.core.model.Interruption
 import app.proxyflow.core.model.KillSwitchStatus
 import app.proxyflow.core.model.SystemKillSwitch
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -170,15 +171,38 @@ class ProtectionStoreTest {
         assertEquals(listOf(null, SystemKillSwitch(alwaysOn = true, blocksWithoutVpn = true, checkedAtMillis = 4_000)), killSwitches)
     }
 
+    /** A write once begun is finished even when its caller is cancelled while DataStore writes, and is read then. */
+    @Test
+    fun aWriteWhoseCallerIsCancelledMeanwhileStillLands() = runTest(UnconfinedTestDispatcher()) {
+        val dataStore = SnapshotDataStore()
+        val store = DataStoreProtectionStore(dataStore)
+        val interruptions = mutableListOf<Interruption?>()
+        backgroundScope.launch { store.interruption.collect { interruptions += it } }
+        val writing = CompletableDeferred<Unit>()
+        dataStore.gate = writing
+
+        val interruption = Interruption("p1", 1_000, 2_000, ExitReason.Killed, 3_000, KillSwitchStatus.Off)
+        val writer = launch { store.interrupted(interruption) }
+        writer.cancel() // while DataStore is still writing
+        writing.complete(Unit)
+        writer.join()
+        advanceUntilIdle()
+
+        assertEquals("written all the same", interruption, store.interruption.first())
+        assertEquals(listOf(null, interruption), interruptions)
+    }
+
     @Test
     fun anUnknownReasonReadsAsUnknown() {
         assertEquals(ExitReason.Unknown, ExitReason.of("from_a_later_version"))
         assertEquals(ExitReason.LowMemory, ExitReason.of("low_memory"))
     }
 
-    /** Gives each collector what it holds when the collector starts, and nothing after. */
+    /** Gives each collector what it holds when the collector starts, and nothing after; a write waits at [gate]. */
     private class SnapshotDataStore : DataStore<Preferences> {
         @Volatile private var held: Preferences = emptyPreferences()
+
+        @Volatile var gate: CompletableDeferred<Unit>? = null
 
         override val data: Flow<Preferences> = flow {
             emit(held)
@@ -186,6 +210,7 @@ class ProtectionStoreTest {
         }
 
         override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+            gate?.await()
             held = transform(held)
             return held
         }

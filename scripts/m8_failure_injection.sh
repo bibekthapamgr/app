@@ -227,10 +227,10 @@ on_exit() {
 STEPS_PRINTED=""
 print_steps() {
     [ -z "$STEPS_PRINTED" ] || return 0
-    STEPS_PRINTED=1
     # Printed whole, or workflow commands stay off for the rest of the step: a stop meanwhile is ignored (what follows
     # is clean-up with its own time limits).
     trap '' TERM INT
+    STEPS_PRINTED=1
     local token
     token="$(openssl rand -hex 16 2>/dev/null || echo "m8$RANDOM$RANDOM")"
     echo "::group::M8 failure injection steps (API $API)"

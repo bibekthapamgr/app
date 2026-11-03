@@ -198,7 +198,8 @@ jobs:
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: ./gradlew :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle-5-release.log"
 
-      # M8: also what the release APK ships for the manifest's @xml files (aapt2): no variant the check did not read.
+      # M8: also what the release APK ships for the manifest's @xml files, read back with aapt2 and checked by content
+      # in every configuration it ships.
       - name: Release manifest and APK (permissions, backups, debuggable, cleartext, trust, exported components, @xml files)
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: python3 scripts/check_release_manifest.py
@@ -381,8 +382,8 @@ jobs:
         id: emulator
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         # Inside the job's limit, so the evidence, the digest and the upload below still run if the emulator hangs:
-        # boot (up to 15 min), the device tests (up to 55), M8's failure injection (up to 15) and the pulls after it.
-        timeout-minutes: 95
+        # boot (up to 15 min), the device tests (up to 55), M8's failure injection (up to 18) and the pulls after it.
+        timeout-minutes: 98
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}

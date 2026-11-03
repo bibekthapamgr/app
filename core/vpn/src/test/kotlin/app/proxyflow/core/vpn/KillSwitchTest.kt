@@ -197,14 +197,20 @@ class KillSwitchTest {
         assertFalse("the interface stays: apps get nowhere around the proxy", host.tuns.single().closed)
         assertNull("not connected yet", reconnecting.connectedSinceMillis)
         eventually("with the interface up, what Android says is read before the proxy answers") { stored()?.status == KillSwitchStatus.On }
+        eventually("the marker, from when traffic was first held") { protection.connected?.sinceMillis == NOW }
 
-        // The proxy answers again: the next attempt connects on the same interface.
+        // The proxy answers again a minute and a half later: the next attempt connects on the same interface.
+        now.set(NOW + 90_000)
         engine.answer = PreflightAnswer(ok = true)
         session.retryNow()
         val connected = await { it.status == ConnectionStatus.Connected }
         assertEquals(profile.id, connected.profileId)
         assertEquals(1, host.tuns.size)
         assertFalse(host.tuns.single().closed)
+        // Connected: the marker says since when, as Home does (what the next process reports of the session's length).
+        assertEquals(NOW + 90_000, connected.connectedSinceMillis)
+        eventually("the marker, from when it connected") { protection.connected?.sinceMillis == NOW + 90_000 }
+        assertEquals(ConnectedMarker(profile.id, NOW + 90_000, FakeHistory.PID, FakeHistory.BOOT), protection.connected)
     }
 
     /** A failure that isn't the proxy's (an unexpected one) during an Always-on start's attempts ends them: bounded. */
@@ -413,6 +419,30 @@ class KillSwitchTest {
         assertEquals("the first profile's new session", NOW + 7_200_000, back.connectedSinceMillis)
         eventually("the first profile's marker again") { protection.connected?.profileId == first.id }
         assertEquals(ConnectedMarker(first.id, NOW + 7_200_000, FakeHistory.PID, FakeHistory.BOOT), protection.connected)
+    }
+
+    /**
+     * A switch refused at first (the sign-in) and tried again two hours later: the marker names the new profile from
+     * the switch, and once it connects, from then — the session the next process would report.
+     */
+    @Test
+    fun aSwitchTriedAgainLaterIsMarkedFromWhenItConnected() {
+        connect()
+        val second = saveOsaka()
+        now.set(NOW + 3_600_000)
+        engine.answer = PreflightAnswer(ok = false, code = "AUTH_FAILED")
+        session.connect(second.id)
+        await { it.profileId == second.id && it.status == ConnectionStatus.Blocked }
+        eventually("the second profile's marker, from the switch") { protection.connected?.profileId == second.id }
+        assertEquals(NOW + 3_600_000, protection.connected?.sinceMillis)
+
+        now.set(NOW + 3 * 3_600_000)
+        engine.answer = PreflightAnswer(ok = true)
+        session.restart()
+        val connected = await { it.status == ConnectionStatus.Connected && it.profileId == second.id }
+        assertEquals(NOW + 3 * 3_600_000, connected.connectedSinceMillis)
+        eventually("the marker, from when it connected") { protection.connected?.sinceMillis == NOW + 3 * 3_600_000 }
+        assertEquals(ConnectedMarker(second.id, NOW + 3 * 3_600_000, FakeHistory.PID, FakeHistory.BOOT), protection.connected)
     }
 
     /** The same while the other profile is still being checked: going back is a new session of the first one. */

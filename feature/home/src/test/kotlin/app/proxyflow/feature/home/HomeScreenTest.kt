@@ -220,7 +220,7 @@ class HomeScreenTest {
         scrolledTo(
             "ProxyFlow couldn't connect to 203.0.113.10:3128. Check the address and port, and that the proxy is online.",
         ).assertIsDisplayed()
-        scrolledTo("You're not connected — apps are still using your normal network.").assertIsDisplayed()
+        scrolledTo("You're not connected: apps use your normal network unless Android's system kill switch is on.").assertIsDisplayed()
         scrolledTo("Code: PROXY_UNREACHABLE").assertIsDisplayed()
         scrolledTo("Edit profile").performClick()
         scrolledTo("Use another proxy").performClick()
@@ -269,7 +269,7 @@ class HomeScreenTest {
             "203.0.113.10:3128 refused to open a test connection. Providers answer this way when a plan has ended or " +
                 "your network's address isn't allowed. Check your account with your proxy provider.",
         ).assertIsDisplayed()
-        scrolledTo("You're not connected — apps are still using your normal network.").assertIsDisplayed()
+        scrolledTo("You're not connected: apps use your normal network unless Android's system kill switch is on.").assertIsDisplayed()
     }
 
     @Test
@@ -328,7 +328,7 @@ class HomeScreenTest {
     fun disconnectedSaysWhatHappensIfProxyFlowStops() {
         var state by mutableStateOf(ready(ConnectionState.Idle))
         compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
-        compose.onNodeWithText("Apps are using your normal network").assertIsDisplayed()
+        compose.onNodeWithText("Apps use your normal network unless Android's system kill switch is on").assertIsDisplayed()
         shown("If ProxyFlow stops while connected, only Android's system kill switch keeps apps off your normal network.")
         scrolledTo("Set up system kill switch").performClick()
 
@@ -337,14 +337,17 @@ class HomeScreenTest {
         compose.onNodeWithText(
             "Android's system kill switch was on when last checked: if it still is, apps have no internet",
         ).assertIsDisplayed()
-        shown("System kill switch is on: while ProxyFlow isn't connected, apps have no internet.", substring = true)
-        scrolledTo("As Android last told ProxyFlow, at", substring = true).assertIsDisplayed()
+        shown("that its system kill switch is on: while it is, apps have no internet when ProxyFlow isn't connected.", substring = true)
+        scrolledTo("Android said at", substring = true).assertIsDisplayed()
         scrolledTo("About the system kill switch").performClick()
 
         state = ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON.copy(alwaysOn = false, blocksWithoutVpn = false))
         compose.waitForIdle()
-        compose.onNodeWithText("Apps are using your normal network").assertIsDisplayed()
-        shown("System kill switch is off: if ProxyFlow stops while connected, apps use your normal network.", substring = true)
+        compose.onNodeWithText("Apps use your normal network unless Android's system kill switch is on").assertIsDisplayed()
+        shown(
+            "that its system kill switch is off: while it is, apps use your normal network if ProxyFlow stops while connected.",
+            substring = true,
+        )
 
         state = ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON.copy(blocksWithoutVpn = false))
         compose.waitForIdle()
@@ -378,7 +381,7 @@ class HomeScreenTest {
         compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
         shown("ProxyFlow was stopped while connected")
         shown("Android closed ProxyFlow to free memory at", substring = true)
-        shown("Android removed the VPN with it, so apps used your normal network from then on.", substring = true)
+        shown("Android removed the VPN with it: from then on apps used your normal network, unless", substring = true)
         compose.onAllNodesWithText("Set up system kill switch").assertCountEquals(1) // B2's own, not a second one
         scrolledTo("OK").performClick()
         assertEquals(listOf("dismiss interruption"), calls)
@@ -395,7 +398,7 @@ class HomeScreenTest {
         state =
             ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON, interruption = interruption.copy(killSwitch = KillSwitchStatus.Off))
         compose.waitForIdle()
-        shown("Android removed the VPN with it, so apps used your normal network from then on.", substring = true)
+        shown("Android removed the VPN with it: from then on apps used your normal network, unless", substring = true)
         compose.onNodeWithText("Set up system kill switch").assertDoesNotExist() // on now: nothing to set up
 
         // Connected again since: said so.

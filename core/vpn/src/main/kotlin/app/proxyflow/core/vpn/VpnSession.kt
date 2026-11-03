@@ -189,6 +189,9 @@ class VpnSession(
     /** Whose session that marker is: a switch to another profile writes that profile's, a reconnection or restart keeps it. */
     private var markerProfile: String? = null
 
+    /** Since when that marker says the session ran: when it connected, or until it has, since traffic was held for it. */
+    private var markerSince: Long? = null
+
     /** [protection]'s writes, in the order the session makes them (DataStore keeps them in order only one at a time). */
     private val writes = Channel<suspend ProtectionStore.() -> Unit>(Channel.UNLIMITED)
     private val loop: Job
@@ -656,13 +659,13 @@ class VpnSession(
     }
 
     /**
-     * The marker the next process finds if this one ends with the VPN up (M8): once per profile's session — a
-     * reconnection or a restart of the same profile keeps the session's; a switch to another profile writes that
-     * one's as it begins, since traffic is held for it from then (it replaces the marker before), whether or not it
-     * connects.
+     * The marker the next process finds if this one ends with the VPN up (M8), one per profile's session: written as
+     * traffic is first held for a profile — an Always-on VPN start, a switch to it (replacing the marker before) — and
+     * when its session first connects ([connected], with the session's start); a reconnection or a restart of the same
+     * profile keeps it.
      */
-    private fun writeMarker(profileId: String?, sinceMillis: Long) {
-        if (markerWritten && markerProfile == profileId) return
+    private fun writeMarker(profileId: String?, sinceMillis: Long, connected: Boolean = false) {
+        if (markerWritten && markerProfile == profileId && (!connected || markerSince == sinceMillis)) return
         val marker = try {
             history.marker(profileId, sinceMillis)
         } catch (e: Exception) {
@@ -671,6 +674,7 @@ class VpnSession(
         }
         markerWritten = true
         markerProfile = profileId
+        markerSince = sinceMillis
         persist { markConnected(marker) }
     }
 
@@ -813,7 +817,7 @@ class VpnSession(
         }
         host?.showStatus(state.value)
         // A new session (not a reconnection of this one): the next process finds it if this one ends without stopping it.
-        writeMarker(profileId, totals.sinceMillis)
+        writeMarker(profileId, totals.sinceMillis, connected = true)
         checkKillSwitch()
     }
 
@@ -1221,6 +1225,7 @@ class VpnSession(
         if (markerWritten) {
             markerWritten = false
             markerProfile = null
+            markerSince = null
             persist { clearConnected() }
         }
         if (before.status != ConnectionStatus.Disconnected) log("disconnected${error?.let { ": ${it.code}" } ?: ""}")

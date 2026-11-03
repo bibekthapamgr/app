@@ -13,7 +13,7 @@ Legend: ✅ in place and checked automatically on every CI run · 🔁 in place,
 | ✅ | An Always-on VPN start holds traffic before the proxy check and retries with traffic held (I-5, ADR-0013 §3) | `KillSwitchTest`; device scenario B |
 | ✅ | Always-on VPN connects only the profile the user chose; none chosen → nothing connects, the user is told | `KillSwitchTest`, `HomeViewModelTest`, `HomeScreenTest` |
 | ⏳ | Process death while connected: measured on devices with and without Android's kill switch; found and explained on the next start (I-6) | `scripts/m8_failure_injection.sh` + `scripts/m8_evidence.py`, API 29/34/35/36, on every CI run; ✅ once a run passes on all four (`docs/m8/failure-injection.md` §3) |
-| ✅ | The marker names the profile whose traffic the interface carries or holds — a switch writes the new profile's as it begins, a switch back the first one's afresh; the interruption reaches Home even when Home begins to read just as it is written (ADR-0013 §4) | `KillSwitchTest`, `ProtectionStoreTest` (DataStore 1.3.0, and the store's own read again after each write) |
+| ✅ | The marker names the profile whose traffic the interface carries or holds, and since when — a switch writes the new profile's as it begins, a switch back the first one's afresh, a session's first connection its start; the interruption reaches Home even when Home begins to read just as it is written (ADR-0013 §4) | `KillSwitchTest`, `ProtectionStoreTest` (DataStore 1.3.0, and the store's own read again after each write) |
 | ⚠️ | Without Android's kill switch, apps use the normal network when the VPN goes away (R1) | Told in E1/E1b, E2, B2, B6d and after an interruption |
 | ✅ | DNS never leaves the phone except the proxy's own name (I-4) | `m6_evidence.py` |
 | ✅ | UDP refused, ping unanswered, IPv6 handled (I-7, I-8, I-13) | Device tests M6; `TestPingIsNeverAnswered`, `TestEchoFilterBlocksOutboundReplies` |
@@ -49,7 +49,7 @@ Legend: ✅ in place and checked automatically on every CI run · 🔁 in place,
 | ✅ | VPN service not exported, `BIND_VPN_SERVICE`, `android.net.VpnService` only | `check_release_manifest.py`, `ManifestTest` |
 | ✅ | Nothing exported without a permission but the launcher activity | `check_release_manifest.py` |
 | ✅ | Not debuggable; no cleartext opt-in; network security config: no cleartext, system CAs only, no exceptions | `check_release_manifest.py` (`test_release_manifest.py`) |
-| ✅ | The release APK ships the network security config and both backup rule files in no configuration the check didn't read (a library's qualified variant would apply where it matches) | `check_release_manifest.py` with `aapt2 dump resources` (`test_release_manifest.py`) |
+| ✅ | What the release APK ships for the network security config and both backup rule files passes the same checks in every configuration it ships (a library's qualified variant or the release build type's copy would apply where it matches) | `check_release_manifest.py` with `aapt2 dump resources` and `dump xmltree` (`test_release_manifest.py`) |
 | ✅ | `PendingIntent`s immutable | Code review; Lint |
 | ✅ | Taps through another app's window dropped on Disconnect, Stop, Delete, Discard, Clear (S4) | `ObscuredTouchesTest` |
 | ⏳ | Quick Settings tile exported only behind `BIND_QUICK_SETTINGS_TILE` | M9 |

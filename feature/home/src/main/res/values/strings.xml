@@ -13,7 +13,7 @@
     <string name="home_status_offline">Waiting for network</string>
 
     <!-- B2 -->
-    <string name="home_normal_network">Apps are using your normal network</string>
+    <string name="home_normal_network">Apps use your normal network unless Android\'s system kill switch is on</string>
     <string name="home_proxy_label">Proxy</string>
     <!-- TLS between this phone and the proxy, never HTTPS to sites (ADR-0005, ADR-0011). -->
     <string name="home_tls">TLS to proxy</string>
@@ -141,7 +141,7 @@
     <string name="home_error_offline_message">ProxyFlow will connect when a network is available. Traffic stays blocked meanwhile.</string>
 
     <!-- B6b (pre-flight failures) and the blocked layout -->
-    <string name="home_not_connected_note">You\'re not connected — apps are still using your normal network.</string>
+    <string name="home_not_connected_note">You\'re not connected: apps use your normal network unless Android\'s system kill switch is on.</string>
     <string name="home_blocked_note">Apps can\'t go online until this is fixed — ProxyFlow sends nothing around your proxy.</string>
     <string name="home_code">Code: %1$s</string>
     <string name="home_try_again">Try again</string>
@@ -218,11 +218,10 @@
     <!-- M8: Android's system kill switch (boards B2, B6d; the guide is E2 in feature/settings). As Android last said:
          it tells ProxyFlow only while ProxyFlow's VPN runs. -->
     <string name="home_no_network_kill_switch">Android\'s system kill switch was on when last checked: if it still is, apps have no internet</string>
-    <string name="home_kill_switch_off">System kill switch is off: if ProxyFlow stops while connected, apps use your normal network.</string>
-    <string name="home_kill_switch_always_on_only">Always-on VPN is on without blocking: if ProxyFlow stops while connected, apps use your normal network until it connects again.</string>
+    <string name="home_kill_switch_off">Android said at %1$s that its system kill switch is off: while it is, apps use your normal network if ProxyFlow stops while connected.</string>
+    <string name="home_kill_switch_always_on_only">Android said at %1$s that Always-on VPN is on without blocking: while it is, apps use your normal network if ProxyFlow stops while connected, until it connects again.</string>
     <string name="home_kill_switch_unknown">If ProxyFlow stops while connected, only Android\'s system kill switch keeps apps off your normal network.</string>
-    <string name="home_kill_switch_on">System kill switch is on: while ProxyFlow isn\'t connected, apps have no internet. To use your normal network, turn it off in Android\'s VPN settings.</string>
-    <string name="home_kill_switch_checked">As Android last told ProxyFlow, at %1$s.</string>
+    <string name="home_kill_switch_on">Android said at %1$s that its system kill switch is on: while it is, apps have no internet when ProxyFlow isn\'t connected. To use your normal network, turn it off in Android\'s VPN settings.</string>
     <string name="home_kill_switch_set_up">Set up system kill switch</string>
     <string name="home_kill_switch_details">About the system kill switch</string>
     <string name="home_prevent_title">Prevent this next time</string>
@@ -235,8 +234,8 @@
     <string name="home_interrupted_title">ProxyFlow was stopped while connected</string>
     <string name="home_interrupted_at">%1$s at %2$s.</string>
     <string name="home_interrupted_unknown_time">%1$s some time after it connected at %2$s.</string>
-    <string name="home_interrupted_leak">Android removed the VPN with it, so apps used your normal network from then on.</string>
-    <string name="home_interrupted_restart_leak">After a restart ProxyFlow connects by itself only as your Always-on VPN: until then, apps use your normal network.</string>
+    <string name="home_interrupted_leak">Android removed the VPN with it: from then on apps used your normal network, unless Android\'s system kill switch was on.</string>
+    <string name="home_interrupted_restart_leak">After a restart ProxyFlow connects by itself only as your Always-on VPN: until then, apps use your normal network unless Android\'s system kill switch is on.</string>
     <string name="home_interrupted_blocked">Android\'s system kill switch was on when ProxyFlow last checked before that: if it still was, apps had no internet until ProxyFlow connected again.</string>
     <string name="home_interrupted_connected_again">ProxyFlow is connected again.</string>
     <string name="home_interrupted_dismiss">OK</string>

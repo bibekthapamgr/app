@@ -104,7 +104,7 @@ Rules that apply to every state:
 | | |
 |---|---|
 | Trigger | Disconnect on B4, the notification action, the Quick Settings tile (B11, built in M9), or "Stop and use normal network" from a blocked state |
-| Screens | B2 Disconnected ("Apps are using your normal network") |
+| Screens | B2 Disconnected ("Apps use your normal network unless Android's system kill switch is on"; until M8, "Apps are using your normal network") |
 | Happy path | Engine stopped (all flows closed, goroutines released — E12), TUN fd closed, foreground service stopped, notification removed |
 | Branches | If OS lockdown is on, apps have no network after disconnect — B2 says so and links to E2 |
 | Acceptance | Stop completes in < 2 s with 200 open flows and apps see their connections end at once (lab E12: `Stop()` took 24 ms with 200 flows open, goroutines 608 → 2, and the last app saw its connection end 17 ms after the stop signal); no leaked file descriptors (instrumentation check on devices); session summary written to Logs |

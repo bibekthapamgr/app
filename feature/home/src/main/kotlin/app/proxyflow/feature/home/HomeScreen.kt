@@ -295,16 +295,18 @@ private fun DisconnectedContent(state: HomeUiState.Ready, actions: HomeActions) 
 private fun KillSwitchNote(state: HomeUiState.Ready, actions: HomeActions) {
     val killSwitch = state.killSwitch
     val on = killSwitch?.status == KillSwitchStatus.On
-    val text = stringResource(
-        when (killSwitch?.status) {
-            KillSwitchStatus.On -> R.string.home_kill_switch_on
-            KillSwitchStatus.AlwaysOnOnly -> R.string.home_kill_switch_always_on_only
-            KillSwitchStatus.Off -> R.string.home_kill_switch_off
-            null -> R.string.home_kill_switch_unknown
-        },
-    )
-    val checked = killSwitch?.let { stringResource(R.string.home_kill_switch_checked, shortWhen(it.checkedAtMillis)) }
-    PfBanner(text = listOfNotNull(text, checked).joinToString(" "), tone = if (on) BannerTone.Info else BannerTone.Warning)
+    // What Android said, dated: it answers only while ProxyFlow's VPN runs, and may say otherwise now (ADR-0013 §2).
+    val text = killSwitch?.let {
+        stringResource(
+            when (it.status) {
+                KillSwitchStatus.On -> R.string.home_kill_switch_on
+                KillSwitchStatus.AlwaysOnOnly -> R.string.home_kill_switch_always_on_only
+                KillSwitchStatus.Off -> R.string.home_kill_switch_off
+            },
+            shortWhen(it.checkedAtMillis),
+        )
+    } ?: stringResource(R.string.home_kill_switch_unknown)
+    PfBanner(text = text, tone = if (on) BannerTone.Info else BannerTone.Warning)
     PfTextButton(
         text = stringResource(if (on) R.string.home_kill_switch_details else R.string.home_kill_switch_set_up),
         onClick = actions.onOpenKillSwitchGuide,
