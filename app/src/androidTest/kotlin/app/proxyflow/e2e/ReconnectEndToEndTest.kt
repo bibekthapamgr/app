@@ -443,11 +443,14 @@ class ReconnectEndToEndTest {
         assertEquals("REPLY PROXYFLOW-DEST $line", FromShell.tcp(env.destinationName, env.destinationPort, line))
     }
 
-    /** One line that must get nowhere (m6_evidence.py checks no destination has it). */
+    /**
+     * One line that must get nowhere (m6_evidence.py checks no destination has it), to the destination's address: a line
+     * sent just as traffic is held then waits out only its connect timeout, while a name's lookup, held too, has none.
+     */
     private fun assertRefused(label: String) {
         val line = Lines.next(label)
-        Lines.refused(line, env.destinationName, env.destinationPort)
-        val result = FromShell.tcp(env.destinationName, env.destinationPort, line)
+        Lines.refused(line, env.destinationAddress, env.destinationPort)
+        val result = FromShell.tcp(env.destinationAddress, env.destinationPort, line)
         assertTrue("the connection must fail: $result", result.startsWith("ERROR"))
     }
 
@@ -484,9 +487,9 @@ class ReconnectEndToEndTest {
 
         /**
          * Long enough that the reconnection is still waiting when the test disconnects, however long the probe took (a
-         * line sent just as traffic is held waits out its 10 s timeout); short enough to wait past afterwards.
+         * line sent just as traffic is held waits out its 10 s connect timeout); short enough to wait past afterwards.
          */
-        const val CANCEL_WAIT_MS = 15_000L
+        const val CANCEL_WAIT_MS = 20_000L
         const val NO_MORE_ATTEMPTS_MS = 2_000L
         const val FAILURE_HEARD_MS = 3_000L
         const val QUIET_MS = 2_000L

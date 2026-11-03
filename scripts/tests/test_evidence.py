@@ -827,6 +827,7 @@ class M7EvidenceTest(unittest.TestCase):
                     self.VPN + "reconnecting: proxy_failures PROXY_UNREACHABLE",
                     self.VPN + "reconnect attempt 1 of 8",
                     self.VPN + "reconnected p1 after 1 attempts",
+                    self.E2E + "retry now: connected 905 ms after the tap, 101873 ms before the attempt was due",
                 ))
             with contextlib.redirect_stdout(io.StringIO()) as printed:
                 status = m7_evidence.main(["m7_evidence.py", "--api", "34", "--pf", pf, "--out", out])
@@ -835,7 +836,15 @@ class M7EvidenceTest(unittest.TestCase):
                 written = f.read()
             self.assertIn("the session heard of the phone's network 1 times: wifi (first report)", written)
             self.assertIn("diagnostic log: 2 checks", written)
+            self.assertIn("retry now: connected 905 ms after the tap, with 101873 ms of the wait left", written)
             self.assertNotIn("PROBLEM", written)
+
+    def test_retry_now_must_connect_before_the_attempt_was_due(self):
+        line = self.E2E + "retry now: connected 905 ms after the tap, 101873 ms before the attempt was due"
+        self.assertEqual((["retry now: connected 905 ms after the tap, with 101873 ms of the wait left"], []), m7_evidence.retry_now([line]))
+        late = self.E2E + "retry now: connected 30000 ms after the tap, 20000 ms before the attempt was due"
+        self.assertEqual(1, len(m7_evidence.retry_now([late])[1]), "connected only when the wait would have ended anyway")
+        self.assertEqual(1, len(m7_evidence.retry_now(["unrelated"])[1]), "no timing at all fails")
 
 
 if __name__ == "__main__":

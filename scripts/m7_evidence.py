@@ -42,6 +42,7 @@ FLOW = re.compile(r"ProxyFlowE2E\s*:\s*traffic (\S+) (up|down) flow up=(\d+|null
 SESSION = re.compile(r"ProxyFlowE2E\s*:\s*traffic (\S+) session up=(\d+)/(\d+) down=(\d+)/(\d+)")
 HELD = re.compile(r"ProxyFlowE2E\s*:\s*network change: held connection ENDED (\d+) (\w+)")
 LOG_CHECKS = re.compile(r"ProxyFlowE2E\s*:\s*(log checked .*|log cleared.*)$")
+RETRY_NOW = re.compile(r"ProxyFlowE2E\s*:\s*retry now: connected (\d+) ms after the tap, (-?\d+) ms before the attempt was due")
 VPN = re.compile(r"ProxyFlowVpn\s*:\s*(.*)$")
 
 
@@ -60,6 +61,16 @@ def flows(logcat: list[str]) -> list[tuple[str, str, int | None, int, int | None
 def sessions(logcat: list[str]) -> list[tuple[str, int, int, int, int]]:
     """The session's counters over each protocol's transfers: protocol, counted and expected up and down."""
     return [(m.group(1), *map(int, m.groups()[1:])) for line in logcat if (m := SESSION.search(line))]
+
+
+def retry_now(logcat: list[str]) -> tuple[list[str], list[str]]:
+    """Retry now as the device test timed it: from the tap to Connected, and what was left of the wait then."""
+    found = [(int(m.group(1)), int(m.group(2))) for line in logcat if (m := RETRY_NOW.search(line))]
+    if not found:
+        return [], ["no \"retry now\" line in logcat: the Retry now test did not time itself"]
+    took, left = found[-1]
+    problems = [] if took < left else [f"retry now: connected {took} ms after the tap, not before the attempt was due ({left} ms)"]
+    return [f"retry now: connected {took} ms after the tap, with {left} ms of the wait left"], problems
 
 
 def check_transfers(found_flows: list, found_sessions: list) -> tuple[list[str], list[str]]:
@@ -226,6 +237,7 @@ def main(argv: list[str]) -> int:
         check_bulk(bulk_requests(after("bulk.log")), after("squid-access.log"), after("danted.log"), len(found_sessions)),
         check_hold(logcat, bulk_requests(after("bulk.log"))),
         reconnections(logcat),
+        retry_now(logcat),
         (networks(logcat), []),
     ):
         facts += more_facts

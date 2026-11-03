@@ -16,7 +16,7 @@ import javax.net.ssl.X509TrustManager
  * The app's instrumentation runner (app/build.gradle.kts). The app under test is the app as
  * installed, except that [TestProxyFlowApplication] builds its container with [TestTrust], so a
  * test can have certificates from the lab's CA trusted for TLS proxies (ADR-0011), and with
- * [TestRetry], so a test can reconnect with shorter waits (ADR-0012). Until a test sets them, and
+ * [TestRetry], so a test can reconnect with waits of its own (ADR-0012). Until a test sets them, and
  * in the app as installed always, the platform's trust manager and the default retry policy decide.
  */
 class E2eTestRunner : AndroidJUnitRunner() {
