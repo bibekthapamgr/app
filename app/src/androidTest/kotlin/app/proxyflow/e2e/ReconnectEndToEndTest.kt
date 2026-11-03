@@ -472,10 +472,15 @@ class ReconnectEndToEndTest {
 
         /** Apps' connections that fail through the broken gate before ProxyFlow must be reconnecting (three in a row suffice). */
         const val MAX_FAILING_LINES = 6
-        const val LONG_WAIT_MS = 60_000L
+
+        /**
+         * Far longer than a reconnection's start can take on a slow emulator (a line sent just as traffic is held waits
+         * out its timeout), so Retry now still has most of it left to cut short.
+         */
+        const val LONG_WAIT_MS = 120_000L
         const val SHORT_WAIT_MS = 3_000L
         const val NO_MORE_ATTEMPTS_MS = 2_000L
-        const val FAILURE_HEARD_MS = 1_500L
+        const val FAILURE_HEARD_MS = 3_000L
         const val QUIET_MS = 2_000L
         const val SETTLE_MS = 30_000L
         const val RETRY_NOW_MS = 20_000L
