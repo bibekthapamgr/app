@@ -122,6 +122,54 @@ class DiagnosticsRecorderTest {
         assertEquals("dated when the first of them failed", NOW + 1_000, counted.timeMillis)
     }
 
+    /**
+     * Engine threads report failures at any time: one that read the log's generation just before a Clear and wrote its
+     * count just after another thread's, counted after the Clear, never replaces that count with one of before.
+     */
+    @Test
+    fun aFailureCountedJustAfterAClearIsNeverLostToOneOfBefore() {
+        val delegate = InMemoryLogRepository(clock = { now.get() })
+        val paused = CountDownLatch(1)
+        val resume = CountDownLatch(1)
+        var slow: Thread? = null
+        val log = object : LogRepository by delegate {
+            override val generation: Long
+                get() {
+                    val generation = delegate.generation
+                    if (Thread.currentThread() == slow) {
+                        paused.countDown() // read, then the thread loses the CPU
+                        resume.await(5, TimeUnit.SECONDS)
+                    }
+                    return generation
+                }
+        }
+        val recorder = DiagnosticsRecorder(log, scope, clock = { now.get() })
+        val first = Thread { recorder.connectionFailed("TARGET_UNREACHABLE", "p1") } // just before Clear
+        slow = first
+        first.start()
+        assertTrue(paused.await(5, TimeUnit.SECONDS))
+        runBlocking { log.clear() }
+        now.addAndGet(1_000)
+        val second = Thread { recorder.connectionFailed("TARGET_UNREACHABLE", "p1") } // after Clear
+        second.start()
+        // It finishes, or it waits for the first thread's turn: either way the first may go on now.
+        val deadline = System.currentTimeMillis() + 5_000
+        while (second.state != Thread.State.BLOCKED && second.state != Thread.State.TERMINATED) {
+            check(System.currentTimeMillis() < deadline) { "the second report neither ran nor waited" }
+            Thread.sleep(5)
+        }
+        resume.countDown()
+        first.join()
+        second.join()
+        now.addAndGet(1_000)
+        recorder.connectionFailed("TARGET_UNREACHABLE", "p1") // and one more after Clear
+        recorder.flushProblems()
+
+        val counted = awaitEntries(log, 1).single { it.event == LogEvent.ConnectionProblems }
+        assertEquals("the two failures after Clear", "2", counted.details[LogDetail.COUNT])
+        assertEquals("dated when the first of them failed", NOW + 1_000, counted.timeMillis)
+    }
+
     @Test
     fun aLogThatCannotBeWrittenNeverStopsTheWriter() {
         val failures = AtomicInteger()

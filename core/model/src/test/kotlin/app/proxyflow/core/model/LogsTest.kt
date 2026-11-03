@@ -45,6 +45,8 @@ class LogsTest {
             "ip_203.0.113.7" to "203.0.113.7",
             "203.0.113.7ms" to "203.0.113.7",
             "--proxy.example.com" to "proxy.example",
+            // A value followed by "[" is redacted whole, its last characters too.
+            "Basic YWxpY2U6aHVudGVyMg==[x]" to "g==",
         )
         for ((raw, secret) in leaks) {
             val clean = LogSanitizer.text(raw)
@@ -68,8 +70,19 @@ class LogsTest {
             "username or password not valid for HTTP Basic authentication",
             "HTTP Basic usernames cannot contain ':' (RFC 7617)",
             "proxy offers only bearer authentication; V1 supports Basic",
+            "V1 supports Basic only",
+            "HTTP Basic sign-in refused",
         )
         for (phrase in phrases) assertEquals(phrase, LogSanitizer.text(phrase))
+    }
+
+    /** A sign-in's parameters lose their values and keep their names, after a scheme too: no rule cuts another's match short. */
+    @Test
+    fun aSignInsParametersLoseTheirValuesAndKeepTheirNames() {
+        assertEquals("Digest username=[redacted], realm=[redacted]", LogSanitizer.text("Digest username=\"alice\", realm=\"proxy\""))
+        assertEquals("Basic realm=[redacted]", LogSanitizer.text("Basic realm=\"Squid proxy\""))
+        assertEquals("Basic username=[redacted]", LogSanitizer.text("Basic username=alice"))
+        assertEquals("Bearer token=[redacted]", LogSanitizer.text("Bearer token=abc"))
     }
 
     /** Every fixed phrase the engine's errors and the session's own carry, read from their sources, stays as it is. */

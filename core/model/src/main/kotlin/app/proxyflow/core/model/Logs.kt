@@ -152,16 +152,16 @@ object LogSanitizer {
         Regex("""(?<!\S)[^\s:@]+:[^@]{0,64}?@\S*""") to { _ -> "[redacted]" },
         Regex("""\S+@\S*""") to { _ -> "[redacted]" },
         // A sign-in's parameters, as Digest sends them (username="…", realm, nonce, response…); the schemes' rules below
-        // then leave "Digest username=[redacted]" as it is.
+        // then leave "Digest username=[redacted]" as it is (a value taken whole, never cut short to fit).
         Regex("""(?i)\b(username|user|password|passwd|pass|realm|nonce|cnonce|response|opaque|token)\s*=\s*(?:"[^"]*"?|[^\s,;]+)""") to
             { match -> "${match.groupValues[1]}=[redacted]" },
         // Basic and Bearer credentials: whatever follows the scheme but the few words a phrase has there ("HTTP Basic
         // authentication", "a Bearer token"), so a value that looks like a word is redacted too.
-        Regex("""\b((?i:basic|bearer))\s+([A-Za-z0-9+/=._~-]{4,})(?![=\[])""") to { match ->
+        Regex("""\b((?i:basic|bearer))\s+([A-Za-z0-9+/=._~-]{4,}+)(?!\[redacted])""") to { match ->
             if (match.groupValues[2].lowercase(Locale.ROOT) in PHRASE_WORDS) match.value else "${match.groupValues[1]} [redacted]"
         },
         // Other schemes' tokens: only a value with a digit or + / =, so a phrase such as "Digest authentication" stays readable.
-        Regex("""\b((?i:digest|negotiate|ntlm))\s+(?=[A-Za-z0-9+/=._~-]*[0-9+/=])[A-Za-z0-9+/=._~-]{8,}(?![=\[])""") to
+        Regex("""\b((?i:digest|negotiate|ntlm))\s+(?=[A-Za-z0-9+/=._~-]*[0-9+/=])[A-Za-z0-9+/=._~-]{8,}+(?!\[redacted])""") to
             { match -> "${match.groupValues[1]} [redacted]" },
         // Next to letters too ("ip_203.0.113.7", "203.0.113.7ms"); followed by a full stop that ends a sentence it is still
         // an address, followed by ".5" it is a longer number.
@@ -175,8 +175,10 @@ object LogSanitizer {
         Regex("""[A-Za-z0-9+/_=-]{24,}""") to { _ -> "[redacted]" },
     )
 
-    /** What a phrase may have after "Basic" or "Bearer"; anything else there is taken for a credential. */
-    private val PHRASE_WORDS = setOf("auth", "authentication", "authorization", "credentials", "scheme", "token", "username", "usernames")
+    /** What a phrase may have after "Basic" or "Bearer"; anything else there is taken for a credential, a word too. */
+    private val PHRASE_WORDS = setOf(
+        "auth", "authentication", "authorization", "credentials", "only", "scheme", "sign-in", "token", "tokens", "username", "usernames",
+    )
 
     /** [raw] made safe to keep: see the class comment. */
     fun text(raw: String): String {

@@ -4,15 +4,19 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.data.db.LogDatabase
+import app.proxyflow.core.data.db.LogEventDao
+import app.proxyflow.core.data.db.LogEventEntity
 import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.LogDetail
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -159,16 +163,42 @@ class LogRepositoryTest {
     }
 
     @Test
-    fun aBatchTakenBeforeClearNeverLandsAfterIt() = runTest {
-        val repository = room()
-        repeat(20) { round ->
-            val before = repository.generation
-            val writes = (1..10).map { i -> async(Dispatchers.IO) { repository.append(listOf(entry(now - i)), before) } }
-            val clear = async(Dispatchers.IO) { repository.clear() }
-            (writes + clear).awaitAll()
-
-            assertEquals("round $round", emptyList<LogEntry>(), repository.entries.first())
+    fun aBatchCheckedBeforeClearNeverLandsAfterIt() = runTest {
+        val db = LogDatabase.inMemory(context).also { opened += it }
+        val dao = Hooked(db.logEventDao())
+        val repository = RoomLogRepository(db, dao, clock = { now })
+        val checked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        dao.beforeInsert = {
+            checked.countDown()
+            release.await(5, TimeUnit.SECONDS)
         }
+        // The session's writer has checked its batch against Clear and is about to insert it…
+        val write = async(Dispatchers.IO) { repository.append(listOf(entry(now)), repository.generation) }
+        assertTrue(checked.await(5, TimeUnit.SECONDS))
+        // …when Clear comes: it waits for the write's turn to end, then deletes what it wrote.
+        val clear = async(Dispatchers.IO) { repository.clear() }
+        Thread.sleep(300) // were they not taking turns, Clear would be over by now, before the insert
+        release.countDown()
+        write.await()
+        clear.await()
+
+        assertEquals(emptyList<LogEntry>(), repository.entries.first())
+    }
+
+    @Test
+    fun aClearThatFailsLeavesEverythingAsItWas() = runTest {
+        val db = LogDatabase.inMemory(context).also { opened += it }
+        val dao = Hooked(db.logEventDao())
+        val repository = RoomLogRepository(db, dao, clock = { now })
+        repository.append(listOf(entry(now - 2_000)))
+        val onItsWay = repository.generation // a batch the session's writer took before the tap on Clear
+
+        dao.failDelete = true
+        assertTrue("the disk is full", runCatching { repository.clear() }.isFailure)
+        repository.append(listOf(entry(now - 1_000)), onItsWay)
+
+        assertEquals(listOf(now - 1_000, now - 2_000), repository.entries.first().map { it.timeMillis })
     }
 
     @Test
@@ -227,6 +257,31 @@ class LogRepositoryTest {
         db.logEventDao().insertAll(listOf(entry(now).toRow().copy(event = "from_a_newer_version"), entry(now).toRow()))
 
         assertEquals(listOf(LogEvent.Connected), RoomLogRepository(db, clock = { now }).entries.first().map { it.event })
+    }
+
+    /** The database's own DAO, with a pause before each insert and a delete that can be made to fail. */
+    private class Hooked(private val real: LogEventDao) : LogEventDao() {
+        @Volatile var beforeInsert: () -> Unit = {}
+
+        @Volatile var failDelete = false
+
+        override fun observeLatest(limit: Int): Flow<List<LogEventEntity>> = real.observeLatest(limit)
+
+        override suspend fun count(): Int = real.count()
+
+        override suspend fun insertAll(rows: List<LogEventEntity>) = real.insertAll(rows)
+
+        override suspend fun deleteOutside(cutoffMillis: Long, futureMillis: Long): Int = real.deleteOutside(cutoffMillis, futureMillis)
+
+        override suspend fun trimTo(keep: Int): Int = real.trimTo(keep)
+
+        override suspend fun deleteAll(): Int =
+            if (failDelete) throw IllegalStateException("database or disk is full") else real.deleteAll()
+
+        override suspend fun insertBounded(rows: List<LogEventEntity>, cutoffMillis: Long, futureMillis: Long, keep: Int) {
+            beforeInsert()
+            real.insertBounded(rows, cutoffMillis, futureMillis, keep)
+        }
     }
 
     private fun fileHolds(text: String): Boolean {

@@ -95,8 +95,8 @@ class InMemoryLogRepository(
 
     override suspend fun clear() {
         synchronized(this) {
-            clears.incrementAndGet()
             list.value = emptyList()
+            clears.incrementAndGet()
         }
     }
 
@@ -113,13 +113,20 @@ class InMemoryLogRepository(
 }
 
 /** The log in its own Room database ([LogDatabase]). */
-class RoomLogRepository(
+class RoomLogRepository internal constructor(
     private val database: LogDatabase,
+    private val dao: LogEventDao, // the database's own; tests pass one that can wait or fail
     private val clock: () -> Long = System::currentTimeMillis,
     private val retentionMillis: Long = LogRepository.RETENTION_MILLIS,
     private val maxEntries: Int = LogRepository.MAX_ENTRIES,
 ) : LogRepository {
-    private val dao: LogEventDao = database.logEventDao()
+    constructor(
+        database: LogDatabase,
+        clock: () -> Long = System::currentTimeMillis,
+        retentionMillis: Long = LogRepository.RETENTION_MILLIS,
+        maxEntries: Int = LogRepository.MAX_ENTRIES,
+    ) : this(database, database.logEventDao(), clock, retentionMillis, maxEntries)
+
     private val clears = AtomicLong()
 
     // Clear and every write take turns, so a batch that passed the check can't land after Clear's delete.
@@ -147,8 +154,8 @@ class RoomLogRepository(
 
     override suspend fun clear() {
         writing.withLock {
-            clears.incrementAndGet()
             dao.deleteAll()
+            clears.incrementAndGet() // only once the entries are gone: a Clear that fails leaves everything as it was
         }
     }
 

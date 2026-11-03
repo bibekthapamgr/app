@@ -72,8 +72,9 @@ class DiagnosticsRecorder(
 
     override fun connectionFailed(code: String, profileId: String?) {
         val now = clock()
-        val generation = repository.generation
         synchronized(counts) {
+            // Read under the lock: a failure counted on another thread just after a Clear is never replaced by one of before.
+            val generation = repository.generation
             val key = profileId to code
             val counting = counts[key]?.takeIf { it.generation == generation } // one from before a Clear starts again
             counts[key] = counting?.let { it.copy(count = it.count + 1) } ?: Problems(generation, firstMillis = now, count = 1)
