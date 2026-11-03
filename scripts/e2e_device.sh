@@ -267,10 +267,16 @@ adb shell "setsid sh /data/local/tmp/pf-connecting.sh > /data/local/tmp/pf-conne
 # collected when a test hangs (scripts/m5_evidence.py reads how far the tests got from logcat).
 # Into a file, not through tee: a Gradle daemon that outlives a stopped build would hold a pipe open.
 GRADLE_LOG="$RUNNER_TEMP/gradle-2-device.log"
+if [ "${PF_M8_PROBE:-0}" = 1 ]; then
+    # Trying the M8 failure injection alone (a branch's probe): the instrumented tests are not run.
+    echo "PF_M8_PROBE=1: the instrumented tests are skipped" > "$GRADLE_LOG"
+    STATUS=0
+else
 timeout --kill-after=60s "${DEVICE_TESTS_TIMEOUT:-55m}" \
     ./gradlew :core:data:connectedDebugAndroidTest :core:engine:connectedDebugAndroidTest :app:connectedDebugAndroidTest \
     --continue > "$GRADLE_LOG" 2>&1
 STATUS=$?
+fi
 cat "$GRADLE_LOG"
 if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
     echo "::error title=Device tests (API $API)::The device tests ran past ${DEVICE_TESTS_TIMEOUT:-55m} and were stopped; the evidence lists from logcat which tests ran, failed or never finished."
@@ -279,6 +285,13 @@ fi
 
 timeout 120 adb logcat -d -v threadtime -v UTC > "$OUT/logcat.txt" 2>&1 || true
 kill "$LIVE_LOGCAT" 2>/dev/null || true
+
+# M8: failure injection (process death, Android's Always-on VPN with Block connections without VPN), after the tests
+# and their logcat, so the M5 to M7 evidence reads the tests alone; it has its own logcat (logcat-m8.txt). The captures
+# and the socket samples go on through it.
+bash scripts/m8_failure_injection.sh "$API" "$OUT"
+M8_STATUS=$?
+if [ "$M8_STATUS" != 0 ] && [ "$STATUS" = 0 ]; then STATUS=$M8_STATUS; fi
 timeout 30 adb shell 'pkill -f pf-connecting.sh' >/dev/null 2>&1 || true
 timeout 120 adb pull /data/local/tmp/pf-connecting.txt "$OUT/phone-connecting.txt" >/dev/null 2>&1 || echo "no socket samples" > "$OUT/phone-connecting.txt"
 timeout 60 adb shell pm list packages -U 2>/dev/null | tr -d '\r' > "$OUT/packages-uids.txt" || true

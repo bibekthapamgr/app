@@ -377,6 +377,8 @@ jobs:
           emulator-boot-timeout: 900
           disable-animations: true
           script: bash scripts/e2e_device.sh ${{ matrix.api-level }}
+        env:
+          PF_M8_PROBE: "1" # TEMPORARY (M8 branch): the failure injection alone, while it is being tried on each level
 
       - name: End-to-end evidence (the lab's logs, packet captures, logcat; emitted as annotations)
         if: ${{ !cancelled() && steps.proxies.outcome == 'success' && steps.emulator.outcome != 'skipped' }}
@@ -397,7 +399,7 @@ jobs:
           dir="$RUNNER_TEMP/m5-evidence-api${{ matrix.api-level }}"
           mkdir -p "$dir"
           for log in destination.log sink.log destination-address.log destination6.log destination-lan.log tls-destination.log \
-                     udp-sink.log gate.log stunnel.log dns-proxies.log dns-uplink.log squid-access.log danted.log bulk.log log-baseline.properties; do
+                     udp-sink.log gate.log stunnel.log dns-proxies.log dns-uplink.log squid-access.log danted.log bulk.log witness.log log-baseline.properties; do
             sudo cp "/tmp/pf/$log" "$dir/" 2>/dev/null || true
           done
           sudo chown -R "$(id -u):$(id -g)" "$dir"

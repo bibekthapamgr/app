@@ -9,7 +9,7 @@ at the proxy, each TLS front must present the certificate it is meant to (valid,
 expired, untrusted CA: checked here against the run's CA the way a client checks it), the
 HTTPS destination must answer through a proxy with the certificate the device will expect,
 the gate must relay, the bulk server must take and send exact byte counts through both
-proxies, the UDP sinks must answer, and the two DNS servers must answer what they should. Unless --offline, both proxies must also reach the pre-flight check's target
+proxies, the witness must answer directly and through neither proxy, the UDP sinks must answer, and the two DNS servers must answer what they should. Unless --offline, both proxies must also reach the pre-flight check's target
 (connectivitycheck.gstatic.com:443), as a user's working proxy does. --offline and
 --no-ipv6 are for trying the lab on a machine without Internet access or IPv6; CI uses
 neither.
@@ -177,6 +177,18 @@ def main(argv: list[str]) -> int:
         for name, via in (("SOCKS5", through_socks), ("HTTP CONNECT", through_http)):
             got = via(host, port)
             check(f"{name} to {host}:{port}", got == "PROXYFLOW-DEST lab-check", got)
+
+    # The witness (M8): the phone reaches it directly, a proxy never can (each would connect to 10.0.2.2, where it is
+    # not listening).
+    witness = int(p["witness.port"])
+    with socket.create_connection(("127.0.0.1", witness), timeout=5) as sock:
+        check("the witness answers directly", exchange(sock, "lab-check") == "PROXYFLOW-DEST lab-check")
+    for name, via in (("SOCKS5", through_socks), ("HTTP CONNECT", through_http)):
+        try:
+            got = via(p["lan.address"], witness)
+        except (OSError, IndexError, ValueError) as e:  # the proxy closed, or answered nothing usable
+            got = f"no tunnel ({e.__class__.__name__})"
+        check(f"{name} can't reach the witness", got != "PROXYFLOW-DEST lab-check", got)
 
     # A name the proxies' DNS server does not know fails at the proxy (SOCKS5 4: host unreachable).
     missing = p["missing.name"]
