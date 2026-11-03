@@ -111,6 +111,8 @@ dependencies {
     implementation(project(":feature:settings"))
     implementation(project(":feature:logs"))
     implementation(project(":feature:about"))
+    // ProxyFlow's own Lint checks (LogSecret), run by :app:lintDebug over every module above.
+    lintChecks(project(":lint-rules"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

@@ -34,6 +34,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,7 +46,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.proxyflow.core.designsystem.component.BannerTone
 import app.proxyflow.core.designsystem.component.PfBanner
@@ -69,10 +73,13 @@ import app.proxyflow.core.model.LogEvent
 import app.proxyflow.core.model.LogExport
 import app.proxyflow.core.model.LogFilter
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** What the Logs screen's controls do; the defaults do nothing (previews, screenshots, tests). */
 data class LogsActions(
@@ -97,13 +104,27 @@ internal fun LogsRoute(viewModel: LogsViewModel, appVersion: String) {
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val copied = stringResource(R.string.logs_copied)
-    val copy = { text: String ->
-        copyToClipboard(context, text)
-        // Android 13 and later confirm a copy themselves.
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
+    val notHandedOver = stringResource(R.string.logs_not_handed_over)
+    // Each time the screen is shown (back from another tab too) the log's bounds are applied; leaving it closes the
+    // detail sheet and the Clear confirmation, so they don't come back with it.
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { viewModel.onShown() }
+    DisposableEffect(viewModel) { onDispose { viewModel.onLeft() } }
+    val tell: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
+    val copy: (String) -> Unit = { text ->
+        if (runCatching { copyToClipboard(context, text) }.isFailure) {
+            tell(notHandedOver)
+        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            tell(copied) // Android 13 and later confirm a copy themselves.
+        }
+    }
+    // The text sanitizes and formats every entry shown: built off the main thread, then handed over.
+    val handOver: ((String) -> Unit) -> Unit = { deliver ->
+        val shown = state
+        scope.launch { deliver(withContext(Dispatchers.Default) { exportText(context, shown, appVersion, zone) }) }
     }
     LogsScreen(
         state = state,
+        searchText = viewModel.searchText,
         zone = zone,
         snackbar = snackbar,
         actions = LogsActions(
@@ -111,15 +132,23 @@ internal fun LogsRoute(viewModel: LogsViewModel, appVersion: String) {
             onQuery = viewModel::setQuery,
             onSelect = viewModel::select,
             onCloseDetail = viewModel::closeDetail,
-            onCopy = { copy(exportText(context, state, appVersion, zone)) },
+            onCopy = { handOver { copy(it) } },
             onExport = {
-                val send = Intent(Intent.ACTION_SEND)
-                    .setType("text/plain")
-                    .putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.logs_export_title))
-                    .putExtra(Intent.EXTRA_TEXT, exportText(context, state, appVersion, zone))
-                context.startActivity(Intent.createChooser(send, context.getString(R.string.logs_export)))
+                handOver { text ->
+                    val send = Intent(Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.logs_export_title))
+                        .putExtra(Intent.EXTRA_TEXT, text)
+                    // Android refuses an intent too large to pass on (TransactionTooLargeException), or finds no app.
+                    runCatching { context.startActivity(Intent.createChooser(send, context.getString(R.string.logs_export))) }
+                        .onFailure { tell(notHandedOver) }
+                }
             },
-            onCopyEntry = { entry -> copy(LogExport.line(entry, zone)) },
+            onCopyEntry = { entry ->
+                // Before Android 13 the confirmation is the screen's own, which the sheet would cover.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) viewModel.closeDetail()
+                copy(LogExport.line(entry, zone))
+            },
             onClear = viewModel::requestClear,
             onConfirmClear = viewModel::confirmClear,
             onDismissClear = viewModel::dismissClear,
@@ -129,16 +158,17 @@ internal fun LogsRoute(viewModel: LogsViewModel, appVersion: String) {
 
 /**
  * The text Copy and Export hand over: header lines (app and Android version, when, how many of how
- * many entries, the filter and search), then the entries shown, sanitized once more (LogExport) —
- * at most what fits in one transaction to the other app, the newest kept.
+ * many entries, the filter, and whether a search was applied — never its text, which may be a
+ * profile's name), then the entries shown, sanitized once more (LogExport) — at most what Android
+ * can pass on to the other app, the newest kept.
  */
-internal fun exportText(context: Context, state: LogsUiState, appVersion: String, zone: ZoneId, now: Instant = Instant.now()): String {
+fun exportText(context: Context, state: LogsUiState, appVersion: String, zone: ZoneId, now: Instant = Instant.now()): String {
     val included = LogExport.newestFitting(state.entries, zone)
     val filter = context.getString(filterLabelRes(state.filter))
     val count = if (state.query.isBlank()) {
         context.getString(R.string.logs_export_count, included.size, state.total, filter)
     } else {
-        context.getString(R.string.logs_export_count_search, included.size, state.total, filter, state.query.trim())
+        context.getString(R.string.logs_export_count_search, included.size, state.total, filter)
     }
     val header = listOf(
         context.getString(R.string.logs_export_title),
@@ -155,6 +185,10 @@ private fun copyToClipboard(context: Context, text: String) {
     context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
 }
 
+/**
+ * @param searchText the search field's text, as typed (LogsViewModel.searchText).
+ * @param today entries of another day show their date too; any day's are shown, up to the log's 24 hours.
+ */
 @Composable
 fun LogsScreen(
     state: LogsUiState,
@@ -162,6 +196,8 @@ fun LogsScreen(
     actions: LogsActions = LogsActions(),
     zone: ZoneId = ZoneId.systemDefault(),
     snackbar: SnackbarHostState = remember { SnackbarHostState() },
+    searchText: String = state.query,
+    today: LocalDate = LocalDate.now(zone),
 ) {
     Scaffold(
         modifier = modifier,
@@ -198,7 +234,7 @@ fun LogsScreen(
                 )
             }
             else -> Column(content) {
-                Controls(state, actions)
+                Controls(state, searchText, actions)
                 if (state.entries.isEmpty()) {
                     Box(Modifier.fillMaxSize()) {
                         PfEmptyState(
@@ -208,7 +244,7 @@ fun LogsScreen(
                         )
                     }
                 } else {
-                    EntryList(state.entries, zone, actions.onSelect)
+                    EntryList(state.entries, zone, today, actions.onSelect)
                 }
             }
         }
@@ -237,7 +273,7 @@ fun LogsScreen(
 
 /** Board F2's filters (docs/m1/03 J10), the search field and what the log keeps. */
 @Composable
-private fun Controls(state: LogsUiState, actions: LogsActions) {
+private fun Controls(state: LogsUiState, searchText: String, actions: LogsActions) {
     Column(
         modifier = Modifier.padding(horizontal = Spacing.screenGutter, vertical = Spacing.sm),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
@@ -251,11 +287,11 @@ private fun Controls(state: LogsUiState, actions: LogsActions) {
             modifier = Modifier.horizontalScroll(rememberScrollState()),
         )
         PfTextField(
-            value = state.query,
+            value = searchText,
             onValueChange = actions.onQuery,
             label = stringResource(R.string.logs_search),
             trailingIcon = {
-                if (state.query.isEmpty()) {
+                if (searchText.isEmpty()) {
                     Icon(PfIcons.Search, contentDescription = null)
                 } else {
                     IconButton(onClick = { actions.onQuery("") }) {
@@ -273,11 +309,15 @@ private fun Controls(state: LogsUiState, actions: LogsActions) {
 }
 
 @Composable
-private fun EntryList(entries: List<LogEntry>, zone: ZoneId, onSelect: (LogEntry) -> Unit) {
-    val formatter = remember(zone) { DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM).withZone(zone) }
+private fun EntryList(entries: List<LogEntry>, zone: ZoneId, today: LocalDate, onSelect: (LogEntry) -> Unit) {
+    val timeOnly = remember(zone) { DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM).withZone(zone) }
+    // The log spans up to a day, so an entry of another day says which.
+    val withDate = remember(zone) { DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT, FormatStyle.MEDIUM).withZone(zone) }
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = Spacing.screenGutter)) {
         items(entries, key = { it.id }) { entry ->
-            LogRow(entry, time = formatter.format(Instant.ofEpochMilli(entry.timeMillis)), onClick = { onSelect(entry) })
+            val instant = Instant.ofEpochMilli(entry.timeMillis)
+            val time = if (instant.atZone(zone).toLocalDate() == today) timeOnly.format(instant) else withDate.format(instant)
+            LogRow(entry, time = time, onClick = { onSelect(entry) })
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
@@ -289,7 +329,7 @@ private fun LogRow(entry: LogEntry, time: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(onClickLabel = stringResource(R.string.logs_show_details), role = Role.Button, onClick = onClick)
             .padding(vertical = Spacing.sm),
         horizontalArrangement = Arrangement.spacedBy(Spacing.md),
         verticalAlignment = Alignment.Top,
@@ -354,7 +394,13 @@ private fun EntrySheet(entry: LogEntry, profileName: String?, zone: ZoneId, onCo
 
 @Composable
 private fun Field(@StringRes label: Int, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+    // Read out as one: "Code, AUTH_FAILED".
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+    ) {
         Text(stringResource(label), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.35f))
         Text(
             value,
@@ -461,11 +507,16 @@ private fun count(plural: Int, value: Long): String {
     return pluralStringResource(plural, n, n)
 }
 
-/** What the user can do about an entry's code (docs/m1/04 §4), or null when there is nothing to do. */
+/**
+ * What the user can do about an entry (docs/m1/04 §4), or null when there is nothing to do. A site's code
+ * means one thing for a single connection while connected (other connections are unaffected) and another
+ * for the proxy check before connecting or reconnecting (the proxy did not open even a test connection).
+ */
 @Composable
 private fun hint(entry: LogEntry): String? {
     val code = entry.code ?: return null
     val error = ConnectionError(code, entry.details[LogDetail.DETAIL])
+    val oneConnection = entry.event == LogEvent.ConnectionProblems
     val hint = when (code) {
         "AUTH_REQUIRED", "AUTH_FAILED" -> if (error.unsupportedSignIn) R.string.logs_hint_auth_unsupported else R.string.logs_hint_auth
         "TLS_UNTRUSTED", "TLS_HOSTNAME" -> R.string.logs_hint_tls
@@ -475,12 +526,20 @@ private fun hint(entry: LogEntry): String? {
         "HANDSHAKE_TIMEOUT" -> R.string.logs_hint_timeout
         "PROXY_UNREACHABLE" -> R.string.logs_hint_unreachable
         "PROTOCOL_ERROR" -> if (error.noConnect) R.string.logs_hint_no_connect else R.string.logs_hint_protocol
-        "TARGET_NOT_ALLOWED", "TARGET_UNREACHABLE", "TARGET_REFUSED", "TARGET_UNSUPPORTED", "PROXY_GENERAL_FAILURE" ->
-            R.string.logs_hint_target
+        "TARGET_NOT_ALLOWED" -> if (oneConnection) R.string.logs_hint_target else R.string.logs_hint_check_not_allowed
+        "TARGET_UNREACHABLE", "TARGET_REFUSED" -> if (oneConnection) R.string.logs_hint_target else R.string.logs_hint_check_no_internet
+        "PROXY_GENERAL_FAILURE" -> if (oneConnection) R.string.logs_hint_target else R.string.logs_hint_check_proxy_error
+        "TARGET_UNSUPPORTED" -> if (oneConnection) R.string.logs_hint_target else R.string.logs_hint_check_unsupported
+        "STALE_DNS_MAPPING" -> R.string.logs_hint_stale_address
+        "CONNECTION_LIMIT" -> R.string.logs_hint_connection_limit
+        "APP_HANDSHAKE_FAILED" -> R.string.logs_hint_app_gave_up
+        ConnectionError.INTERNAL -> if (oneConnection) R.string.logs_hint_internal_connection else R.string.logs_hint_internal
         ConnectionError.OFFLINE -> R.string.logs_hint_offline
         ConnectionError.ENGINE_STOPPED -> R.string.logs_hint_engine
         ConnectionError.CREDENTIAL_UNREADABLE -> R.string.logs_hint_credentials
         ConnectionError.VPN_REVOKED -> R.string.logs_hint_revoked
+        ConnectionError.VPN_PERMISSION_DENIED -> R.string.logs_hint_permission
+        ConnectionError.PROFILE_DELETED -> R.string.logs_hint_profile_deleted
         else -> return null
     }
     return stringResource(hint)

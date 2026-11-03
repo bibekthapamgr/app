@@ -291,6 +291,35 @@ func TestHandshakeTimeout(t *testing.T) {
 	}
 }
 
+// A SOCKS5 proxy that answered the method selection but not CONNECT in time is still trying to reach
+// the site (Dante waits for its own connect timeout): the site's failure, never a proxy timeout, so it
+// does not count towards reconnecting. An HTTP proxy says nothing before it has reached the site, so
+// its silence stays a proxy timeout (TestHandshakeTimeout).
+func TestSOCKS5ConnectReplyNotInTimeIsTheSites(t *testing.T) {
+	proxytest.CheckLeaks(t)
+	stalled := proxytest.NewServer(t, proxytest.Config{Protocol: proxytest.SOCKS5, StallConnect: true})
+	d, err := NewDialer(ProxyConfig{Kind: KindSOCKS5, Host: stalled.Host(), Port: stalled.Port(), HandshakeTimeout: 300 * time.Millisecond}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	_, err = d.Dial(context.Background(), Target{Host: "a.test", Port: 80})
+	if CodeOf(err) != CodeTargetUnreachable || CodeOf(err).IsProxyLevel() || IsTimeout(err) {
+		t.Fatalf("got %v, want TARGET_UNREACHABLE (the site's, not a proxy timeout)", err)
+	}
+	if el := time.Since(start); el < 250*time.Millisecond || el > 2*time.Second {
+		t.Fatalf("the handshake timeout was not what ended it (%v)", el)
+	}
+	waitFor(t, func() bool { return stalled.Active() == 0 }, "the stalled proxy connection to be closed")
+
+	// Cancelled while waiting for the reply: canceled, not the site's failure.
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	if _, err := d.Dial(ctx, Target{Host: "a.test", Port: 80}); CodeOf(err) != CodeCanceled {
+		t.Fatalf("cancelled: got %v, want CANCELED", err)
+	}
+}
+
 // The app's diagnostics count proxy timeouts (IsTimeout): connecting to the proxy or
 // its handshake took too long. Other failures, and a slow lookup of the proxy's own
 // name (a DNS failure), are not timeouts.

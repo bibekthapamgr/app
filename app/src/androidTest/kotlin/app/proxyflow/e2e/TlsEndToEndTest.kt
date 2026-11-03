@@ -109,6 +109,7 @@ class TlsEndToEndTest {
         gate.forward(lab.tlsHttpPort)
         val profile = tlsProfile(ProxyProtocol.HTTP, lab.gatePort)
         app.connect(profile.id)
+        val established = ProxyFlowVpnService.establishedInterfaces.get()
         assertSent("tls-gate-up")
 
         gate.forward(lab.tlsUntrustedPort)
@@ -130,7 +131,8 @@ class TlsEndToEndTest {
         gate.forward(lab.tlsHttpPort)
         app.controller.restart()
         app.awaitStatus(ConnectionStatus.Connected)
-        assertEquals("the same interface", 1, Descriptors.tun().size)
+        assertEquals("the same interface", established, ProxyFlowVpnService.establishedInterfaces.get())
+        assertEquals(1, Descriptors.tun().size)
         assertSent("tls-gate-back")
     }
 

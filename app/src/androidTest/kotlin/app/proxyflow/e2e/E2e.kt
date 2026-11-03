@@ -250,6 +250,18 @@ class StateHistory(controller: ConnectionController) : AutoCloseable {
 
     fun neverConnected(): Boolean = seen.none { it.status == ConnectionStatus.Connected }
 
+    /** The states seen, one per line and short, for a failure message: status, reconnection and error. */
+    fun describe(): String = seen.joinToString("\n", prefix = "states:\n") { state ->
+        listOfNotNull(
+            state.status.name,
+            state.step?.name,
+            state.reconnect?.let {
+                "${it.reason} attempt ${it.attempt}/${it.maxAttempts} due ${it.nextAttemptAtMillis?.minus(System.currentTimeMillis())} ms"
+            },
+            state.error?.code,
+        ).joinToString(" ")
+    }
+
     override fun close() = scope.cancel()
 }
 

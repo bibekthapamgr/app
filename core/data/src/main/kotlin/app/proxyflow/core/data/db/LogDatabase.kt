@@ -45,8 +45,9 @@ abstract class LogEventDao {
     @Insert
     abstract suspend fun insertAll(rows: List<LogEventEntity>)
 
-    @Query("DELETE FROM log_events WHERE time_millis < :cutoffMillis")
-    abstract suspend fun deleteOlderThan(cutoffMillis: Long): Int
+    /** Entries dated before [cutoffMillis] or after [futureMillis] (the clock was set ahead, then back). */
+    @Query("DELETE FROM log_events WHERE time_millis < :cutoffMillis OR time_millis > :futureMillis")
+    abstract suspend fun deleteOutside(cutoffMillis: Long, futureMillis: Long): Int
 
     /** Keeps the newest [keep] entries. */
     @Query("DELETE FROM log_events WHERE id NOT IN (SELECT id FROM log_events ORDER BY time_millis DESC, id DESC LIMIT :keep)")
@@ -55,18 +56,21 @@ abstract class LogEventDao {
     @Query("DELETE FROM log_events")
     abstract suspend fun deleteAll(): Int
 
-    /** Writes [rows], then drops what is older than [cutoffMillis] and all but the newest [keep]: the log never grows past its bounds. */
+    /**
+     * Writes [rows], then drops what is dated outside [cutoffMillis]..[futureMillis] and all but the newest
+     * [keep]: the log never grows past its bounds.
+     */
     @Transaction
-    open suspend fun insertBounded(rows: List<LogEventEntity>, cutoffMillis: Long, keep: Int) {
+    open suspend fun insertBounded(rows: List<LogEventEntity>, cutoffMillis: Long, futureMillis: Long, keep: Int) {
         insertAll(rows)
-        deleteOlderThan(cutoffMillis)
+        deleteOutside(cutoffMillis, futureMillis)
         trimTo(keep)
     }
 
-    /** Applies the bounds without writing (at start, and when the Logs screen opens). */
+    /** Applies the bounds without writing (at start, every hour, and each time the Logs screen is shown). */
     @Transaction
-    open suspend fun purge(cutoffMillis: Long, keep: Int) {
-        deleteOlderThan(cutoffMillis)
+    open suspend fun purge(cutoffMillis: Long, futureMillis: Long, keep: Int) {
+        deleteOutside(cutoffMillis, futureMillis)
         trimTo(keep)
     }
 }
@@ -75,14 +79,23 @@ abstract class LogEventDao {
  * The diagnostic log's own database, apart from the profiles' (ADR-0012): clearing it, its retention
  * and its schema never touch a profile. SQLite's `secure_delete` overwrites deleted entries, and the
  * rollback journal is truncated after each write instead of a write-ahead log keeping old pages, so
- * "Clear" leaves no readable entry behind in the file. Like the profiles' database, its exported
- * schema is committed in `core/data/schemas` and checked in CI (ADR-0009).
+ * "Clear" leaves no readable entry behind in the file: both are set on the connection each time it
+ * opens, whatever the platform's defaults. Like the profiles' database, its exported schema is
+ * committed in `core/data/schemas` and checked in CI (ADR-0009).
  *
  * - Version 1 (M7): `log_events`.
  */
 @Database(entities = [LogEventEntity::class], version = 1, exportSchema = true)
 abstract class LogDatabase : RoomDatabase() {
     abstract fun logEventDao(): LogEventDao
+
+    /** `journal_mode` and `secure_delete` as this database's connection has them (one connection: no write-ahead log). */
+    fun storageSettings(): Map<String, String> {
+        val db = openHelper.writableDatabase
+        return listOf("journal_mode", "secure_delete").associateWith { pragma ->
+            db.query("PRAGMA $pragma").use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).lowercase() else "" }
+        }
+    }
 
     companion object {
         const val NAME = "logs.db"
@@ -98,10 +111,14 @@ abstract class LogDatabase : RoomDatabase() {
             Room.inMemoryDatabaseBuilder(context.applicationContext, LogDatabase::class.java).addCallback(SecureDelete).build()
     }
 
-    /** `secure_delete` is a per-connection setting, so it is set each time the database opens. */
+    /**
+     * `secure_delete` and the journal mode are per-connection settings, so they are set each time the database opens:
+     * Room's TRUNCATE only turns the write-ahead log off, leaving the journal mode to the platform's default.
+     */
     private object SecureDelete : Callback() {
         override fun onOpen(db: SupportSQLiteDatabase) {
             db.query("PRAGMA secure_delete = ON").close()
+            db.query("PRAGMA journal_mode = TRUNCATE").close()
         }
     }
 }

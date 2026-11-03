@@ -43,8 +43,9 @@ interface VpnHost {
     /**
      * Leaves the foreground, removes the status notification and stops the
      * service, unless a newer start reached it meanwhile (`stopSelfResult`).
+     * Returns the start the stop is for: a start up to it is over.
      */
-    fun stop()
+    fun stop(): Int
 }
 
 /**

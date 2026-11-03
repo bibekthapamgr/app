@@ -15,6 +15,19 @@ class LogsTest {
             "dial tcp 203.0.113.7:1080: connect: connection refused" to "203.0.113.7",
             "proxy at [2001:db8::1]:443 closed" to "2001:db8::1",
             "fd99::1 did not answer" to "fd99::1",
+            "proxy at 2001:db8:0:0:0:0:0:1 closed" to "2001:db8:0:0:0:0:0:1",
+            "fe80::1%wlan0 unreachable" to "fe80::1",
+            "via ::ffff:192.0.2.1" to "192.0.2.1",
+            "router 3c:22:fb:01:9a:7e answered" to "3c:22:fb:01:9a:7e",
+            "addr:2001:db8::1 refused" to "2001:db8::1",
+            "cannot reach 203.0.113.5." to "203.0.113.5",
+            "lookup my_proxy.example.com failed" to "my_proxy.example.com",
+            "certificate for *.provider.net" to "provider.net",
+            "dial myproxy:8080 refused" to "myproxy",
+            "lookup пример.рф failed" to "пример",
+            "header Basic dXNlcjpwYXNzd29yZA== sent" to "dXNlcjpwYXNzd29yZA",
+            "url user:secret@" to "secret",
+            "no route\u2028FAKE 10:00 entry" to "\u2028",
             "lookup proxy.example.com failed" to "proxy.example.com",
             "sign in to my-proxy.provider.net:3128 refused" to "my-proxy.provider.net",
             "see https://example.org/help?x=1" to "example.org",
@@ -36,8 +49,25 @@ class LogsTest {
             "the proxy did not complete the handshake in time",
             "proxy offers only Digest authentication; V1 supports Basic",
             "reconnecting stopped after 8 attempts",
+            "Exported 2026-11-03 10:16:30.250 +09:00",
+            "session lasted 00:12:47",
+            "proxy offers only Digest authentication; V1 supports Basic",
+            "SOCKS5 reply 0x04 host unreachable",
+            "the proxy did not reach the site in time",
         )
         for (phrase in phrases) assertEquals(phrase, LogSanitizer.text(phrase))
+    }
+
+    @Test
+    fun longValuesAreLookedAtQuicklyAndNoHalfOfANameEscapes() {
+        val started = System.nanoTime()
+        assertEquals(LogSanitizer.MAX_LENGTH, LogSanitizer.text("word ".repeat(20_000)).length)
+        assertEquals("one long token", "[redacted]", LogSanitizer.text("x".repeat(80_000)))
+        assertEquals("one word too long to look at", "[redacted]", LogSanitizer.text("a.".repeat(40_000) + "com"))
+        assertTrue("took ${(System.nanoTime() - started) / 1_000_000} ms", System.nanoTime() - started < 1_000_000_000)
+        // A name cut where the looked-at part ends must not leave its first half in the clear.
+        val cut = "word ".repeat(199) + "proxy.example.com"
+        assertFalse(LogSanitizer.text(cut).contains("proxy.exa"))
     }
 
     @Test

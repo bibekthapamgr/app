@@ -162,6 +162,11 @@ class FakeHost(private val log: CallLog) : VpnHost {
 
     @Volatile var foregroundAllowed = true
 
+    /** The service's starts so far (`onStartCommand`'s start ids): [started] is the next one. */
+    private val starts = AtomicInteger()
+
+    fun started(): Int = starts.incrementAndGet()
+
     val tuns = CopyOnWriteArrayList<FakeTun>()
     val statuses = CopyOnWriteArrayList<ConnectionState>()
     val problems = CopyOnWriteArrayList<ConnectionState>()
@@ -234,8 +239,9 @@ class FakeHost(private val log: CallLog) : VpnHost {
         log.add("clear problem")
     }
 
-    override fun stop() {
+    override fun stop(): Int {
         log.add("host stop")
+        return starts.get()
     }
 
     companion object {

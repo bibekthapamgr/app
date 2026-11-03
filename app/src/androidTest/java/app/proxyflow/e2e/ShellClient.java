@@ -43,14 +43,16 @@ import javax.net.ssl.TrustManagerFactory;
  *   dns SERVER NAME TYPE TIMEOUT_MS [tcp]     RCODE n ANSWERS a,b|- | TIMEOUT | ERROR ...
  *   resolve NAME                              ADDRESSES a,b | ERROR ...
  *   tls HOST PORT CA_PEM LINE TIMEOUT_MS      TLS protocol LEAF sha256 REPLY text | ERROR ...
- *   bulk HOST PORT up BYTES TIMEOUT_MS        SENT n REPLY text | ERROR ...
- *   bulk HOST PORT down BYTES TIMEOUT_MS      RECEIVED n | ERROR ...
+ *   bulk HOST PORT up BYTES TIMEOUT_MS LINGER_MS     SENT n REPLY text | ERROR ...
+ *   bulk HOST PORT down BYTES TIMEOUT_MS LINGER_MS   RECEIVED n | ERROR ...
  *   hold HOST PORT SECONDS                    ENDED ms closed|reset|data|timeout | ERROR ...
  * </pre>
  *
  * bulk and hold talk to the lab's bulk server (scripts/e2e_servers.py): up sends BYTES after its
- * request line and prints the server's count, down reads until the server closes, and hold keeps
- * one connection open, sending nothing, and prints how long it stayed open and how it ended.
+ * request line and prints the server's count, down reads BYTES, and both then keep the connection
+ * open for LINGER_MS more (the server waits for the client to close), so the test can read the
+ * engine's own count for it; hold keeps one connection open, sending nothing, and prints how long
+ * it stayed open and how it ended.
  *
  * TYPE is a DNS record type number (1 A, 28 AAAA, 16 TXT, 65 HTTPS). tls trusts only the CA in
  * CA_PEM and checks the host name, as a browser checks a site: what it prints is the certificate
@@ -84,7 +86,7 @@ public final class ShellClient {
             case "tls":
                 return tls(a[1], Integer.parseInt(a[2]), a[3], a[4], Integer.parseInt(a[5]));
             case "bulk":
-                return bulk(a[1], Integer.parseInt(a[2]), a[3], Long.parseLong(a[4]), Integer.parseInt(a[5]));
+                return bulk(a[1], Integer.parseInt(a[2]), a[3], Long.parseLong(a[4]), Integer.parseInt(a[5]), Integer.parseInt(a[6]));
             case "hold":
                 return hold(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]));
             default:
@@ -100,7 +102,7 @@ public final class ShellClient {
         }
     }
 
-    private static String bulk(String host, int port, String direction, long bytes, int timeout) throws Exception {
+    private static String bulk(String host, int port, String direction, long bytes, int timeout, int linger) throws Exception {
         try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress(host, port), timeout);
             socket.setSoTimeout(timeout);
@@ -120,13 +122,15 @@ public final class ShellClient {
                 ByteArrayOutputStream reply = new ByteArrayOutputStream();
                 int b;
                 while ((b = in.read()) != -1 && b != '\n') reply.write(b);
+                Thread.sleep(linger);
                 return "SENT " + bytes + " REPLY " + reply.toString("US-ASCII").trim();
             }
             out.write(("DOWN " + bytes + "\n").getBytes(StandardCharsets.US_ASCII));
             out.flush();
             long received = 0;
             int n;
-            while ((n = in.read(buffer)) != -1) received += n;
+            while (received < bytes && (n = in.read(buffer, 0, (int) Math.min(buffer.length, bytes - received))) != -1) received += n;
+            Thread.sleep(linger);
             return "RECEIVED " + received;
         }
     }

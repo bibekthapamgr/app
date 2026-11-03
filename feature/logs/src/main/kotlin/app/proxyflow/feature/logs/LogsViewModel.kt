@@ -1,5 +1,8 @@
 package app.proxyflow.feature.logs
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.proxyflow.core.data.LogRepository
@@ -7,10 +10,14 @@ import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogFilter
 import java.util.Locale
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -36,25 +43,37 @@ data class LogsUiState(
 
 /**
  * The diagnostic log on screen: newest first, filtered (All, Errors, Connection, Blocked) and
- * searched by code, event, stage, detail or profile name. Opening the screen applies the log's
- * bounds at once, so nothing older than its retention is shown; Clear removes every entry.
+ * searched by code, event, stage, detail or profile name. Each time the screen is shown the log's
+ * bounds are applied ([onShown]); the log itself never hands over an entry past its retention.
+ * Clear removes every entry. Sorting, filtering and searching thousands of entries happen on
+ * [work], off the main thread; a log that can't be read shows as empty rather than taking the app down.
  */
-class LogsViewModel(private val logs: LogRepository, profiles: ProfileRepository) : ViewModel() {
+class LogsViewModel(private val logs: LogRepository, profiles: ProfileRepository, work: CoroutineDispatcher = Dispatchers.Default) :
+    ViewModel() {
     private val filter = MutableStateFlow(LogFilter.All)
     private val query = MutableStateFlow("")
     private val selectedId = MutableStateFlow<Long?>(null)
     private val confirmingClear = MutableStateFlow(false)
 
-    init {
-        viewModelScope.launch { runCatching { logs.purge() } }
-    }
+    /**
+     * The search field's text, read by the field itself: typing never waits for the list to be filtered,
+     * so no character is dropped and an input method's composition is never interrupted.
+     */
+    var searchText by mutableStateOf("")
+        private set
 
     private val choices = combine(filter, query, selectedId, confirmingClear) { filter, query, selected, clear ->
         Choices(filter, query, selected, clear)
     }
 
     val uiState: StateFlow<LogsUiState> =
-        combine(logs.entries, profiles.profiles, choices) { entries, profileList, choices ->
+        combine(
+            logs.entries.catch {
+                emit(emptyList())
+            },
+            profiles.profiles.catch { emit(emptyList()) },
+            choices,
+        ) { entries, profileList, choices ->
             val names = profileList.associate { it.id to it.displayName }
             val newestFirst = entries.sortedWith(compareByDescending<LogEntry> { it.timeMillis }.thenByDescending { it.id })
             LogsUiState(
@@ -68,14 +87,27 @@ class LogsViewModel(private val logs: LogRepository, profiles: ProfileRepository
                 selected = choices.selectedId?.let { id -> entries.firstOrNull { it.id == id } },
                 confirmingClear = choices.confirmingClear,
             )
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), LogsUiState())
+        }.flowOn(work).stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), LogsUiState())
+
+    /** The screen is shown (each time, also back from another tab): the log's bounds are applied now. */
+    fun onShown() {
+        viewModelScope.launch { runCatching { logs.purge() } }
+    }
+
+    /** The screen is left: an open detail sheet or Clear confirmation does not come back with it. */
+    fun onLeft() {
+        selectedId.value = null
+        confirmingClear.value = false
+    }
 
     fun setFilter(value: LogFilter) {
         filter.value = value
     }
 
     fun setQuery(value: String) {
-        query.value = value.take(MAX_QUERY_LENGTH)
+        val text = value.take(MAX_QUERY_LENGTH)
+        searchText = text
+        query.value = text
     }
 
     /** Opens the detail sheet (F3) for [entry]. */
@@ -95,11 +127,11 @@ class LogsViewModel(private val logs: LogRepository, profiles: ProfileRepository
         confirmingClear.value = false
     }
 
-    /** Removes every entry kept on the phone. */
+    /** Removes every entry kept on the phone; a log that can't be written (the disk full) stays as it is. */
     fun confirmClear() {
         confirmingClear.value = false
         selectedId.value = null
-        viewModelScope.launch { logs.clear() }
+        viewModelScope.launch { runCatching { logs.clear() } }
     }
 
     private data class Choices(val filter: LogFilter, val query: String, val selectedId: Long?, val confirmingClear: Boolean)

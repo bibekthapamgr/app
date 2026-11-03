@@ -1,8 +1,10 @@
 package adapters
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"net"
 )
 
 // SOCKS5 client handshake (RFC 1928) with optional username/password
@@ -67,8 +69,17 @@ func socks5Handshake(rw io.ReadWriter, creds *Credentials, t Target) error {
 	if _, err := rw.Write(req); err != nil {
 		return err
 	}
-	// 3. Reply.
-	return readSOCKS5Reply(rw)
+	// 3. Reply. The proxy has answered the method selection (and the sign-in), so it works: a reply that does not
+	//    come in time is the proxy still trying to reach the site — Dante waits for its own connect timeout before
+	//    it answers — so it is the site's failure, never counted towards reconnecting (docs/m1/04 §4).
+	if err := readSOCKS5Reply(rw); err != nil {
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			return newErr(CodeTargetUnreachable, "the proxy did not reach the site in time", err)
+		}
+		return err
+	}
+	return nil
 }
 
 // socks5UserPass sends VER ULEN UNAME PLEN PASSWD from one exactly-sized

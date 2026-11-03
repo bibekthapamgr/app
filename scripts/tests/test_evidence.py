@@ -651,6 +651,22 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(1, status)
         self.assertIn("4 of 4 attempts matched, but their gaps spread over 2.00 s around +1.00 s", printed)
 
+    def test_only_attempts_whose_proxy_check_ran_line_the_capture_up(self):
+        # Ten connects cancelled before their check (no SYN), then a reconnection's attempt (a SYN, no "connect").
+        logcat = [f"11-01 01:59:{40 + n}.000   200   210 I ProxyFlowVpn: connect p9\n" for n in range(10)]
+        logcat += [f"11-01 01:59:{40 + n}.500   200   210 I ProxyFlowVpn: disconnect\n" for n in range(10)]
+        logcat.sort()
+        logcat += self.VPN + [
+            "11-01 02:00:10.000   200   210 I ProxyFlowVpn: reconnecting: proxy_failures PROXY_UNREACHABLE\n",
+            "11-01 02:00:12.000   200   210 I ProxyFlowVpn: reconnect attempt 1 of 8\n",
+            "11-01 02:00:12.400   200   210 I ProxyFlowVpn: check p1: ok\n",
+            "11-01 02:00:12.600   200   210 I ProxyFlowVpn: reconnected p1 after 1 attempts\n",
+        ]
+        retry_syn = (at("02:00:12"), ipv4(PHONE4, GATEWAY, 6, tcp(40101, 1080, syn=True)))
+        status, printed = self.run_evidence(uplink_dns=[self.PROXY_LOOKUP], logcat_extra=logcat, capture_extra=[self.PROXY_SYN, retry_syn])
+        self.assertEqual(0, status, printed)
+        self.assertIn("2 of 2 connection attempts matched", printed)
+
     def test_without_the_emulators_capture_the_dns_log_is_lined_up_by_the_proxy_lookups(self):
         status, printed = self.run_evidence(
             uplink_dns=[self.PROXY_LOOKUP, "02:00:10 www.youtube.com"], logcat_extra=self.VPN, capture_extra=[self.PROXY_SYN], host_capture=False,
@@ -725,17 +741,26 @@ class M7EvidenceTest(unittest.TestCase):
     E2E = "11-03 10:00:00.000  1234  1250 I ProxyFlowE2E: "
     VPN = "11-03 10:00:00.000  1234  1251 I ProxyFlowVpn: "
 
-    def test_counters_within_the_tolerance_pass_and_outside_it_fail(self):
-        line = self.E2E + "traffic SOCKS5 up expected=1048596 counted=1050000 down expected=4194316 counted=4194316"
-        found = m7_evidence.transfers([line, "unrelated"])
-        self.assertEqual([("SOCKS5", 1048596, 1050000, 4194316, 4194316)], found)
-        facts, problems = m7_evidence.check_transfers(found)
+    def test_each_transfers_connection_must_count_exactly_and_the_session_at_least_as_much(self):
+        logcat = [
+            self.E2E + "traffic SOCKS5 up flow up=1048587/1048587 down=13/13",
+            self.E2E + "traffic SOCKS5 down flow up=13/13 down=4194304/4194304",
+            self.E2E + "traffic SOCKS5 session up=1048700/1048600 down=6300000/4194317",
+            "unrelated",
+        ]
+        flows, sessions = m7_evidence.flows(logcat), m7_evidence.sessions(logcat)
+        self.assertEqual(2, len(flows))
+        self.assertEqual([("SOCKS5", 1048700, 1048600, 6300000, 4194317)], sessions)
+        facts, problems = m7_evidence.check_transfers(flows, sessions)
         self.assertEqual([], problems)
-        self.assertIn("up 1050000 counted for 1048596 sent (+1404)", facts[0])
-        low = m7_evidence.check_transfers([("HTTP", 1000, 999, 1000, 1000)])[1]
-        self.assertEqual(1, len(low), "fewer bytes than the transfer carried must fail")
-        high = m7_evidence.check_transfers([("HTTP", 1000, 1000, 1000, m7_evidence.allowed(1000) + 1)])[1]
-        self.assertEqual(1, len(high), "more than 2 % + 256 KiB over must fail")
+        self.assertIn("2 of 2 transfers' connections counted exactly what they carried, both ways", facts[0])
+        self.assertIn("(+2105683)", facts[1])
+        off_by_one = m7_evidence.flows([self.E2E + "traffic HTTP up flow up=1048588/1048587 down=13/13"])
+        self.assertEqual(1, len(m7_evidence.check_transfers(off_by_one, [])[1]), "a byte too many on the connection must fail")
+        never_seen = m7_evidence.flows([self.E2E + "traffic HTTP down flow up=null/13 down=null/4194304"])
+        self.assertEqual(1, len(m7_evidence.check_transfers(never_seen, [])[1]), "a connection the engine never listed must fail")
+        short = m7_evidence.check_transfers([], [("HTTP", 1000, 1001, 5000, 5000)])[1]
+        self.assertEqual(1, len(short), "a session counting less than the transfers carried must fail")
 
     def test_the_bulk_server_must_get_everything_through_a_proxy(self):
         bulk = [
@@ -759,6 +784,8 @@ class M7EvidenceTest(unittest.TestCase):
         self.assertEqual([], problems)
         _, problems = m7_evidence.check_hold([self.E2E + "network change: held connection ENDED 59000 timeout"], requests)
         self.assertEqual(1, len(problems))
+        _, problems = m7_evidence.check_hold([self.E2E + "network change: held connection ENDED 400 closed"], requests)
+        self.assertEqual(1, len(problems), "closed is not the engine's reset")
         self.assertEqual(1, len(m7_evidence.check_hold([], requests)[1]), "a test that did not run fails")
 
     def test_reconnections_stay_within_their_limit_and_end(self):
@@ -777,6 +804,36 @@ class M7EvidenceTest(unittest.TestCase):
         _, problems = m7_evidence.reconnections(log + [self.VPN + "reconnecting: network_changed", self.VPN + "reconnect attempt 4 of 3"])
         self.assertEqual(2, len(problems), problems)
         self.assertEqual(1, len(m7_evidence.reconnections([self.VPN + "connected p1"])[1]), "no reconnection at all fails")
+
+    def test_the_whole_check_runs_on_a_run_s_files(self):
+        with tempfile.TemporaryDirectory() as pf, tempfile.TemporaryDirectory() as out:
+            with open(os.path.join(pf, "log-baseline.properties"), "w") as f:
+                f.write("bulk.log=0\nsquid-access.log=0\ndanted.log=0\n")
+            with open(os.path.join(pf, "bulk.log"), "w") as f:
+                f.write("1.0 127.0.0.1:1 up 1048576 got=1048576\n2.0 127.0.0.1:2 down 4194304 sent=4194304\n")
+                f.write("3.0 127.0.0.1:3 hold 60 ended after 0.4 s (reset)\n")
+            with open(os.path.join(pf, "danted.log"), "w") as f:
+                f.writelines(f"x pass(1): tcp/connect [: 10.0.2.2.4000{n} 10.99.0.1.{m7_evidence.BULK_PORT}\n" for n in range(3))
+            open(os.path.join(pf, "squid-access.log"), "w").close()
+            with open(os.path.join(out, "logcat.txt"), "w") as f:
+                f.writelines(line + "\n" for line in (
+                    self.E2E + "traffic SOCKS5 up flow up=1048587/1048587 down=13/13",
+                    self.E2E + "traffic SOCKS5 down flow up=13/13 down=4194304/4194304",
+                    self.E2E + "traffic SOCKS5 session up=1048600/1048600 down=4194317/4194317",
+                    self.E2E + "network change: held connection ENDED 412 reset",
+                    self.E2E + "log checked 6 entries of a refused sign-in",
+                    self.VPN + "network: wifi (first report)",
+                    self.VPN + "reconnecting: proxy_failures PROXY_UNREACHABLE",
+                    self.VPN + "reconnect attempt 1 of 8",
+                    self.VPN + "reconnected p1 after 1 attempts",
+                ))
+            with contextlib.redirect_stdout(io.StringIO()) as printed:
+                status = m7_evidence.main(["m7_evidence.py", "--api", "34", "--pf", pf, "--out", out])
+            self.assertEqual(0, status, printed.getvalue())
+            with open(os.path.join(out, "m7-evidence.txt")) as f:
+                written = f.read()
+            self.assertIn("the session heard of the phone's network 1 times: wifi (first report)", written)
+            self.assertNotIn("PROBLEM", written)
 
 
 if __name__ == "__main__":

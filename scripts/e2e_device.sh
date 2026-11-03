@@ -67,7 +67,9 @@ wifi_down() {
     case "$out" in *inet*) return 1 ;; esac
     return 0
 }
-# One uplink for the whole run, and the other one off: the app follows no network change until M7.
+# One uplink for the whole run, and the other one off. Since M7 the app follows network changes: losing the
+# uplink makes it wait Offline, and a move to another network resets every connection — in the middle of a test,
+# either fails it. The session's own reports of the network ("network: ...") are in the M7 evidence.
 # On API 35 mobile data sometimes comes up late or never, and Wi-Fi then switches itself back on
 # (runs 41219399550, 41233261642, 41234640020: routes lost in the middle of the tests). So mobile
 # data is waited for first; once it is up, Wi-Fi is switched off (its automatic re-enabling and

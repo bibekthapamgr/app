@@ -176,7 +176,7 @@ jobs:
 
       - name: Unit, ViewModel and Robolectric UI tests
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
-        run: ./gradlew testDebugUnitTest :core:model:test --continue 2>&1 | tee "$RUNNER_TEMP/gradle-3-test.log"
+        run: ./gradlew testDebugUnitTest :core:model:test :lint-rules:test --continue 2>&1 | tee "$RUNNER_TEMP/gradle-3-test.log"
 
       # The tests above compiled core/data, which exports the Room schema to core/data/schemas.
       # A schema that changed without its file (and a migration, ADR-0009) being committed fails

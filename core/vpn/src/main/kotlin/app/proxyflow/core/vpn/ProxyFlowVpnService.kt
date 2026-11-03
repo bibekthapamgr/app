@@ -71,7 +71,7 @@ class ProxyFlowVpnService :
         lastStartId = startId
         runtime.log.add("service start $startId ${intent?.action ?: "(no action)"}")
         val session = runtime.session
-        session.attach(this, alwaysOn = intent?.action == SERVICE_INTERFACE)
+        session.attach(this, alwaysOn = intent?.action == SERVICE_INTERFACE, startId = startId)
         when (intent?.action) {
             ACTION_DISCONNECT -> session.disconnect()
             ACTION_RESTART -> session.restart()
@@ -191,7 +191,7 @@ class ProxyFlowVpnService :
 
     override fun clearProblem() = notifications.clearProblem()
 
-    override fun stop() {
+    override fun stop(): Int {
         val startId = lastStartId
         val generation = synchronized(statusLock) {
             foreground = false
@@ -208,6 +208,7 @@ class ProxyFlowVpnService :
             val stopped = stopSelfResult(startId)
             runtime.log.add("service stop $startId: ${if (stopped) "stopping" else "a newer start keeps it"}")
         }
+        return startId
     }
 
     /** The interface's descriptor, closed by the session once the engine has stopped. */

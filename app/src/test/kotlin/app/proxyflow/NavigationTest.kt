@@ -51,7 +51,7 @@ class NavigationTest {
         compose.tab("Profiles").assertIsSelected()
 
         compose.tab("Logs").performClick()
-        compose.onNodeWithText("No events yet").assertIsDisplayed()
+        compose.waitForText("No events yet").assertIsDisplayed()
 
         compose.tab("Settings").performClick()
         compose.tab("Settings").assertIsSelected()

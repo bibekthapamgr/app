@@ -8,9 +8,10 @@ import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
 import app.proxyflow.core.model.LogSanitizer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import org.json.JSONObject
 
@@ -20,15 +21,23 @@ import org.json.JSONObject
  * through [LogSanitizer] once more.
  */
 interface LogRepository {
-    /** Every entry kept, newest first. */
+    /**
+     * Every entry kept, newest first — only those within the retention when read, so an entry past it
+     * never shows even before the next purge, nor one dated later than [FUTURE_MARGIN_MILLIS] from now
+     * (the phone's clock was set ahead, then back). Read and checked off the main thread.
+     */
     val entries: Flow<List<LogEntry>>
 
+    /** Keeps [entries]; one older than the last [clear] (a batch already on its way) is dropped, so cleared events never come back. */
     suspend fun append(entries: List<LogEntry>)
 
     /** Removes every entry. */
     suspend fun clear()
 
-    /** Drops what the bounds no longer allow, without writing (at start, and when the Logs screen opens). */
+    /**
+     * Drops what the bounds no longer allow, and entries dated beyond [FUTURE_MARGIN_MILLIS], without
+     * writing: at start, every hour, and each time the Logs screen is shown.
+     */
     suspend fun purge()
 
     companion object {
@@ -37,8 +46,15 @@ interface LogRepository {
 
         /** About a week of busy use at a few hundred entries a day, well within a megabyte or two. */
         const val MAX_ENTRIES = 5_000
+
+        /** How far ahead of the clock an entry may be dated and still be kept (the clock was corrected meanwhile). */
+        const val FUTURE_MARGIN_MILLIS = 60L * 60 * 1_000
     }
 }
+
+/** Whether an entry dated [timeMillis] is within the log's retention at [now]. */
+internal fun kept(timeMillis: Long, now: Long, retentionMillis: Long): Boolean =
+    timeMillis >= now - retentionMillis && timeMillis <= now + LogRepository.FUTURE_MARGIN_MILLIS
 
 /** An entry as it is kept: sanitized details and code, whatever the writer passed. */
 internal fun LogEntry.sanitized(): LogEntry = copy(code = LogSanitizer.code(code), details = LogSanitizer.details(details))
@@ -51,18 +67,24 @@ class InMemoryLogRepository(
 ) : LogRepository {
     private val list = MutableStateFlow<List<LogEntry>>(emptyList())
     private var nextId = 1L
-    override val entries: Flow<List<LogEntry>> = list.asStateFlow()
+    private var clearedAtMillis = Long.MIN_VALUE
+    override val entries: Flow<List<LogEntry>> = list.map { all ->
+        val now = clock()
+        all.filter { kept(it.timeMillis, now, retentionMillis) }
+    }
 
     override suspend fun append(entries: List<LogEntry>) {
-        if (entries.isEmpty()) return
         synchronized(this) {
-            val added = entries.map { it.sanitized().copy(id = nextId++) }
-            list.value = bounded(added + list.value)
+            val added = entries.filter { it.timeMillis >= clearedAtMillis }.map { it.sanitized().copy(id = nextId++) }
+            if (added.isNotEmpty()) list.value = bounded(added + list.value)
         }
     }
 
     override suspend fun clear() {
-        synchronized(this) { list.value = emptyList() }
+        synchronized(this) {
+            clearedAtMillis = clock()
+            list.value = emptyList()
+        }
     }
 
     override suspend fun purge() {
@@ -70,8 +92,8 @@ class InMemoryLogRepository(
     }
 
     private fun bounded(all: List<LogEntry>): List<LogEntry> {
-        val cutoff = clock() - retentionMillis
-        return all.filter { it.timeMillis >= cutoff }
+        val now = clock()
+        return all.filter { kept(it.timeMillis, now, retentionMillis) }
             .sortedWith(compareByDescending<LogEntry> { it.timeMillis }.thenByDescending { it.id })
             .take(maxEntries)
     }
@@ -79,30 +101,47 @@ class InMemoryLogRepository(
 
 /** The log in its own Room database ([LogDatabase]). */
 class RoomLogRepository(
-    private val dao: LogEventDao,
+    private val database: LogDatabase,
     private val clock: () -> Long = System::currentTimeMillis,
     private val retentionMillis: Long = LogRepository.RETENTION_MILLIS,
     private val maxEntries: Int = LogRepository.MAX_ENTRIES,
 ) : LogRepository {
-    override val entries: Flow<List<LogEntry>> = dao.observeLatest(maxEntries).map { rows -> rows.mapNotNull { it.toEntry() } }
+    private val dao: LogEventDao = database.logEventDao()
+
+    @Volatile private var clearedAtMillis = Long.MIN_VALUE
+
+    // Room hands rows to the collector's thread; parsing and sanitizing thousands of them stays off the main thread.
+    override val entries: Flow<List<LogEntry>> = dao.observeLatest(maxEntries)
+        .map { rows ->
+            val now = clock()
+            rows.filter { kept(it.timeMillis, now, retentionMillis) }.mapNotNull { it.toEntry() }
+        }
+        .flowOn(Dispatchers.Default)
 
     override suspend fun append(entries: List<LogEntry>) {
-        if (entries.isEmpty()) return
-        dao.insertBounded(entries.map { it.sanitized().toRow() }, clock() - retentionMillis, maxEntries)
+        val rows = entries.filter { it.timeMillis >= clearedAtMillis }.map { it.sanitized().toRow() }
+        if (rows.isEmpty()) return
+        val now = clock()
+        dao.insertBounded(rows, now - retentionMillis, now + LogRepository.FUTURE_MARGIN_MILLIS, maxEntries)
     }
 
     override suspend fun clear() {
+        clearedAtMillis = clock()
         dao.deleteAll()
     }
 
     override suspend fun purge() {
-        dao.purge(clock() - retentionMillis, maxEntries)
+        val now = clock()
+        dao.purge(now - retentionMillis, now + LogRepository.FUTURE_MARGIN_MILLIS, maxEntries)
     }
+
+    /** What Clear relies on, as this database's own connection has it (device tests): `journal_mode` and `secure_delete`. */
+    fun storageSettings(): Map<String, String> = database.storageSettings()
 }
 
 /** Builds the log's storage, so no other module needs Room on its classpath. */
 object LogStorage {
-    fun repository(context: Context): LogRepository = RoomLogRepository(LogDatabase.create(context).logEventDao())
+    fun repository(context: Context): LogRepository = RoomLogRepository(LogDatabase.create(context))
 }
 
 internal fun LogEntry.toRow() = LogEventEntity(

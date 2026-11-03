@@ -220,8 +220,8 @@ def main(argv: list[str]) -> int:
         with connect(1080 if name == "SOCKS5" else 3128) as sock:
             opened(sock)
             sock.sendall(b"DOWN 300000\n")
-            received = 0
-            while chunk := sock.recv(65536):
+            received = 0  # the server keeps the connection open until the client closes it
+            while received < 300_000 and (chunk := sock.recv(min(65536, 300_000 - received))):
                 received += len(chunk)
             check(f"{name}: the bulk server sent 300000 bytes", received == 300_000, str(received))
 

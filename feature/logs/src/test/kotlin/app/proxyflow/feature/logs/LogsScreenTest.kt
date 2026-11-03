@@ -1,6 +1,9 @@
 package app.proxyflow.feature.logs
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -19,6 +22,7 @@ import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
 import app.proxyflow.core.model.LogFilter
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -145,7 +149,11 @@ class LogsScreenTest {
         assertEquals("ProxyFlow diagnostic log", lines[0])
         assertTrue(lines[1], lines[1].startsWith("App 0.7.0 (7) · Android "))
         assertEquals("Exported 2026-11-03 10:16:30.250 +00:00", lines[2])
-        assertEquals("Events: 2 of 5 · filter: Errors · search: auth", lines[3])
+        assertEquals(
+            "the search's text is left out: it may be a profile's name",
+            "Events: 2 of 5 · filter: Errors · search applied",
+            lines[3],
+        )
         assertEquals("Never includes passwords, server or site names, addresses or page content.", lines[4])
         val entries = lines.drop(6).filter { it.isNotBlank() }
         assertEquals(2, entries.size)
@@ -157,8 +165,44 @@ class LogsScreenTest {
         for (secret in listOf("alice", "hunter2", "203.0.113.7", "proxy.example.com", "Tokyo")) assertFalse(secret, text.contains(secret))
     }
 
+    /** A site's code says one thing for a single connection and another for the proxy check before connecting. */
+    @Test
+    fun whatToDoDependsOnWhereTheCodeCameFrom() {
+        val check = failed.copy(code = "TARGET_UNREACHABLE", details = emptyMap())
+        val sites = check.copy(
+            id = 9,
+            event = LogEvent.ConnectionProblems,
+            level = LogEntry.Level.Warning,
+            stage = ConnectionStage.Connected,
+        )
+        val permission = check.copy(id = 10, code = "VPN_PERMISSION_DENIED", stage = ConnectionStage.VpnPermission)
+        val hints = mapOf(
+            check to "couldn't open a test connection to connectivitycheck.gstatic.com",
+            sites to "Other connections are unaffected.",
+            permission to "allow Android's VPN request",
+        )
+        var shown by mutableStateOf(check)
+        compose.setContent {
+            ProxyFlowTheme { LogsScreen(LogsUiState(loading = false, entries = listOf(shown), total = 1, selected = shown), zone = utc) }
+        }
+        for ((entry, hint) in hints) {
+            shown = entry
+            compose.onNodeWithText(hint, substring = true).performScrollTo().assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun anEntryOfAnotherDaySaysWhichDay() {
+        compose.setContent {
+            ProxyFlowTheme {
+                LogsScreen(LogsUiState(loading = false, entries = listOf(failed), total = 1), zone = utc, today = LocalDate.of(2026, 11, 4))
+            }
+        }
+        compose.onNodeWithText("11/3/26", substring = true).assertIsDisplayed()
+    }
+
     private fun show(state: LogsUiState) {
-        compose.setContent { ProxyFlowTheme { LogsScreen(state, actions = actions, zone = utc) } }
+        compose.setContent { ProxyFlowTheme { LogsScreen(state, actions = actions, zone = utc, today = LocalDate.of(2026, 11, 3)) } }
     }
 
     private companion object {

@@ -69,7 +69,7 @@ class VpnSessionTest {
         engine = engine,
         services = {
             serviceStarts.incrementAndGet()
-            if (serviceStartAllowed && serviceAttaches) session.attach(host, alwaysOn = false)
+            if (serviceStartAllowed && serviceAttaches) session.attach(host, alwaysOn = false, startId = host.started())
             serviceStartAllowed
         },
         state = state,
@@ -476,9 +476,36 @@ class VpnSessionTest {
         runBlocking { session.awaitIdle() }
         assertEquals(0, log.count("probe"))
 
-        session.attach(host, alwaysOn = false)
+        session.attach(host, alwaysOn = false, startId = host.started())
         awaitStatus(ConnectionStatus.Connected)
         assertEquals(1, serviceStarts.get())
+    }
+
+    /**
+     * Connecting and disconnecting quickly queues several starts of the service: one that reached it
+     * before the session let it go is over (the stop that followed ends the service), so the next
+     * connection waits for a newer start instead of beginning on a service that is going away.
+     */
+    @Test
+    fun aServiceStartFromBeforeItsStopIsNotUsedForTheNextConnection() {
+        val profile = save()
+        serviceAttaches = false
+        session.connect(profile.id)
+        session.attach(host, alwaysOn = false, startId = host.started())
+        awaitStatus(ConnectionStatus.Connected)
+        val queued = host.started() // reached the service; the session has not handled it yet
+
+        session.disconnect()
+        awaitStatus(ConnectionStatus.Disconnected)
+        session.connect(profile.id)
+        session.attach(host, alwaysOn = false, startId = queued)
+        runBlocking { session.awaitIdle() }
+
+        assertEquals("still waiting for the service", ConnectionStatus.Connecting, state.value.status)
+        assertEquals("no check on a service that is going away", 1, log.count("probe ${profile.id}"))
+        session.attach(host, alwaysOn = false, startId = host.started())
+        awaitStatus(ConnectionStatus.Connected)
+        assertEquals(2, log.count("probe ${profile.id}"))
     }
 
     @Test
@@ -517,14 +544,14 @@ class VpnSessionTest {
     @Test
     fun alwaysOnConnectsOnlyTheProfileTheUserChose() {
         save(name = "Fallback")
-        session.attach(host, alwaysOn = true)
+        session.attach(host, alwaysOn = true, startId = host.started())
         runBlocking { session.awaitIdle() }
         assertEquals("no explicit choice: the service stops", 1, log.count("host stop"))
         assertEquals(0, log.count("probe"))
 
         val chosen = save(name = "Chosen")
         runBlocking { profiles.repository.setActive(chosen.id) }
-        session.attach(host, alwaysOn = true)
+        session.attach(host, alwaysOn = true, startId = host.started())
 
         assertEquals(chosen.id, awaitStatus(ConnectionStatus.Connected).profileId)
     }

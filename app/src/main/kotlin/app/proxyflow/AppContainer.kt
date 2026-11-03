@@ -33,6 +33,7 @@ import javax.net.ssl.X509TrustManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -80,8 +81,14 @@ class AppContainer(
     init {
         // Keys left behind by a delete that was interrupted (ADR-0006). A failure here only delays that clean-up.
         appScope.launch { runCatching { profiles.deleteOrphanedKeys() } }
-        // Entries past the log's bounds go at start, not only at the next write (ADR-0012).
-        appScope.launch(Dispatchers.IO) { runCatching { logRepository.purge() } }
+        // Entries past the log's bounds go at start and every hour while the process runs, not only at the next
+        // write (ADR-0012; docs/m1/03 J10: retention applied at least daily).
+        appScope.launch(Dispatchers.IO) {
+            while (true) {
+                runCatching { logRepository.purge() }
+                delay(LOG_PURGE_INTERVAL_MS)
+            }
+        }
     }
 
     /** Creates every screen's ViewModel; navigation passes it to each destination. */
@@ -95,5 +102,6 @@ class AppContainer(
 
     private companion object {
         const val SETTINGS_FILE = "settings"
+        const val LOG_PURGE_INTERVAL_MS = 60 * 60 * 1_000L
     }
 }

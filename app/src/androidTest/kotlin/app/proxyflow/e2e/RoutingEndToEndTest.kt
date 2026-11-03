@@ -219,7 +219,7 @@ class RoutingEndToEndTest {
         assertEquals("$reconnecting", "PROXY_UNREACHABLE", (reconnecting.reconnect?.lastError ?: reconnecting.error)?.code)
 
         gate.forward(env.socksPort)
-        if (app.controller.state.value.status == ConnectionStatus.Blocked) app.controller.restart()
+        recoverNow()
         app.awaitStatus(ConnectionStatus.Connected)
         assertSent("gate-back", env.destinationName, env.destinationPort)
     }
@@ -232,14 +232,22 @@ class RoutingEndToEndTest {
 
         gate.silent()
         assertRefused("gate-silent", env.destinationName, env.destinationPort, timeoutMillis = HANGING_PROXY_WAIT_MS)
-        // Read after the first timeout: three failures in a row (other apps' count too) make ProxyFlow reconnect, which
-        // stops the engine and its counters (ADR-0012).
-        eventually("the engine counted a proxy timeout") { ProxyEngine().stats().proxyTimeouts >= 1 }
-        app.awaitDiagnostics("a proxy timeout") { it.proxyTimeouts >= 1 }
+        // Counted by the engine — unless other apps' connections hung there too and made it three in a row: then
+        // ProxyFlow reconnects, which stops the engine and its counters, and names the timeout as its reason (ADR-0012).
+        eventually("a proxy timeout counted, or reconnecting because of it", diagnose = { Diagnostics.report(app) }) {
+            val state = app.controller.state.value
+            when (state.status) {
+                ConnectionStatus.Connected -> ProxyEngine().stats().proxyTimeouts >= 1
+                else -> (state.reconnect?.lastError ?: state.error)?.code == "HANDSHAKE_TIMEOUT"
+            }
+        }
+        if (app.controller.state.value.status == ConnectionStatus.Connected) {
+            app.awaitDiagnostics("a proxy timeout") { it.proxyTimeouts >= 1 }
+        }
         assertRefused("gate-silent-address", lab.addressDestination, lab.addressPort, timeoutMillis = HANGING_PROXY_WAIT_MS)
 
         gate.forward(env.socksPort)
-        if (app.controller.state.value.status == ConnectionStatus.Blocked) app.controller.restart()
+        recoverNow()
         app.awaitStatus(ConnectionStatus.Connected, timeoutMillis = RECOVERY_WAIT_MS)
         assertSent("gate-back", env.destinationName, env.destinationPort)
     }
@@ -270,6 +278,19 @@ class RoutingEndToEndTest {
     private fun http(): ProxyProfile = app.save("HTTP", ProxyProtocol.HTTP, env.proxyHost, env.httpPort, env.httpUser, env.httpPassword)
 
     /** SOCKS5 through the gate, which relays to Dante until a test breaks it. */
+
+    /**
+     * With the proxy back: a reconnection waiting for its next attempt runs it now (Retry now), and a blocked
+     * connection is restarted (Try again), so the test never waits out the policy's longer waits.
+     */
+    private fun recoverNow() {
+        when (app.controller.state.value.status) {
+            ConnectionStatus.Blocked -> app.controller.restart()
+            ConnectionStatus.Reconnecting -> app.controller.retryNow()
+            else -> Unit
+        }
+    }
+
     private fun gated(): ProxyProfile =
         app.save("Gate", ProxyProtocol.SOCKS5, env.proxyHost, lab.gatePort, env.socksUser, env.socksPassword)
 

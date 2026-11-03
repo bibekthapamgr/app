@@ -117,6 +117,10 @@ class VpnSession(
 
     // Touched only by the event loop, except where @Volatile says otherwise.
     private var host: VpnHost? = null
+
+    /** The service the session last let go of, and its last start then: a start of it up to that one is stale. */
+    private var released: VpnHost? = null
+    private var releasedStart = 0
     private var pending: ProxyProfile? = null
     private var serviceWait: Job? = null
     private var serviceToken = 0L
@@ -134,6 +138,9 @@ class VpnSession(
 
     /** Set while the session reconnects on its own. */
     private var recovery: Recovery? = null
+
+    /** Since when the connection has carried no traffic (reconnecting, offline, blocked); null while connected. */
+    private var heldSinceMillis: Long? = null
     private var retryWait: Job? = null
     private var retryToken = 0L
 
@@ -173,8 +180,12 @@ class VpnSession(
     /** While reconnecting on its own, runs the next attempt now ("Retry now", board B5). */
     fun retryNow() = send(Event.RetryNow)
 
-    /** The service started (or Android started it for Always-on VPN) and can establish interfaces. */
-    fun attach(host: VpnHost, alwaysOn: Boolean) = send(Event.Attached(host, alwaysOn))
+    /**
+     * The service started (or Android started it for Always-on VPN) and can establish interfaces;
+     * [startId] is that start's (`onStartCommand`), so a start that reached the service before the
+     * session let it go is told apart from a newer one.
+     */
+    fun attach(host: VpnHost, alwaysOn: Boolean, startId: Int) = send(Event.Attached(host, alwaysOn, startId))
 
     /** The service was destroyed. */
     fun detached(host: VpnHost) = send(Event.Detached(host))
@@ -228,7 +239,7 @@ class VpnSession(
                 Event.Disconnect -> onDisconnect()
                 Event.ClearError -> if (state.value.status == ConnectionStatus.Disconnected) publish(state.value.copy(error = null))
                 Event.RetryNow -> onRetryNow()
-                is Event.Attached -> onAttached(event.host, event.alwaysOn)
+                is Event.Attached -> onAttached(event.host, event.alwaysOn, event.startId)
                 is Event.Detached -> onDetached(event.host)
                 is Event.Revoked -> onRevoked()
                 is Event.ProfileDeleted -> onProfileDeleted(event.profileId)
@@ -349,7 +360,14 @@ class VpnSession(
         end(ConnectionError(ConnectionError.INTERNAL, "the VPN service did not start"))
     }
 
-    private suspend fun onAttached(attached: VpnHost, alwaysOn: Boolean) {
+    private suspend fun onAttached(attached: VpnHost, alwaysOn: Boolean, startId: Int) {
+        if (attached === released && startId <= releasedStart) {
+            // This start reached the service before the session let it go, and the stop that followed ends the service
+            // unless a newer start reached it — which attaches it again. A connection must not begin on a service that
+            // is going away (connecting and disconnecting quickly queues several starts).
+            log("service start $startId came before its stop: not used")
+            return
+        }
         host = attached
         serviceWait?.cancel()
         serviceWait = null
@@ -369,6 +387,7 @@ class VpnSession(
     }
 
     private fun onDetached(detached: VpnHost) {
+        if (released === detached) released = null
         if (host !== detached) return
         host = null
         // Android keeps a VPN service bound while its interface exists, so this happens with a
@@ -386,13 +405,17 @@ class VpnSession(
         // taking over arrives as a revocation instead; for an app the user allowed before, prepare() takes it back.)
         if (!current.hasConsent()) return end(ConnectionError(ConnectionError.VPN_PERMISSION_DENIED))
         current.clearProblem()
-        publish(state.value.copy(step = ConnectStep.ProxyHandshake))
-        if (recovery == null) stageReached()
+        // Running in the foreground is part of setting up the VPN: refused, the attempt fails at this stage, before any
+        // proxy is contacted.
         if (!current.showStatus(state.value)) {
             return failAttempt(ConnectionError(ConnectionError.INTERNAL, "Android did not allow the foreground service"))
         }
+        publish(state.value.copy(step = ConnectStep.ProxyHandshake))
+        if (recovery == null) stageReached()
+        current.showStatus(state.value)
         val id = ++attempt
         val guard = current.socketGuard()
+        preflight?.cancel() // never two checks at once; a replaced one's answer is ignored (its attempt is over)
         preflight = scope.launch(blocking + failuresOf(id)) {
             val check = coroutineContext.job
             // Cancelled (Disconnect, another profile): the check's sockets are shut down, so the engine returns at once.
@@ -571,10 +594,14 @@ class VpnSession(
         connectedOnce = true
         val now = clock()
         val profileId = state.value.profileId
-        val totals =
-            sessionTotals?.takeIf { it.profileId == profileId } ?: SessionTotals(profileId, sinceMillis = now).also { sessionTotals = it }
-        val recovered = recovery
+        val existing = sessionTotals?.takeIf { it.profileId == profileId }
+        val totals = existing ?: SessionTotals(profileId, sinceMillis = now).also { sessionTotals = it }
+        // A reconnection only when this profile's session was connected before: a profile connected for the first time
+        // (a switch that failed and was retried on its own, say) starts its session here.
+        val recovered = recovery?.takeIf { existing != null }
+        val outageStarted = heldSinceMillis ?: recovered?.startedMillis
         recovery = null
+        heldSinceMillis = null
         if (recovered != null) {
             log("reconnected $profileId after ${recovered.attempt} attempts")
             sessionTotals = totals.copy(reconnects = totals.reconnects + 1)
@@ -597,7 +624,7 @@ class VpnSession(
                 details = mapOf(
                     LogDetail.REASON to recovered.reason.key,
                     LogDetail.ATTEMPT to recovered.attempt.toString(),
-                    LogDetail.OUTAGE_MS to (now - recovered.startedMillis).toString(),
+                    LogDetail.OUTAGE_MS to (now - (outageStarted ?: recovered.startedMillis)).toString(),
                 ),
             )
         } else {
@@ -641,6 +668,9 @@ class VpnSession(
         log("unexpected ${event.type} in a session job${if (event.attempt != attempt) " of an attempt that is over" else ""}")
         // A cancelled or replaced attempt's job failing late must not touch the connection that followed.
         if (event.attempt != attempt) return
+        // The job is over: nothing waits for its answer any more, so the next attempt (or Retry now) may run.
+        preflight = null
+        routing = null
         failAttempt(ConnectionError(ConnectionError.INTERNAL, "unexpected ${event.type} in a background job"))
     }
 
@@ -672,6 +702,7 @@ class VpnSession(
         if (state.value.profile == null || tun == null) return block(error ?: ConnectionError(ConnectionError.INTERNAL))
         cancelAttempt()
         stopEngine()
+        if (heldSinceMillis == null) heldSinceMillis = clock()
         val policy = retry()
         recovery = Recovery(reason, policy, startedMillis = clock(), attempt = 1, lastError = error)
         log("reconnecting: ${reason.key}${error?.let { " ${it.code}" } ?: ""}")
@@ -714,10 +745,12 @@ class VpnSession(
     private fun onRetryDue(token: Long) {
         val r = recovery ?: return
         if (token != retryToken) return
+        if (preflight != null || routing != null) return // an attempt runs already: never two at once
         retryWait = null
         val profile = state.value.profile ?: return block(ConnectionError(ConnectionError.INTERNAL, PROFILE_GONE))
         val current = host ?: return block(ConnectionError(ConnectionError.INTERNAL, "the VPN service stopped"))
         log("reconnect attempt ${r.attempt} of ${r.policy.maxAttempts}")
+        attemptStartedMillis = clock()
         publishRecovery(r, nextAttemptAtMillis = null)
         runPreflight(current, profile)
     }
@@ -726,7 +759,8 @@ class VpnSession(
         if (recovery == null || preflight != null || routing != null) return // nothing waiting, or an attempt is running
         retryWait?.cancel()
         retryWait = null
-        onRetryDue(retryToken)
+        // A new token: the wait's own RetryDue, should its timer have fired already, finds it changed and does nothing.
+        onRetryDue(++retryToken)
     }
 
     /** An attempt failed: the next one after its wait, or — with no attempt left, or an answer no retry changes — blocked. */
@@ -818,6 +852,7 @@ class VpnSession(
         cancelAttempt()
         recovery = null
         stopEngine()
+        if (heldSinceMillis == null) heldSinceMillis = clock()
         log("offline")
         publish(
             state.value.copy(
@@ -850,6 +885,7 @@ class VpnSession(
         cancelAttempt()
         recovery = null
         stopEngine()
+        if (heldSinceMillis == null) heldSinceMillis = clock()
         log("blocked: ${error.code}")
         publish(
             state.value.copy(status = ConnectionStatus.Blocked, step = null, connectedSinceMillis = null, error = error, reconnect = null),
@@ -877,6 +913,7 @@ class VpnSession(
         stopEngine()
         closeInterface()
         connectedOnce = false
+        heldSinceMillis = null
         if (before.status != ConnectionStatus.Disconnected) log("disconnected${error?.let { ": ${it.code}" } ?: ""}")
         publish(
             before.copy(status = ConnectionStatus.Disconnected, step = null, connectedSinceMillis = null, error = error, reconnect = null),
@@ -964,8 +1001,10 @@ class VpnSession(
     }
 
     private fun releaseHost() {
-        host?.stop()
+        val current = host ?: return
         host = null
+        releasedStart = current.stop()
+        released = current
     }
 
     private fun publish(next: ConnectionState) {
@@ -1059,7 +1098,7 @@ class VpnSession(
 
         data object RetryNow : Event
 
-        class Attached(val host: VpnHost, val alwaysOn: Boolean) : Event
+        class Attached(val host: VpnHost, val alwaysOn: Boolean, val startId: Int) : Event
 
         class Detached(val host: VpnHost) : Event
 

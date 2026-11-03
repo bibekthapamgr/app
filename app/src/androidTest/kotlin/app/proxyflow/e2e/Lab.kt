@@ -150,9 +150,12 @@ object FromShell {
 
     fun tls(host: String, port: Int, caPath: String, line: String): String = run("tls", host, port, caPath, line, 10_000)
 
-    /** Sends [bytes] to the bulk server ("SENT n REPLY GOT n") or has it send them ("RECEIVED n"). */
-    fun bulk(host: String, port: Int, up: Boolean, bytes: Long, timeoutMillis: Int = 30_000): String =
-        run("bulk", host, port, if (up) "up" else "down", bytes, timeoutMillis)
+    /**
+     * Sends [bytes] to the bulk server ("SENT n REPLY GOT n") or has it send them ("RECEIVED n"), then keeps the
+     * connection open for [lingerMillis], so the engine's own count for it can be read meanwhile.
+     */
+    fun bulk(host: String, port: Int, up: Boolean, bytes: Long, lingerMillis: Int = 0, timeoutMillis: Int = 30_000): String =
+        run("bulk", host, port, if (up) "up" else "down", bytes, timeoutMillis, lingerMillis)
 
     /** Holds one connection to the bulk server open for at most [seconds]: "ENDED <ms> closed|reset|data|timeout". */
     fun hold(host: String, port: Int, seconds: Int): String = run("hold", host, port, seconds)

@@ -5,6 +5,8 @@ targetSdk = "36"
 minSdk = "29"
 
 agp = "9.5.0"
+# Android Lint's libraries for the app's own checks: always AGP's version + 23.0.0.
+lint = "32.5.0"
 kotlin = "2.4.21"
 composeBom = "2025.10.00"
 activityCompose = "1.13.0"
@@ -68,6 +70,8 @@ turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine
 roborazzi = { group = "io.github.takahirom.roborazzi", name = "roborazzi", version.ref = "roborazzi" }
 roborazzi-compose = { group = "io.github.takahirom.roborazzi", name = "roborazzi-compose", version.ref = "roborazzi" }
 roborazzi-junit-rule = { group = "io.github.takahirom.roborazzi", name = "roborazzi-junit-rule", version.ref = "roborazzi" }
+lint-api = { group = "com.android.tools.lint", name = "lint-api", version.ref = "lint" }
+lint-tests = { group = "com.android.tools.lint", name = "lint-tests", version.ref = "lint" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

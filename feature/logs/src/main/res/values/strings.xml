@@ -26,13 +26,16 @@
     <string name="logs_clear_message">This removes every event kept on this phone. It can\'t be undone.</string>
     <string name="logs_clear_confirm">Clear</string>
     <string name="logs_cancel">Cancel</string>
+    <string name="logs_not_handed_over">Couldn\'t pass the log on. Filter it to fewer events, then try again.</string>
+    <string name="logs_show_details">Show details</string>
 
-    <!-- What Copy and Export hand over: these lines first, then one line per event with stable keys. -->
+    <!-- What Copy and Export hand over: these lines first, then one line per event with stable keys. A search is
+         only said to be applied: its text may be a profile's name. -->
     <string name="logs_export_title">ProxyFlow diagnostic log</string>
     <string name="logs_export_app">App %1$s · Android %2$s (API %3$d)</string>
     <string name="logs_export_when">Exported %1$s</string>
     <string name="logs_export_count">Events: %1$d of %2$d · filter: %3$s</string>
-    <string name="logs_export_count_search">Events: %1$d of %2$d · filter: %3$s · search: %4$s</string>
+    <string name="logs_export_count_search">Events: %1$d of %2$d · filter: %3$s · search applied</string>
     <string name="logs_export_privacy">Never includes passwords, server or site names, addresses or page content.</string>
 
     <!-- One line per event (F2) and the detail sheet's title (F3) -->
@@ -47,7 +50,7 @@
     <string name="logs_event_reconnect_proxy">Reconnecting: connections to the proxy kept failing</string>
     <string name="logs_event_reconnect_network_back">Reconnecting: the phone has a network again</string>
     <string name="logs_event_reconnect_network_changed">Reconnecting: the phone moved to another network</string>
-    <string name="logs_event_attempt_failed">Attempt %1$d of %2$d failed</string>
+    <string name="logs_event_attempt_failed">Attempt failed (%1$d of %2$d)</string>
     <plurals name="logs_event_reconnected">
         <item quantity="one">Reconnected after %d attempt</item>
         <item quantity="other">Reconnected after %d attempts</item>
@@ -63,8 +66,8 @@
     <string name="logs_event_revoked">Disconnected by Android</string>
     <string name="logs_event_session_summary">Session ended · %1$s · ↑ %2$s ↓ %3$s</string>
     <plurals name="logs_event_connection_problems">
-        <item quantity="one">%d connection to a site failed in a minute</item>
-        <item quantity="other">%d connections to sites failed in a minute</item>
+        <item quantity="one">%d connection failed in a minute</item>
+        <item quantity="other">%d connections failed in a minute</item>
     </plurals>
 
     <string name="logs_stage_starting">Starting</string>
@@ -103,8 +106,21 @@
     <string name="logs_hint_protocol">Check the protocol (HTTP or SOCKS5) and the port in the profile.</string>
     <string name="logs_hint_no_connect">This HTTP proxy doesn\'t allow tunnels (CONNECT). Check the port, or ask your provider for a proxy that allows them.</string>
     <string name="logs_hint_target">Your proxy couldn\'t reach some sites or refused them. Other connections are unaffected. If it goes on, check with your provider.</string>
+    <!-- The proxy check before connecting or reconnecting (docs/m1/04 §4, pre-flight texts): the proxy opened no test connection. -->
+    <string name="logs_hint_check_not_allowed">Your proxy refused to open a test connection. Providers answer this way when a plan has ended or your network\'s address isn\'t allowed. Check your account with your proxy provider.</string>
+    <string name="logs_hint_check_no_internet">Your proxy accepted the connection but couldn\'t open a test connection to connectivitycheck.gstatic.com. The proxy may have no internet access right now, or it blocks that address. Check with your proxy provider.</string>
+    <string name="logs_hint_check_proxy_error">Your proxy answered the test connection with an error. Check your account with your proxy provider.</string>
+    <string name="logs_hint_check_unsupported">Your proxy doesn\'t support the connections ProxyFlow needs: tunnels to a site by its name. Use another proxy, or ask your provider.</string>
+    <!-- One connection, while connected (the catalogue's log-only codes). -->
+    <string name="logs_hint_stale_address">An app used an address from before this connection; it tries again on its own. Nothing to do.</string>
+    <string name="logs_hint_connection_limit">ProxyFlow reached its connection limit, so new connections were refused until others closed. If it goes on, close apps you aren\'t using.</string>
+    <string name="logs_hint_app_gave_up">An app gave up before its connection was ready. Nothing to do unless it goes on.</string>
+    <string name="logs_hint_internal_connection">One connection hit an internal error and was closed. Other traffic is unaffected.</string>
     <string name="logs_hint_offline">ProxyFlow reconnects when your phone has a network again. Apps stay paused meanwhile.</string>
     <string name="logs_hint_engine">Restart the connection from Home. If it happens again, export this log for support.</string>
     <string name="logs_hint_credentials">Enter the password again in the profile.</string>
     <string name="logs_hint_revoked">Another VPN app was turned on, or ProxyFlow\'s VPN permission was removed. Reconnect from Home.</string>
+    <string name="logs_hint_internal">Connect again from Home. If it happens again, export this log for support.</string>
+    <string name="logs_hint_permission">Connect again from Home and allow Android\'s VPN request. If another VPN app is set to Always-on, turn that off first.</string>
+    <string name="logs_hint_profile_deleted">The profile this connection used was deleted, so its proxy isn\'t used any more. Stop the connection from Home, then connect with another profile.</string>
 </resources>

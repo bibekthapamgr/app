@@ -10,10 +10,10 @@ import org.junit.Test
 class FormatsTest {
     @Test
     fun bytesReadAsAndroidsSettingsShowThem() {
-        val shown = listOf(0L, 999, 1_000, 1_234, 99_949, 99_950, 999_949, 999_950, 34_500_000, 1_200_000_000, 5_000_000_000_000)
+        val shown = listOf(0L, 999, 1_000, 1_234, 99_949, 99_950, 999_499, 999_500, 999_949, 34_500_000, 999_600_000, 5_000_000_000_000)
             .map { Formats.bytes(it, Locale.US) }
         assertEquals(
-            listOf("0 B", "999 B", "1.0 kB", "1.2 kB", "99.9 kB", "100 kB", "1000 kB", "1.0 MB", "34.5 MB", "1.2 GB", "5.0 TB"),
+            listOf("0 B", "999 B", "1.0 kB", "1.2 kB", "99.9 kB", "100 kB", "999 kB", "1.0 MB", "1.0 MB", "34.5 MB", "1.0 GB", "5.0 TB"),
             shown,
         )
         assertEquals("1,2 kB", Formats.bytes(1_234, Locale.GERMANY))

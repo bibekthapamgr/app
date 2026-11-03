@@ -51,16 +51,17 @@ ProxyFlow carries **TCP** from apps to the user's HTTP CONNECT or SOCKS5 proxy. 
 
 | Situation (while connected) | Result | Verified on devices |
 |---|---|---|
-| The proxy stops accepting connections | New connections get a RST at once; names are still answered on the phone; traffic flows again as soon as the proxy is back; Home counts the failures | `whenTheProxyStopsAnsweringNothingGoesAroundIt` (the gate refuses, then forwards again): lines to a name, to an IPv4 and to an IPv6 address all fail, and none arrives anywhere |
-| The proxy accepts connections and never answers | Each new connection fails after the 10 s handshake timeout; counted as a proxy timeout | `aProxyThatHangsIsReportedAsATimeout` (to a name and to an address) |
-| The proxy's certificate changes to one the phone does not trust | Each new connection is refused (`TLS_UNTRUSTED`), nothing is sent unencrypted; Home counts the TLS failures and names the check; recovers when the valid certificate is back | `aCertificateThatChangesWhileConnectedIsRefusedForEachConnection` (to a name and to an address) |
+| The proxy stops accepting connections | New connections get a RST at once; names are still answered on the phone. Since M7, three failures in a row make ProxyFlow reconnect on its own with traffic held, and it is connected again as soon as the proxy is back (docs/m7/logs-stats-reconnect.md §4) | `whenTheProxyStopsAnsweringNothingGoesAroundIt` (the gate refuses, then forwards again): lines to a name, to an IPv4 and to an IPv6 address all fail, and none arrives anywhere; M7's `ReconnectEndToEndTest` |
+| The proxy accepts connections and never answers | Each new connection fails after the 10 s handshake timeout; counted as a proxy timeout. Since M7, three in a row make ProxyFlow reconnect | `aProxyThatHangsIsReportedAsATimeout`: a line to a name, then one to an address (which finds traffic held if other apps' timeouts already made ProxyFlow reconnect) |
+| A SOCKS5 proxy answers, but not a connection request in time (it is still trying to reach an unresponsive site; Dante waits for its own connect timeout) | That connection fails as the site's (`TARGET_UNREACHABLE`, since M7), never counted towards reconnecting. An HTTP proxy says nothing until it has reached the site, so its silence stays a proxy timeout (ADR-0012 §3) | Engine tests (`TestSOCKS5ConnectReplyNotInTimeIsTheSites`, `TestHandshakeTimeout`) |
+| The proxy's certificate changes to one the phone does not trust | The first new connection is refused (`TLS_UNTRUSTED`), nothing is sent unencrypted; since M7 that blocks traffic at once (B6c: no retry changes a certificate), and Try again connects once the valid certificate is back | `aCertificateThatChangesWhileConnectedBlocksAtOnce`: a line to a name is refused by the certificate check; one to an address then finds traffic held, and neither arrives anywhere |
 | The proxy cannot resolve or reach one name | That connection fails; others continue; counted as a DNS problem | `aNameTheProxyCannotResolveFailsWithoutAFallback` |
 | Switch, restart, engine failure | As in M5: traffic held, never let out | M5 (`VpnEndToEndTest`) |
 | Android revokes the VPN (another VPN app starts, or the user withdraws the permission) | The VPN is gone, so apps use the normal network (Android's behaviour); Home and an alert say so. Only Always-on VPN with "Block connections without VPN" keeps them blocked (guided in M8) | M5 `revocationClosesEverythingAndSaysSo` |
 
 At connect time (before the VPN interface exists) every failure — TLS, DNS, timeout, sign-in, refusal — ends the attempt with nothing changed on the phone and a code-specific explanation (board B6b, `docs/m1/04-ux-screens-and-error-states.md` §4).
 
-From M7 on, three proxy-level failures in a row while connected switch Home to an error state (the escalation rule); M6 counts them.
+Since M7 the escalation rule applies while connected (ADR-0012): a refused sign-in or certificate blocks at once; three other proxy-level failures in a row make ProxyFlow reconnect on its own, traffic held, with a bounded number of attempts; with no network it waits offline. While reconnecting or offline the engine is stopped, so nothing is answered on the phone, DNS included.
 
 ## 3. TLS to the proxy versus HTTPS to sites
 

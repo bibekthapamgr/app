@@ -56,7 +56,10 @@ interface TunnelEngine {
      */
     fun diagnostics(): RoutingDiagnostics? = null
 
-    /** The running engine's traffic counters (M7), or null when none runs. Safe from any thread at any time. */
+    /**
+     * The engine's traffic counters (M7) while it runs, and after it failed until it is stopped; null
+     * when none was started or it stopped. Safe from any thread at any time.
+     */
     fun traffic(): EngineTraffic? = null
 
     /** Proxy-level failures in a row as the running engine counts them (a success resets it); 0 when none runs. */
@@ -169,9 +172,10 @@ class ProxyTunnelEngine(
 
     override fun stop() = engine.stop()
 
-    override fun diagnostics(): RoutingDiagnostics? = runningStats()?.toDiagnostics()
+    override fun diagnostics(): RoutingDiagnostics? = statsWhile(EngineState.Running)?.toDiagnostics()
 
-    override fun traffic(): EngineTraffic? = runningStats()?.let {
+    // A failed engine (its packet loop ended) keeps its counters until it is stopped: they are the session's traffic too.
+    override fun traffic(): EngineTraffic? = statsWhile(EngineState.Running, EngineState.Failed)?.let {
         EngineTraffic(
             bytesUp = it.bytesUp,
             bytesDown = it.bytesDown,
@@ -188,7 +192,7 @@ class ProxyTunnelEngine(
 
     override fun resetFlows(): Int = runCatching { engine.resetFlows() }.getOrDefault(0)
 
-    private fun runningStats() = runCatching { engine.stats() }.getOrNull()?.takeIf { it.state == EngineState.Running }
+    private fun statsWhile(vararg states: EngineState) = runCatching { engine.stats() }.getOrNull()?.takeIf { it.state in states }
 
     internal companion object {
         /** tunnel.EvEngineFailed: the packet loop ended without Stop. */

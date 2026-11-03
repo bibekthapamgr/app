@@ -14,8 +14,8 @@ object Formats {
         if (bytes < 1_000) return "${bytes.coerceAtLeast(0)} B"
         var value = bytes / 1_000.0
         var unit = 1
-        // Rounded as shown: 999,950 bytes read "1.0 MB", never "1000 kB".
-        while (value >= 999.95 && unit < UNITS.lastIndex) {
+        // Rounded as shown (no decimal from 100 of a unit): 999,500 bytes read "1.0 MB", never "1000 kB".
+        while (value >= 999.5 && unit < UNITS.lastIndex) {
             value /= 1_000
             unit++
         }

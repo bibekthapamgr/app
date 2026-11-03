@@ -1,5 +1,8 @@
 package app.proxyflow.core.vpn
 
+import app.proxyflow.core.engine.EngineException
+import app.proxyflow.core.engine.EngineNative
+import app.proxyflow.core.engine.ProxyEngine
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.ConnectionState
@@ -13,6 +16,7 @@ import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.model.ReconnectReason
 import app.proxyflow.core.model.TrafficStats
 import app.proxyflow.core.testing.TestProfiles
+import app.proxyflow.engine.go.pfengine.Platform
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -43,6 +47,7 @@ import org.junit.Test
  */
 class ReconnectTest {
     private val log = CallLog()
+    private val sessionLog = CallLog()
     private val engine = FakeEngine(log)
     private val host = FakeHost(log)
     private val profiles = TestProfiles(dispatcher = Dispatchers.Unconfined)
@@ -74,7 +79,7 @@ class ReconnectTest {
         profiles = profiles.repository,
         engine = engine,
         services = {
-            session.attach(host, alwaysOn = false)
+            session.attach(host, alwaysOn = false, startId = host.started())
             true
         },
         state = state,
@@ -86,6 +91,7 @@ class ReconnectTest {
             routingTimeoutMillis = 2_000,
             routingPollMillis = 5,
         ),
+        log = sessionLog::add,
         retry = { policy },
         random = { 0.5 },
         diagnostics = sink,
@@ -331,6 +337,270 @@ class ReconnectTest {
         eventually("one wait at a time") { session.activeJobs() == 1 }
     }
 
+    /**
+     * Retry now tapped just as the wait ends — its timer fired while the session's thread was busy: the attempt runs
+     * once, never a second time beside itself.
+     */
+    @Test
+    fun retryNowJustAsTheWaitEndsRunsTheAttemptOnce() {
+        policy = RetryPolicy(delaysMillis = listOf(300, 300, 300), jitter = 0.0)
+        val profile = connect()
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        engine.gate = CountDownLatch(1) // attempts wait in their check, so a second one beside the first would show
+        host.onAbort = { engine.gate?.countDown() }
+        escalate()
+        await { it.reconnect?.nextAttemptAtMillis != null }
+
+        val release = CountDownLatch(1)
+        executor.execute { release.await() } // the session's thread is busy when the wait ends...
+        Thread.sleep(500)
+        session.retryNow() // ...and Retry now comes before the thread gets to the wait's end
+        release.countDown()
+        awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}", times = 2)
+        Thread.sleep(100)
+        runBlocking { session.awaitIdle() }
+
+        assertEquals("one attempt: ${sessionLog.all}", 1, sessionLog.count("reconnect attempt 1 of 3"))
+        assertEquals("the connect's check and the attempt's: ${log.all}", 2, log.count("probe ${profile.id}"))
+        session.disconnect()
+        await { it.status == ConnectionStatus.Disconnected }
+        assertEquals(1, host.aborts.get())
+        eventually("no check left running") { session.activeJobs() == 0 }
+    }
+
+    /** The time without a connection counts from when traffic was first held, through Offline and every attempt after. */
+    @Test
+    fun theOutageCountsFromWhenTrafficWasFirstHeld() {
+        connect()
+        session.underlyingNetwork(WIFI)
+        now.set(NOW + 1_000)
+        session.underlyingNetwork(null)
+        await { it.status == ConnectionStatus.Offline }
+        now.set(NOW + 5_000)
+        session.underlyingNetwork(MOBILE)
+        await { it.status == ConnectionStatus.Connected }
+
+        val reconnected = entries.single { it.event == LogEvent.Reconnected }
+        assertEquals("4000", reconnected.details[LogDetail.OUTAGE_MS])
+        assertEquals(ReconnectReason.NetworkBack.key, reconnected.details[LogDetail.REASON])
+    }
+
+    /**
+     * A switch to another profile that failed, then was tried again on its own after a network change, connects that
+     * profile for the first time: logged as a connection with its set-up time, its session starting then.
+     */
+    @Test
+    fun aProfileFirstConnectedByARetryIsLoggedAsConnectedNotReconnected() {
+        connect()
+        session.underlyingNetwork(WIFI)
+        val other = save()
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        session.connect(other.id)
+        assertEquals("PROXY_UNREACHABLE", await { it.status == ConnectionStatus.Blocked && it.profileId == other.id }.error?.code)
+
+        engine.answer = PreflightAnswer(ok = true)
+        now.set(NOW + 9_000)
+        session.underlyingNetwork(MOBILE)
+        val connected = await { it.status == ConnectionStatus.Connected }
+
+        assertEquals(other.id, connected.profileId)
+        assertEquals("its session starts now", NOW + 9_000, connected.connectedSinceMillis)
+        val last = entries.last { it.event == LogEvent.Connected || it.event == LogEvent.Reconnected }
+        assertEquals(LogEvent.Connected, last.event)
+        assertEquals(other.id, last.profileId)
+        assertEquals("0", last.details[LogDetail.SETUP_MS])
+        assertEquals(0, entries.count { it.event == LogEvent.Reconnected })
+    }
+
+    /** The network goes away while an attempt runs: the attempt is cancelled, traffic waits Offline, and no attempt runs until it is back. */
+    @Test
+    fun losingTheNetworkWhileAnAttemptRunsCancelsItAndWaitsOffline() {
+        val profile = connect()
+        session.underlyingNetwork(WIFI)
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        engine.gate = CountDownLatch(1)
+        host.onAbort = { engine.gate?.countDown() }
+        escalate()
+        awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}", times = 2)
+
+        session.underlyingNetwork(null)
+        val offline = await { it.status == ConnectionStatus.Offline }
+        assertNull(offline.reconnect)
+        assertEquals(1, host.aborts.get())
+        eventually("the cancelled attempt's job ended") { session.activeJobs() == 0 }
+        Thread.sleep(200) // several of the policy's waits: no attempt without a network
+        assertEquals(2, log.count("probe ${profile.id}"))
+        assertFalse(engine.running)
+        assertFalse(host.tuns.single().closed)
+
+        engine.answer = PreflightAnswer(ok = true)
+        session.underlyingNetwork(MOBILE)
+        await { it.status == ConnectionStatus.Connected }
+        assertEquals(3, log.count("probe ${profile.id}"))
+    }
+
+    /** After the last attempt traffic stays held: a move to another network tries again, and losing the network waits Offline. */
+    @Test
+    fun afterTheLastAttemptANetworkChangeTriesAgainAndALossWaitsOffline() {
+        val profile = connect()
+        session.underlyingNetwork(WIFI)
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        escalate()
+        await { it.status == ConnectionStatus.Blocked }
+        val probes = log.count("probe ${profile.id}")
+
+        session.underlyingNetwork(MOBILE)
+        await { it.status == ConnectionStatus.Blocked && log.count("probe ${profile.id}") == probes + policy.maxAttempts }
+        assertEquals(ReconnectReason.NetworkChanged, state.history.last { it.reconnect != null }.reconnect?.reason)
+
+        session.underlyingNetwork(null)
+        await { it.status == ConnectionStatus.Offline }
+        engine.answer = PreflightAnswer(ok = true)
+        session.underlyingNetwork(WIFI)
+        val back = await { it.status == ConnectionStatus.Connected }
+        assertEquals(NOW, back.connectedSinceMillis)
+        assertFalse(host.tuns.single().closed)
+    }
+
+    /**
+     * What no retry changes stays blocked whatever the network does: a refused sign-in or certificate, an engine
+     * that stopped, a deleted profile (whose credentials are never used again). Only the user acts on these.
+     */
+    @Test
+    fun aNetworkChangeNeverRetriesWhatNoRetryChanges() {
+        for (cause in listOf("AUTH_FAILED", "TLS_UNTRUSTED", "ENGINE_STOPPED", "PROFILE_DELETED")) {
+            val profile = connect()
+            session.underlyingNetwork(WIFI)
+            when (cause) {
+                "ENGINE_STOPPED" -> checkNotNull(engine.signals)(EngineSignal.Failed(ConnectionError(cause, "tun closed")))
+                "PROFILE_DELETED" -> session.profileDeleted(profile.id)
+                else -> proxyFailure(cause)
+            }
+            await { it.status == ConnectionStatus.Blocked }
+            val probes = log.count("probe ${profile.id}")
+
+            session.underlyingNetwork(MOBILE)
+            session.underlyingNetwork(null)
+            session.underlyingNetwork(WIFI)
+            runBlocking { session.awaitIdle() }
+
+            assertEquals(cause, ConnectionStatus.Blocked, state.value.status)
+            assertEquals(cause, cause, state.value.error?.code)
+            assertEquals("$cause: no attempt", probes, log.count("probe ${profile.id}"))
+            assertEquals(cause, 0, entries.count { it.event == LogEvent.ReconnectStarted })
+            session.disconnect()
+            await { it.status == ConnectionStatus.Disconnected }
+        }
+    }
+
+    /** Disconnect or a revocation while Offline or reconnecting ends everything, and a network coming back later changes nothing. */
+    @Test
+    fun disconnectOrRevocationWhileOfflineOrReconnectingEndsEverything() {
+        policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000, 60_000), jitter = 0.0)
+        for (revoke in listOf(false, true)) {
+            for (offline in listOf(true, false)) {
+                val what = "${if (revoke) "revoked" else "disconnected"} while ${if (offline) "offline" else "reconnecting"}"
+                connect()
+                session.underlyingNetwork(WIFI)
+                if (offline) {
+                    session.underlyingNetwork(null)
+                    await { it.status == ConnectionStatus.Offline }
+                } else {
+                    escalate()
+                    await { it.status == ConnectionStatus.Reconnecting }
+                }
+
+                if (revoke) session.revoked(host) else session.disconnect()
+                val ended = await { it.status == ConnectionStatus.Disconnected }
+                session.underlyingNetwork(MOBILE)
+                runBlocking { session.awaitIdle() }
+
+                assertEquals(what, if (revoke) ConnectionError(ConnectionError.VPN_REVOKED) else null, ended.error)
+                assertEquals(what, ConnectionStatus.Disconnected, state.value.status)
+                assertTrue(what, host.tuns.last().closed)
+                assertFalse(what, engine.running)
+                eventually("$what: every job ended") { session.activeJobs() == 0 }
+            }
+        }
+    }
+
+    /** An attempt whose engine does not start, or that Android does not route in time, fails alone: the next attempt follows. */
+    @Test
+    fun anAttemptWhoseEngineFailsToStartOrIsNotRoutedFailsAlone() {
+        for (failure in listOf("engine", "routing")) {
+            val profile = connect()
+            val established = log.count("establish")
+            if (failure == "engine") engine.startError = EngineException("INTERNAL", "invalid TUN descriptor") else host.routes = false
+            escalate()
+            await { it.reconnect?.attempt == 2 }
+            engine.startError = null
+            host.routes = true
+            val back = await { it.status == ConnectionStatus.Connected }
+
+            assertEquals(failure, NOW, back.connectedSinceMillis)
+            val failed = entries.single { it.event == LogEvent.ReconnectAttemptFailed }
+            assertEquals(failure, "INTERNAL", failed.code)
+            assertEquals("$failure: the same interface throughout", established, log.count("establish"))
+            assertFalse(failure, host.tuns.last().closed)
+            assertEquals(failure, 3, log.count("probe ${profile.id}"))
+            session.disconnect()
+            await { it.status == ConnectionStatus.Disconnected }
+        }
+    }
+
+    /**
+     * The profile is edited while an attempt checks it: its new settings are checked from the start, so the new
+     * server is the one connected and no credential goes to the old one after the edit.
+     */
+    @Test
+    fun anEditDuringAReconnectionChecksTheNewSettingsFromTheStart() {
+        val profile = connect(signIn = true)
+        engine.gate = CountDownLatch(1)
+        escalate()
+        awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}", times = 2)
+
+        runBlocking { profiles.repository.save(profile.id, input(server = "other.example.net", signIn = true)) }
+        engine.gate?.countDown()
+        await { it.status == ConnectionStatus.Connected && it.profile?.host == "other.example.net" }
+
+        assertEquals(
+            listOf("probe $SERVER", "start $SERVER", "probe $SERVER", "probe other.example.net", "start other.example.net"),
+            engine.servers.toList(),
+        )
+        assertFalse(host.tuns.single().closed)
+    }
+
+    /** An engine that fails keeps the traffic it carried in the session's counters: they never go back. */
+    @Test
+    fun anEngineFailureKeepsItsTrafficInTheSession() {
+        connect()
+        engine.trafficNow = EngineTraffic(bytesUp = 300, bytesDown = 400, activeConnections = 1)
+        checkNotNull(engine.signals)(EngineSignal.Failed(ConnectionError("ENGINE_STOPPED", "tun closed")))
+        assertEquals("ENGINE_STOPPED", await { it.status == ConnectionStatus.Blocked }.error?.code)
+        assertEquals(300L, session.traffic()?.bytesUp)
+
+        session.restart()
+        await { it.status == ConnectionStatus.Connected }
+        engine.trafficNow = EngineTraffic(bytesUp = 5, bytesDown = 6)
+        assertEquals(305L, session.traffic()?.bytesUp)
+        assertEquals(406L, session.traffic()?.bytesDown)
+    }
+
+    /** The real engine's counters are read while it runs and after it failed (until it is stopped), never once it stopped. */
+    @Test
+    fun aFailedEnginesCountersAreStillRead() {
+        val native = StatsNative()
+        val tunnel = ProxyTunnelEngine(ProxyEngine(native))
+        native.stats = """{"state":"running","bytes_up":7,"bytes_down":9,"tcp_active":1}"""
+        assertEquals(7L, tunnel.traffic()?.bytesUp)
+        native.stats = """{"state":"failed","bytes_up":8,"bytes_down":11,"tcp_active":0}"""
+        assertEquals(8L, tunnel.traffic()?.bytesUp)
+        assertEquals(11L, tunnel.traffic()?.bytesDown)
+        assertNull("Home's diagnostics are for a running engine only", tunnel.diagnostics())
+        native.stats = "{}"
+        assertNull(tunnel.traffic())
+    }
+
     @Test
     fun proxyFailuresWhileReconnectingStartNoSecondReconnection() {
         policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000, 60_000), jitter = 0.0)
@@ -492,19 +762,50 @@ class ReconnectTest {
 
     // --- helpers ---
 
-    private fun save(signIn: Boolean = false): ProxyProfile = runBlocking {
-        profiles.repository.save(
-            null,
-            ProxyProfileInput(
-                name = "Tokyo",
-                protocol = ProxyProtocol.SOCKS5,
-                server = SERVER,
-                port = "1080",
-                requiresSignIn = signIn,
-                username = if (signIn) USER else "",
-                password = if (signIn) PASSWORD else "",
-            ),
-        )
+    private fun save(signIn: Boolean = false): ProxyProfile = runBlocking { profiles.repository.save(null, input(signIn = signIn)) }
+
+    private fun input(server: String = SERVER, signIn: Boolean = false) = ProxyProfileInput(
+        name = "Tokyo",
+        protocol = ProxyProtocol.SOCKS5,
+        server = server,
+        port = "1080",
+        requiresSignIn = signIn,
+        username = if (signIn) USER else "",
+        password = if (signIn) PASSWORD else "",
+    )
+
+    /** The Go engine's functions, of which only its counters are read. */
+    private class StatsNative : EngineNative {
+        @Volatile var stats = "{}"
+
+        override fun stats(): String = stats
+
+        override fun start(tunFd: Long, configJson: String, secret: ByteArray, platform: Platform) = error("not used")
+
+        override fun stop() = Unit
+
+        override fun status(): String = "{}"
+
+        override fun flows(): String = "[]"
+
+        override fun resetFlows(): Long = 0
+
+        override fun probe(configJson: String, secret: ByteArray, target: String, timeoutMs: Long, platform: Platform): String =
+            error("not used")
+
+        override fun selfTest(
+            configJson: String,
+            secret: ByteArray,
+            target: String,
+            payload: ByteArray,
+            expect: Long,
+            timeoutMs: Long,
+            platform: Platform,
+        ): String = error("not used")
+
+        override fun networkPlan(): String = error("not used")
+
+        override fun version(): String = "test"
     }
 
     private fun connect(signIn: Boolean = false): ProxyProfile {

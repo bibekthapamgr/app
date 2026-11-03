@@ -2,13 +2,15 @@ package app.proxyflow.e2e
 
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.proxyflow.core.data.RoomLogRepository
 import app.proxyflow.core.data.db.LogDatabase
 import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.LogDetail
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
-import app.proxyflow.core.model.LogExport
 import app.proxyflow.core.model.ProxyProtocol
+import app.proxyflow.feature.logs.LogsUiState
+import app.proxyflow.feature.logs.exportText
 import java.io.File
 import java.time.ZoneId
 import java.util.UUID
@@ -67,11 +69,18 @@ class LogsEndToEndTest {
             listOf(ConnectionStage.Starting, ConnectionStage.VpnPermission, ConnectionStage.ProxyHandshake),
             mine.filter { it.event == LogEvent.StageReached }.map { it.stage },
         )
-        val export = LogExport.text(mine, listOf("e2e"), ZoneId.systemDefault())
-        for (secret in listOf(password, env.socksUser, env.socksPassword, env.proxyHost, profile.name)) {
-            assertFalse("the log holds \"$secret\": $mine", mine.toString().contains(secret))
-            assertFalse("the export holds \"$secret\"", export.contains(secret))
+        // What Export hands over, searched by the profile's name as a user would: the search itself stays out of it too.
+        val shown = LogsUiState(loading = false, entries = mine.reversed(), total = mine.size, query = profile.name)
+        val export = exportText(app.context, shown, appVersion = "e2e", zone = ZoneId.systemDefault())
+        // The database file itself, not what reading it gives back (which is sanitized once more); a failure never
+        // prints the secret, so it can't reach logcat either.
+        val secrets = listOf(password, env.socksUser, env.socksPassword, env.proxyHost, profile.name)
+        secrets.forEachIndexed { i, secret ->
+            assertFalse("the log's database file holds secret #$i", fileHolds(secret))
+            assertFalse("the log as read holds secret #$i", mine.toString().contains(secret))
+            assertFalse("the export holds secret #$i", export.contains(secret))
         }
+        assertTrue(export, export.contains("search applied"))
         Log.i(
             LAB_TAG,
             "log checked ${mine.size} entries of a refused sign-in: stage ${failed.stage?.key} code ${failed.code}, nothing secret",
@@ -124,11 +133,17 @@ class LogsEndToEndTest {
         app.awaitLog("the marker entry") { it.details[LogDetail.REASON] == marker }
         assertTrue("the entry is in the database file before Clear", fileHolds(marker))
 
+        // What Clear relies on, as the app's own connection to the database has it: deleted content is overwritten, and
+        // the rollback journal is truncated after each write instead of a write-ahead log keeping old pages.
+        val settings = (app.logs as RoomLogRepository).storageSettings()
+        assertEquals("$settings", "1", settings["secure_delete"])
+        assertEquals("$settings", "truncate", settings["journal_mode"])
+
         runBlocking { app.logs.clear() }
 
         assertEquals(emptyList<LogEntry>(), runBlocking { app.logs.entries.first() })
         assertFalse("nothing of the entry is readable in the database file after Clear", fileHolds(marker))
-        Log.i(LAB_TAG, "log cleared: no entry left, nothing readable in ${LogDatabase.NAME}")
+        Log.i(LAB_TAG, "log cleared: no entry left, nothing readable in ${LogDatabase.NAME} ($settings)")
     }
 
     /** The profile's entries, oldest first. */

@@ -5,12 +5,14 @@ The M7 device tests (app/src/androidTest/.../e2e: ReconnectEndToEndTest, LogsEnd
 ProxyFlowE2E what they measured, and the session logs its reconnections under ProxyFlowVpn. For one API level, and
 only what the device tests caused (scripts/e2e_env.sh recorded each lab log's length after its own checks), this reads:
 
-  - the traffic counters against the controlled transfers: on each "traffic <protocol> up expected=E counted=C down
-    expected=E counted=C" line, E <= C <= E + 2 % + 256 KiB both ways (ADR-0012); the bulk server's log must show every
-    upload read in full and every download sent in full, and each of its connections must have come through a proxy
-    (Dante's and Squid's tunnels to the bulk port);
-  - the network change: the connection held open ended early, as the engine's reset ended it ("network change: held
-    connection ENDED <ms> <how>"), and the bulk server saw it end;
+  - the traffic counters against the controlled transfers (ADR-0012): each transfer's own connection, as the engine
+    counted it ("traffic <protocol> up|down flow up=C/E down=C/E"), exactly what it carried both ways; the session's
+    counters ("traffic <protocol> session up=C/E down=C/E") never less than all the transfers carried — what they read
+    more is other apps' traffic through the VPN meanwhile, reported; the bulk server's log must show every upload read
+    in full and every download sent in full, and each of its connections must have come through a proxy (Dante's and
+    Squid's tunnels to the bulk port);
+  - the network change: the connection held open ended early, reset by the engine ("network change: held connection
+    ENDED <ms> reset"), and the bulk server saw it end; the session's own reports of the phone's network ("network: ...");
   - the session's reconnections: no attempt beyond its policy's limit ("reconnect attempt n of N", n <= N), each
     reconnection ended (connected again, stopped after its last attempt, blocked, offline or disconnected) before
     logcat ends, and how they ended;
@@ -33,33 +35,51 @@ from m5_evidence import annotate  # noqa: E402
 from m6_evidence import baseline, read  # noqa: E402
 
 BULK_PORT = 8090
-TOLERANCE_BYTES = 256 * 1024
 HOLD_SECONDS = 60
 
-TRAFFIC = re.compile(r"ProxyFlowE2E\s*:\s*traffic (\S+) up expected=(\d+) counted=(\d+) down expected=(\d+) counted=(\d+)")
+# "null" when the engine never listed the transfer's connection.
+FLOW = re.compile(r"ProxyFlowE2E\s*:\s*traffic (\S+) (up|down) flow up=(\d+|null)/(\d+) down=(\d+|null)/(\d+)")
+SESSION = re.compile(r"ProxyFlowE2E\s*:\s*traffic (\S+) session up=(\d+)/(\d+) down=(\d+)/(\d+)")
 HELD = re.compile(r"ProxyFlowE2E\s*:\s*network change: held connection ENDED (\d+) (\w+)")
 LOG_CHECKS = re.compile(r"ProxyFlowE2E\s*:\s*(log checked .*|log cleared .*)$")
 VPN = re.compile(r"ProxyFlowVpn\s*:\s*(.*)$")
 
 
-def allowed(expected: int) -> int:
-    """The most the counters may read for [expected] bytes: other apps' traffic through the VPN meanwhile counts too."""
-    return expected + expected // 50 + TOLERANCE_BYTES
+def number(text: str) -> int | None:
+    return None if text == "null" else int(text)
 
 
-def transfers(logcat: list[str]) -> list[tuple[str, int, int, int, int]]:
-    return [(m.group(1), *map(int, m.groups()[1:])) for line in logcat if (m := TRAFFIC.search(line))]
+def flows(logcat: list[str]) -> list[tuple[str, str, int | None, int, int | None, int]]:
+    """Each transfer's connection as the engine counted it: protocol, direction, counted and expected up and down."""
+    return [
+        (m.group(1), m.group(2), number(m.group(3)), int(m.group(4)), number(m.group(5)), int(m.group(6)))
+        for line in logcat if (m := FLOW.search(line))
+    ]
 
 
-def check_transfers(found: list[tuple[str, int, int, int, int]]) -> tuple[list[str], list[str]]:
+def sessions(logcat: list[str]) -> list[tuple[str, int, int, int, int]]:
+    """The session's counters over each protocol's transfers: protocol, counted and expected up and down."""
+    return [(m.group(1), *map(int, m.groups()[1:])) for line in logcat if (m := SESSION.search(line))]
+
+
+def check_transfers(found_flows: list, found_sessions: list) -> tuple[list[str], list[str]]:
     facts, problems = [], []
-    for protocol, up_expected, up_counted, down_expected, down_counted in found:
-        for direction, expected, counted in (("up", up_expected, up_counted), ("down", down_expected, down_counted)):
-            if not expected <= counted <= allowed(expected):
-                problems.append(f"traffic {protocol} {direction}: counted {counted} bytes for {expected}, outside {expected}..{allowed(expected)}")
+    for protocol, direction, up, up_expected, down, down_expected in found_flows:
+        if (up, down) != (up_expected, down_expected):
+            problems.append(
+                f"traffic {protocol} {direction}: the transfer's connection counted up {up} down {down}, "
+                f"for exactly {up_expected} and {down_expected}"
+            )
+    if found_flows:
+        exact = sum(1 for f in found_flows if (f[2], f[4]) == (f[3], f[5]))
+        facts.append(f"traffic: {exact} of {len(found_flows)} transfers' connections counted exactly what they carried, both ways")
+    for protocol, up, up_expected, down, down_expected in found_sessions:
+        for direction, expected, counted in (("up", up_expected, up), ("down", down_expected, down)):
+            if counted < expected:
+                problems.append(f"traffic {protocol} session {direction}: counted {counted} bytes, less than the {expected} the transfers carried")
         facts.append(
-            f"traffic {protocol}: up {up_counted} counted for {up_expected} sent (+{up_counted - up_expected}), "
-            f"down {down_counted} for {down_expected} (+{down_counted - down_expected})"
+            f"traffic {protocol} session: up {up} for {up_expected} the transfers carried (+{up - up_expected} other apps' traffic), "
+            f"down {down} for {down_expected} (+{down - down_expected})"
         )
     return facts, problems
 
@@ -110,8 +130,8 @@ def check_hold(logcat: list[str], requests: dict) -> tuple[list[str], list[str]]
     if not held:
         problems.append("no held connection in logcat: the network-change test did not run")
     for ms, how in held:
-        if ms >= HOLD_SECONDS * 1000 // 2 or how not in ("reset", "closed"):
-            problems.append(f"the held connection lasted {ms} ms and ended {how}: the network change did not end it")
+        if ms >= HOLD_SECONDS * 1000 // 2 or how != "reset":
+            problems.append(f"the held connection lasted {ms} ms and ended {how}: the network change's reset did not end it")
     early = [h for h in requests["hold"] if h[1] < h[0] / 2]
     if held and not early:
         problems.append(f"the bulk server saw no held connection end early: {requests['hold'][:3]}")
@@ -122,6 +142,12 @@ def check_hold(logcat: list[str], requests: dict) -> tuple[list[str], list[str]]
             + f"; the bulk server saw {len(early)} held connection(s) end early"
         )
     return facts, problems
+
+
+def networks(logcat: list[str]) -> list[str]:
+    """The phone's network as the session heard of it ("network: wifi"): real reports and the tests' own."""
+    seen = [m.group(1).removeprefix("network: ") for line in logcat if (m := VPN.search(line)) and m.group(1).startswith("network: ")]
+    return [f"the session heard of the phone's network {len(seen)} times: " + ", ".join(seen[:12]) + (" ..." if len(seen) > 12 else "")]
 
 
 def reconnections(logcat: list[str]) -> tuple[list[str], list[str]]:
@@ -191,14 +217,16 @@ def main(argv: list[str]) -> int:
     streamed = read(os.path.join(args.out, "logcat-live.txt"))
     logcat = dumped if len(dumped) >= len(streamed) else streamed
 
-    found = transfers(logcat)
-    if not found:
+    found_flows, found_sessions = flows(logcat), sessions(logcat)
+    if not found_flows or not found_sessions:
         problems.append("no counted transfer in logcat: the traffic counter test did not run")
     for more_facts, more_problems in (
-        check_transfers(found),
-        check_bulk(bulk_requests(after("bulk.log")), after("squid-access.log"), after("danted.log"), len(found)),
+        check_transfers(found_flows, found_sessions),
+        # Each protocol's upload and download: the bulk server must have seen at least as many of each.
+        check_bulk(bulk_requests(after("bulk.log")), after("squid-access.log"), after("danted.log"), len(found_sessions)),
         check_hold(logcat, bulk_requests(after("bulk.log"))),
         reconnections(logcat),
+        (networks(logcat), []),
     ):
         facts += more_facts
         problems += more_problems
@@ -218,4 +246,13 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    try:
+        sys.exit(main(sys.argv))
+    except Exception:  # an evidence check that cannot finish is a failed check, said where CI shows annotations
+        import traceback
+
+        from m5_evidence import escape
+
+        api = next((sys.argv[i + 1] for i, a in enumerate(sys.argv[:-1]) if a == "--api"), "?")
+        print(f"::error title=M7 end-to-end evidence (API {api})::the evidence script failed: {escape(traceback.format_exc())}")
+        sys.exit(1)

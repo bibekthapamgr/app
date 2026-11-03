@@ -25,7 +25,9 @@ udp-sink ADDRESS PORT LOG
 bulk ADDRESS PORT LOG
     The traffic counters' controlled transfers (M7). Each connection sends one line:
         UP N      then N bytes; the server reads them and answers "GOT <bytes read>"
-        DOWN N    the server sends N bytes (a fixed pattern) and closes
+        DOWN N    the server sends N bytes (a fixed pattern)
+    and the server then waits for the client to close (at most LINGER_MAX_S), so the connection
+    stays open while the test reads the engine's own count for it.
         HOLD S    the server sends nothing and keeps the connection open until the
                   client ends it or S seconds pass (the network-change test ends it)
     Every request is logged with its peer and what happened: "up N got=G",
@@ -157,6 +159,7 @@ async def udp_sink(address: str, port: int, log_path: str) -> None:
 
 BULK_MAX = 64 * 1024 * 1024
 HOLD_MAX_S = 600
+LINGER_MAX_S = 60
 
 
 async def bulk(address: str, port: int, log_path: str) -> None:
@@ -195,6 +198,11 @@ async def bulk(address: str, port: int, log_path: str) -> None:
                         await writer.drain()
                         sent += len(chunk)
                     log.write(f"{stamp()} {peer} down {n} sent={sent}\n")
+                try:  # the client closes once the test has read the engine's count
+                    while await asyncio.wait_for(reader.read(65536), timeout=LINGER_MAX_S):
+                        pass
+                except (asyncio.TimeoutError, ConnectionError):
+                    pass
             elif len(words) == 2 and request == "HOLD" and words[1].isdigit() and int(words[1]) <= HOLD_MAX_S:
                 seconds = int(words[1])
                 start = time.monotonic()

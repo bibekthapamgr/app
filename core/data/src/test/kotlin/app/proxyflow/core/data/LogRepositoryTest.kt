@@ -35,7 +35,7 @@ class LogRepositoryTest {
 
     private fun room(maxEntries: Int = LogRepository.MAX_ENTRIES, file: Boolean = false): RoomLogRepository {
         val db = (if (file) LogDatabase.create(context, name) else LogDatabase.inMemory(context)).also { opened += it }
-        return RoomLogRepository(db.logEventDao(), clock = { now }, maxEntries = maxEntries)
+        return RoomLogRepository(db, clock = { now }, maxEntries = maxEntries)
     }
 
     private fun repositories(maxEntries: Int = LogRepository.MAX_ENTRIES): List<LogRepository> =
@@ -69,24 +69,64 @@ class LogRepositoryTest {
 
     @Test
     fun whateverAWriterPassesIsSanitizedBeforeItIsKept() = runTest {
+        val raw = entry(
+            now,
+            details = mapOf(LogDetail.DETAIL to "proxy 203.0.113.7 refused alice:hunter2@x", "destination" to "example.com"),
+            code = "auth failed for alice",
+        )
+        val secrets = listOf("203.0.113.7", "hunter2", "alice", "example.com")
+        // The rows as stored, not as reading gives them back (which sanitizes once more).
+        val db = LogDatabase.inMemory(context).also { opened += it }
+        RoomLogRepository(db, clock = { now }).append(listOf(raw))
+        val row = db.logEventDao().observeLatest(10).first().single()
+        assertEquals("INTERNAL", row.code)
+        assertEquals("{\"${LogDetail.DETAIL}\"", row.details.substringBefore(':'))
+        for (secret in secrets) assertFalse(row.toString(), row.toString().contains(secret))
+
+        val memory = InMemoryLogRepository(clock = { now })
+        memory.append(listOf(raw))
+        val kept = memory.entries.first().single()
+        assertEquals("INTERNAL", kept.code)
+        assertEquals(setOf(LogDetail.DETAIL), kept.details.keys)
+        for (secret in secrets) assertFalse(kept.toString(), kept.toString().contains(secret))
+    }
+
+    @Test
+    fun anEntryPastTheRetentionNeverShowsEvenBeforeThePurge() = runTest {
         for (repository in repositories()) {
-            repository.append(
-                listOf(
-                    entry(
-                        now,
-                        details = mapOf(LogDetail.DETAIL to "proxy 203.0.113.7 refused alice:hunter2@x", "destination" to "example.com"),
-                        code = "auth failed for alice",
-                    ),
-                ),
-            )
+            repository.append(listOf(entry(now - LogRepository.RETENTION_MILLIS + 1_000), entry(now)))
+            now += 2_000 // no write and no purge since
 
-            val kept = repository.entries.first().single()
+            assertEquals(listOf(now - 2_000), repository.entries.first().map { it.timeMillis })
+        }
+    }
 
-            assertEquals("INTERNAL", kept.code)
-            assertEquals(setOf(LogDetail.DETAIL), kept.details.keys)
-            for (secret in listOf("203.0.113.7", "hunter2", "alice", "example.com")) {
-                assertFalse(kept.toString(), kept.toString().contains(secret))
-            }
+    @Test
+    fun entriesDatedFarAheadOfTheClockAreDropped() = runTest {
+        for (repository in repositories()) {
+            // Written while the phone's clock was a day ahead, then the clock was set right.
+            val ahead = now + DAY
+            val soon = now + LogRepository.FUTURE_MARGIN_MILLIS / 2
+            repository.append(listOf(entry(ahead), entry(soon), entry(now)))
+
+            assertEquals("hidden when read", listOf(soon, now), repository.entries.first().map { it.timeMillis })
+            repository.purge()
+            now += DAY // the day it was dated: dropped by the purge, it never shows
+            assertFalse(repository.entries.first().any { it.timeMillis == ahead })
+        }
+    }
+
+    @Test
+    fun entriesFromBeforeClearThatArriveAfterItAreDropped() = runTest {
+        for (repository in repositories()) {
+            repository.append(listOf(entry(now - 5_000)))
+            repository.clear()
+            // A batch the session's writer had on its way, and the minute's count gathered before Clear.
+            repository.append(listOf(entry(now - 3_000), entry(now - 1)))
+            now += 1_000
+            repository.append(listOf(entry(now)))
+
+            assertEquals(listOf(now), repository.entries.first().map { it.timeMillis })
         }
     }
 
@@ -145,7 +185,7 @@ class LogRepositoryTest {
         val db = LogDatabase.inMemory(context).also { opened += it }
         db.logEventDao().insertAll(listOf(entry(now).toRow().copy(event = "from_a_newer_version"), entry(now).toRow()))
 
-        assertEquals(listOf(LogEvent.Connected), RoomLogRepository(db.logEventDao(), clock = { now }).entries.first().map { it.event })
+        assertEquals(listOf(LogEvent.Connected), RoomLogRepository(db, clock = { now }).entries.first().map { it.event })
     }
 
     private fun fileHolds(text: String): Boolean {

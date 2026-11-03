@@ -5,6 +5,7 @@ import android.net.NetworkCapabilities
 import android.os.SystemClock
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.proxyflow.core.engine.EngineFlow
 import app.proxyflow.core.engine.EngineState
 import app.proxyflow.core.engine.ProxyEngine
 import app.proxyflow.core.model.ConnectionError
@@ -21,6 +22,7 @@ import app.proxyflow.core.vpn.RetryPolicy
 import app.proxyflow.core.vpn.VpnSession
 import java.util.UUID
 import kotlin.concurrent.thread
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -74,19 +76,25 @@ class ReconnectEndToEndTest {
 
     @After
     fun tearDown() {
-        if (::history.isInitialized) history.close()
-        if (::networks.isInitialized) networks.close()
-        TestRetry.policy = RetryPolicy()
-        if (::gate.isInitialized) runCatching { gate.forward(env.socksPort) }
-        app.disconnectAndSettle()
-        realNetwork?.let { app.runtime.session.underlyingNetwork(it) }
-        app.deleteAllProfiles()
+        try {
+            if (::history.isInitialized) history.close()
+            if (::networks.isInitialized) networks.close()
+            TestRetry.policy = RetryPolicy()
+            if (::gate.isInitialized) runCatching { gate.forward(env.socksPort) }
+            // The phone's real network first: a network a test told the session of must never stay for the next test.
+            realNetwork?.let { app.runtime.session.underlyingNetwork(it) }
+        } finally {
+            app.disconnectAndSettle()
+            app.deleteAllProfiles()
+        }
     }
 
     /**
-     * Home's counters against transfers of known size through each protocol: never less than what the apps'
-     * connections carried, and at most 2 % + 256 KiB more (other apps' traffic through the VPN meanwhile, which
-     * the session counts too). The session's summary in the log carries the same.
+     * Transfers of known size through each protocol. Each transfer's own connection, as the engine counts it (what
+     * Home's counters add up), carried exactly the bytes the app sent and received — no packet header, no
+     * retransmission. Home's counters for the session are never less than what the transfers carried; whatever they
+     * read more is other apps' traffic through the VPN meanwhile, which they count by design, and is reported for the
+     * evidence. The session's summary in the log carries the same.
      */
     @Test(timeout = TEST_TIMEOUT_MS)
     fun theTrafficCountersMatchControlledTransfers() {
@@ -94,26 +102,21 @@ class ReconnectEndToEndTest {
             val connected = app.connect(profile.id)
             val before = app.awaitTraffic("the first reading") { it.sinceMillis == connected.connectedSinceMillis }
 
-            assertEquals(
-                "SENT $UP_BYTES REPLY GOT $UP_BYTES",
-                FromShell.bulk(env.destinationName, lab.bulkPort, up = true, bytes = UP_BYTES),
-            )
-            assertEquals("RECEIVED $DOWN_BYTES", FromShell.bulk(env.destinationName, lab.bulkPort, up = false, bytes = DOWN_BYTES))
+            val upload = transfer(profile, up = true, bytes = UP_BYTES)
+            assertEquals("SENT $UP_BYTES REPLY GOT $UP_BYTES", upload.result)
+            val download = transfer(profile, up = false, bytes = DOWN_BYTES)
+            assertEquals("RECEIVED $DOWN_BYTES", download.result)
 
-            // What the two connections carried: the request lines and the upload up; the reply and the download down.
-            val expectedUp = "UP $UP_BYTES\n".length + UP_BYTES + "DOWN $DOWN_BYTES\n".length
-            val expectedDown = "GOT $UP_BYTES\n".length + DOWN_BYTES
-            val after = app.awaitTraffic("the transfers counted") {
+            val expectedUp = upload.expectedUp + download.expectedUp
+            val expectedDown = upload.expectedDown + download.expectedDown
+            val after = app.awaitTraffic("the transfers in the session's counters") {
                 it.bytesUp - before.bytesUp >= expectedUp && it.bytesDown - before.bytesDown >= expectedDown
             }
-            val countedUp = after.bytesUp - before.bytesUp
-            val countedDown = after.bytesDown - before.bytesDown
             Log.i(
                 LAB_TAG,
-                "traffic ${profile.protocol} up expected=$expectedUp counted=$countedUp down expected=$expectedDown counted=$countedDown",
+                "traffic ${profile.protocol} session up=${after.bytesUp - before.bytesUp}/$expectedUp " +
+                    "down=${after.bytesDown - before.bytesDown}/$expectedDown",
             )
-            assertTrue("up: counted $countedUp for $expectedUp", countedUp <= allowed(expectedUp))
-            assertTrue("down: counted $countedDown for $expectedDown", countedDown <= allowed(expectedDown))
 
             app.disconnectAndSettle()
             val summary = app.awaitLog("the session's summary") { it.event == LogEvent.SessionSummary && it.profileId == profile.id }
@@ -131,6 +134,7 @@ class ReconnectEndToEndTest {
     fun aProxyOutageReconnectsOnItsOwnAndTheSessionGoesOn() {
         val profile = gated()
         val connected = app.connect(profile.id)
+        val established = ProxyFlowVpnService.establishedInterfaces.get()
         assertSent("outage-up")
         val before = app.awaitTraffic("the line counted") { it.bytesUp > 0 }
 
@@ -146,7 +150,8 @@ class ReconnectEndToEndTest {
         gate.forward(env.socksPort)
         val back = app.await(what = "Connected again on its own") { it.status == ConnectionStatus.Connected }
         assertEquals(connected.connectedSinceMillis, back.connectedSinceMillis)
-        assertEquals("the same interface throughout", 1, Descriptors.tun().size)
+        assertEquals("the same interface throughout", established, ProxyFlowVpnService.establishedInterfaces.get())
+        assertEquals(1, Descriptors.tun().size)
         assertSent("outage-back")
         val after = app.awaitTraffic("the session's traffic going on") { it.bytesUp > before.bytesUp }
         assertEquals(before.sinceMillis, after.sinceMillis)
@@ -186,21 +191,24 @@ class ReconnectEndToEndTest {
         assertSent("give-up-restarted")
     }
 
-    /** Disconnect while ProxyFlow waits for its next attempt: none runs after it, and nothing is left behind. */
+    /**
+     * Disconnect while ProxyFlow waits for its next attempt: none runs after it — waited for past when it was due, with
+     * the proxy back — and nothing is left behind.
+     */
     @Test(timeout = TEST_TIMEOUT_MS)
     fun disconnectingWhileReconnectingCancelsIt() {
-        TestRetry.policy = RetryPolicy(delaysMillis = listOf(LONG_WAIT_MS, LONG_WAIT_MS, LONG_WAIT_MS), jitter = 0.0)
+        TestRetry.policy = RetryPolicy(delaysMillis = listOf(SHORT_WAIT_MS, SHORT_WAIT_MS, SHORT_WAIT_MS), jitter = 0.0)
         val profile = gated()
         app.connect(profile.id)
         assertSent("cancel-up")
 
         gate.refuse()
         assertNotNull(failUntilReconnecting("cancel").reconnect?.nextAttemptAtMillis)
-        val stoppedAt = SystemClock.elapsedRealtime()
         app.disconnectAndSettle()
+        val stoppedAt = SystemClock.elapsedRealtime()
         eventually("no session job is left", diagnose = { Diagnostics.report(app) }) { app.runtime.session.activeJobs() == 0 }
         gate.forward(env.socksPort)
-        Thread.sleep(NO_MORE_ATTEMPTS_MS)
+        Thread.sleep(SHORT_WAIT_MS + NO_MORE_ATTEMPTS_MS)
 
         assertEquals(ConnectionStatus.Disconnected, app.controller.state.value.status)
         val attempts = app.runtime.log.recent().filter { it.substringBefore(' ').toLong() > stoppedAt && "reconnect attempt" in it }
@@ -217,12 +225,19 @@ class ReconnectEndToEndTest {
         assertSent("retry-now-up")
 
         gate.refuse()
-        val due = checkNotNull(failUntilReconnecting("retry-now").reconnect?.nextAttemptAtMillis)
+        val reconnecting = failUntilReconnecting("retry-now")
+        val due = checkNotNull(reconnecting.reconnect?.nextAttemptAtMillis) { "no wait: $reconnecting" }
         gate.forward(env.socksPort)
+        // What is left of the first attempt's wait when Retry now is tapped: far more than Connected may take after it.
+        val waitLeft = due - System.currentTimeMillis()
+        assertTrue("$waitLeft ms of the wait left\n${history.describe()}\n${Diagnostics.report(app)}", waitLeft > 2 * RETRY_NOW_MS)
+        val tapped = SystemClock.elapsedRealtime()
         app.controller.retryNow()
 
         app.await(timeoutMillis = RETRY_NOW_MS, what = "Connected right after Retry now") { it.status == ConnectionStatus.Connected }
-        assertTrue("long before the attempt was due", System.currentTimeMillis() < due - LONG_WAIT_MS / 2)
+        val took = SystemClock.elapsedRealtime() - tapped
+        Log.i(LAB_TAG, "retry now: connected $took ms after the tap, $waitLeft ms before the attempt was due")
+        assertTrue("connected $took ms after Retry now, $waitLeft ms before the attempt was due", took < waitLeft)
         assertSent("retry-now-back")
     }
 
@@ -267,8 +282,9 @@ class ReconnectEndToEndTest {
 
         var held = ""
         val holder = thread(name = "held-connection") { held = FromShell.hold(env.destinationName, lab.bulkPort, HOLD_S) }
+        // Open in the engine, and its request through: a reset before the request would end it as a bad request instead.
         eventually("the held connection is open in the engine") {
-            ProxyEngine().flows().any { it.port == lab.bulkPort && it.state == "open" }
+            ProxyEngine().flows().any { it.port == lab.bulkPort && it.state == "open" && it.bytesUp >= "HOLD $HOLD_S\n".length }
         }
         val resetsBefore = ProxyEngine().stats().resets
         app.runtime.session.underlyingNetwork(VpnSession.NetworkInfo(id = "e2e-${random()}", transport = "wifi"))
@@ -278,11 +294,14 @@ class ReconnectEndToEndTest {
         Log.i(LAB_TAG, "network change: held connection $held")
         val ended = checkNotNull(Regex("^ENDED (\\d+) (\\w+)$").find(held)) { "the held connection: $held" }
         assertTrue("ended long before its $HOLD_S s: $held", ended.groupValues[1].toLong() < HOLD_S * 1_000L / 2)
-        assertTrue("ended by the reset: $held", ended.groupValues[2] in setOf("reset", "closed"))
+        assertEquals("ended by the reset: $held", "reset", ended.groupValues[2])
         assertEquals(resetsBefore + 1, ProxyEngine().stats().resets)
         assertEquals("still connected", ConnectionStatus.Connected, app.controller.state.value.status)
         assertSent("network-change-after")
-        val changed = app.awaitLog("the network change") { it.event == LogEvent.NetworkChanged && it.details[LogDetail.NETWORK] == "wifi" }
+        val changed = app.awaitLog("the network change") {
+            it.event == LogEvent.NetworkChanged && it.profileId == profile.id && it.details[LogDetail.RESET] != null
+        }
+        assertEquals("wifi", changed.details[LogDetail.NETWORK])
         assertTrue("$changed", checkNotNull(changed.details[LogDetail.RESET]).toInt() >= 1)
         app.runtime.session.underlyingNetwork(real)
     }
@@ -295,11 +314,16 @@ class ReconnectEndToEndTest {
             app.controller.connect(profile.id)
             app.controller.disconnect()
         }
-        app.awaitStatus(ConnectionStatus.Disconnected)
-        eventually("no session job is left", diagnose = { Diagnostics.report(app) }) { app.runtime.session.activeJobs() == 0 }
-        eventually("the VPN interface closes") { Descriptors.tun().isEmpty() }
-        eventually("the VPN service stops") { ProxyFlowVpnService.liveInstances.get() == 0 }
-        eventually("Android has no VPN network") { !networks.present() }
+        // The taps only queue events: once the session has handled them all, the last one has won.
+        runBlocking { app.runtime.session.awaitIdle() }
+        assertEquals("the last tap wins", ConnectionStatus.Disconnected, app.controller.state.value.status)
+        // The service starts they asked for still come, each let go at once: nothing may be left once they have.
+        settled("nothing is left behind") {
+            app.runtime.session.activeJobs() == 0 &&
+                Descriptors.tun().isEmpty() &&
+                ProxyFlowVpnService.liveInstances.get() == 0 &&
+                !networks.present()
+        }
         assertEquals(ConnectionStatus.Disconnected, app.controller.state.value.status)
         assertEquals(null, app.controller.state.value.reconnect)
         assertEquals(null, app.runtime.session.traffic())
@@ -335,13 +359,63 @@ class ReconnectEndToEndTest {
      * of the reconnection, which has the first attempt's wait.
      */
     private fun failUntilReconnecting(label: String): ConnectionState {
-        fun started() = history.states.firstOrNull { it.status == ConnectionStatus.Reconnecting && it.reconnect != null }
+        val from = history.states.size // what came before the proxy went away does not count
+        fun started() = history.states.drop(from).firstOrNull { it.status == ConnectionStatus.Reconnecting && it.reconnect != null }
         repeat(MAX_FAILING_LINES) { i ->
-            started()?.let { return it }
             assertRefused("$label-$i")
+            // The session hears of each failure a moment later; a line sent once traffic is held waits out its whole timeout.
+            val until = SystemClock.elapsedRealtime() + FAILURE_HEARD_MS
+            while (started() == null && SystemClock.elapsedRealtime() < until) Thread.sleep(50)
+            started()?.let { return it }
         }
         eventually("ProxyFlow reconnecting after failures in a row", diagnose = { Diagnostics.report(app) }) { started() != null }
         return checkNotNull(started())
+    }
+
+    /** Waits until [condition] has held for [QUIET_MS] in a row (things that come late, such as service starts, have come). */
+    private fun settled(what: String, condition: () -> Boolean) {
+        val deadline = SystemClock.elapsedRealtime() + SETTLE_MS
+        var since: Long? = null
+        while (true) {
+            val now = SystemClock.elapsedRealtime()
+            if (condition()) {
+                if (since == null) since = now
+                if (now - since >= QUIET_MS) return
+            } else {
+                since = null
+            }
+            if (now > deadline) throw AssertionError("timed out waiting until $what\n${Diagnostics.report(app)}")
+            Thread.sleep(50)
+        }
+    }
+
+    private class Transfer(val result: String, val expectedUp: Long, val expectedDown: Long)
+
+    /**
+     * One transfer from the shell to the bulk server; its connection stays open a moment after the data, while the
+     * engine's own count for it is read: exactly the request line and the data one way, the reply the other.
+     */
+    private fun transfer(profile: ProxyProfile, up: Boolean, bytes: Long): Transfer {
+        val expectedUp = if (up) "UP $bytes\n".length + bytes else "DOWN $bytes\n".length.toLong()
+        val expectedDown = if (up) "GOT $bytes\n".length.toLong() else bytes
+        var result = ""
+        val client =
+            thread(name = "bulk") { result = FromShell.bulk(env.destinationName, lab.bulkPort, up, bytes, lingerMillis = LINGER_MS) }
+        var counted: EngineFlow? = null
+        while (client.isAlive) {
+            ProxyEngine().flows().lastOrNull { it.port == lab.bulkPort }?.let { counted = it }
+            if (counted?.let { it.bytesUp == expectedUp && it.bytesDown == expectedDown } == true) break
+            Thread.sleep(20)
+        }
+        client.join(TRANSFER_MS)
+        val direction = if (up) "up" else "down"
+        Log.i(
+            LAB_TAG,
+            "traffic ${profile.protocol} $direction flow up=${counted?.bytesUp}/$expectedUp down=${counted?.bytesDown}/$expectedDown",
+        )
+        assertEquals("$direction: what the transfer's connection carried up", expectedUp, counted?.bytesUp)
+        assertEquals("$direction: what the transfer's connection carried down", expectedDown, counted?.bytesDown)
+        return Transfer(result, expectedUp, expectedDown)
     }
 
     private fun awaitRealNetwork(): VpnSession.NetworkInfo {
@@ -384,8 +458,6 @@ class ReconnectEndToEndTest {
         )
     }
 
-    private fun allowed(expected: Long): Long = expected + expected / 50 + TOLERANCE_BYTES
-
     private fun random() = UUID.randomUUID().toString().replace("-", "").take(12)
 
     private companion object {
@@ -393,13 +465,18 @@ class ReconnectEndToEndTest {
         const val UP_BYTES = 1_048_576L
         const val DOWN_BYTES = 4_194_304L
 
-        /** Other apps' traffic through the VPN during a transfer, which the session's counters include by design. */
-        const val TOLERANCE_BYTES = 256L * 1024
+        /** How long a transfer's connection stays open after its data, for the engine's count to be read. */
+        const val LINGER_MS = 2_000
+        const val TRANSFER_MS = 60_000L
 
         /** Apps' connections that fail through the broken gate before ProxyFlow must be reconnecting (three in a row suffice). */
         const val MAX_FAILING_LINES = 6
         const val LONG_WAIT_MS = 60_000L
+        const val SHORT_WAIT_MS = 3_000L
         const val NO_MORE_ATTEMPTS_MS = 2_000L
+        const val FAILURE_HEARD_MS = 1_500L
+        const val QUIET_MS = 2_000L
+        const val SETTLE_MS = 30_000L
         const val RETRY_NOW_MS = 20_000L
         const val HOLD_S = 60
         const val HOLD_ENDS_MS = 15_000L

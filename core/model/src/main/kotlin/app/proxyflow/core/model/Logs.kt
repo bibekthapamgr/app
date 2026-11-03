@@ -136,22 +136,55 @@ object LogDetail {
 object LogSanitizer {
     const val MAX_LENGTH = 160
 
+    /** What is looked at, at most: a value is cut to [MAX_LENGTH] anyway, and matching stays quick. */
+    private const val MAX_INPUT = 1_000
+
     private val CODE = Regex("[A-Z][A-Z0-9_]{1,47}")
-    private val RULES = listOf(
-        Regex("""(?i)\b[a-z][a-z0-9+.-]*://\S*""") to "[url]",
-        Regex("""\S+@\S+""") to "[redacted]",
-        Regex("""(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])(?::\d{1,5})?""") to "[address]",
-        Regex("""\[?(?<![\w:])(?:[0-9A-Fa-f]{0,4}:){2,}[0-9A-Fa-f.]*(?:%\w+)?\]?(?::\d{1,5})?""") to "[address]",
-        Regex("""(?i)(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?![\w-])(?::\d{1,5})?""") to "[host]",
-        Regex("""[A-Za-z0-9+/_=-]{24,}""") to "[redacted]",
+
+    /** Hex groups and colons: an IPv6 address (or a MAC address) when it has "::" or at least 5 colons, a time ("10:16:30.250") when not. */
+    private val COLONS = Regex("""\[?(?<![\w])(?:[0-9A-Fa-f]{0,4}:){2,}[0-9A-Fa-f.]*(?:%\w+)?\]?(?::\d{1,5})?""")
+
+    // Letters and digits of any script, for names such as "пример.рф".
+    private const val W = """[\p{L}\p{N}_]"""
+    private val RULES: List<Pair<Regex, (MatchResult) -> CharSequence>> = listOf(
+        Regex("""(?i)\b[a-z][a-z0-9+.-]*://\S*""") to { _ -> "[url]" },
+        Regex("""\S+@\S*""") to { _ -> "[redacted]" },
+        // A sign-in scheme's credentials ("Basic dXNlcjpwYXNzd29yZA=="): only a value with a digit or + / =, so a phrase
+        // such as "Digest authentication" stays readable.
+        Regex("""(?i)\b(basic|bearer|digest|negotiate|ntlm)\s+(?=[A-Za-z0-9+/=._~-]*[0-9+/=])[A-Za-z0-9+/=._~-]{8,}""") to
+            { match -> "${match.groupValues[1]} [redacted]" },
+        // Followed by a full stop that ends a sentence it is still an address; followed by ".5" it is a longer number.
+        Regex("""(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)(?::\d{1,5})?""") to { _ -> "[address]" },
+        COLONS to { match -> if ("::" in match.value || match.value.count { it == ':' } >= 5) "[address]" else match.value },
+        // A dotted name, "*.provider.net" and "my_proxy.example.com" too; not the tail of a longer one.
+        Regex("""(?<!$W|-)(?<!(?:$W|-)\.)(?:$W(?:(?:$W|-){0,61}$W)?\.)+\p{L}(?:\p{L}|\p{N}|-){1,62}(?!$W|-)(?::\d{1,5})?""") to
+            { _ -> "[host]" },
+        // A name with a port but no dot ("myproxy:8080"). A bare one-word name ("squid") can't be told from a word.
+        Regex("""(?<!$W|[.:-])\p{L}(?:$W|-)*:\d{1,5}(?!$W|[.:])""") to { _ -> "[host]" },
+        Regex("""[A-Za-z0-9+/_=-]{24,}""") to { _ -> "[redacted]" },
     )
 
     /** [raw] made safe to keep: see the class comment. */
     fun text(raw: String): String {
-        var clean = raw.map { if (it.isISOControl()) ' ' else it }.joinToString("")
-        for ((pattern, replacement) in RULES) clean = pattern.replace(clean, replacement)
+        // Cut at a word's end, so no half of an address or name escapes the rules below; one word that long is all redacted.
+        val looked = if (raw.length <= MAX_INPUT) {
+            raw
+        } else {
+            val head = raw.take(MAX_INPUT)
+            val end = head.indexOfLast { it.isWhitespace() || it.isISOControl() }
+            if (end < 0) "[redacted]" else head.substring(0, end)
+        }
+        // Control and format characters, and line and paragraph separators, could fake a new line in the export.
+        var clean = looked.map { if (it.isISOControl() || Character.getType(it) in INVISIBLE) ' ' else it }.joinToString("")
+        for ((pattern, replace) in RULES) clean = pattern.replace(clean, replace)
         return clean.trim().take(MAX_LENGTH)
     }
+
+    private val INVISIBLE = setOf(
+        Character.FORMAT.toInt(),
+        Character.LINE_SEPARATOR.toInt(),
+        Character.PARAGRAPH_SEPARATOR.toInt(),
+    )
 
     /** A catalogue code as the engine and the app write them (`AUTH_FAILED`); anything else becomes `INTERNAL`. */
     fun code(raw: String?): String? = raw?.let { if (CODE.matches(it)) it else ConnectionError.INTERNAL }
@@ -176,10 +209,11 @@ object LogExport {
     val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS xxx", Locale.ROOT)
 
     /**
-     * What Copy and Export hand over at most: Android passes the text to the other app in one
-     * transaction, which fails beyond about a megabyte (two bytes a character, and room to spare).
+     * What Copy and Export hand over at most. Android passes the text on inside the intent, and again
+     * as the intent's clip data (two bytes a character each time), through Binder transactions that
+     * share a buffer of about a megabyte: 100,000 characters stay well inside it.
      */
-    const val MAX_CHARS = 200_000
+    const val MAX_CHARS = 100_000
 
     fun text(entries: List<LogEntry>, header: List<String>, zone: ZoneId): String = buildString {
         header.forEach { appendLine(LogSanitizer.text(it)) }
