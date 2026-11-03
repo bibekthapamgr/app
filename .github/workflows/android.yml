@@ -198,7 +198,8 @@ jobs:
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: ./gradlew :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle-5-release.log"
 
-      - name: Release manifest (permissions, backups, debuggable, cleartext, trust, exported components)
+      # M8: also what the release APK ships for the manifest's @xml files (aapt2): no variant the check did not read.
+      - name: Release manifest and APK (permissions, backups, debuggable, cleartext, trust, exported components, @xml files)
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: python3 scripts/check_release_manifest.py
 

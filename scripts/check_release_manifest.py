@@ -16,17 +16,24 @@ fails CI unless:
 - its network security config (M8) permits no cleartext and trusts the system's certificate authorities only, with
   no per-domain exceptions, no user or bundled certificates and no pin overrides — in app/src/main/res/xml and in
   every qualified variant of it (xml-v31…) and the release build type's own resources, any of which Android may use;
-- the only exported component without a permission is the launcher activity.
+- the only exported component without a permission is the launcher activity;
+- the release APK itself (M8, `aapt2 dump resources`) ships each @xml file the manifest points at — the network
+  security config and both backup rule files — in no configuration but those checked here: a library's resource of
+  the same name and qualifiers loses to the app's, but a qualified variant the app lacks (xml-v31/…) would ship
+  beside it, and Android would take it where it applies.
 
-Usage: check_release_manifest.py [merged AndroidManifest.xml]
-(default: the release build's merged manifest under app/build/intermediates)
+Usage: check_release_manifest.py [merged AndroidManifest.xml [release APK]]
+(defaults: the release build's merged manifest under app/build/intermediates and its APK under app/build/outputs;
+aapt2 from the newest build-tools under $ANDROID_HOME or $ANDROID_SDK_ROOT)
 """
 
 from __future__ import annotations
 
 import glob
 import os
+import re
 import secrets
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
@@ -219,6 +226,100 @@ def check(manifest_path: str) -> tuple[list[str], list[str]]:
     return problems, facts
 
 
+# `aapt2 dump resources`: a resource's line, then one line per configuration with its file.
+AAPT2_RESOURCE = re.compile(r"^\s*resource 0x[0-9a-fA-F]+ (\w+)/([\w.]+)")
+AAPT2_FILE = re.compile(r"^\s*\(([^)]*)\) \(file\) (\S+)")
+# The manifest's references to files the app's own checks read, and how many configurations of each they check.
+XML_REFERENCES = ("networkSecurityConfig", "dataExtractionRules", "fullBackupContent")
+
+
+def expected_xml(manifest_path: str) -> dict[str, int]:
+    """For each @xml file the release manifest points at, how many configurations of it this script checks: the
+    network security config in each qualifier directory config_files() finds, the backup rules in res/xml alone."""
+    application = ET.parse(manifest_path).getroot().find("application")
+    expected: dict[str, int] = {}
+    for attribute in XML_REFERENCES:
+        reference = attr(application, attribute) if application is not None else None
+        if not reference or not reference.startswith("@xml/"):
+            continue
+        name = reference.removeprefix("@xml/")
+        if attribute == "networkSecurityConfig":
+            expected[name] = max(1, len({os.path.basename(os.path.dirname(path)) for path in config_files(name)}))
+        else:
+            expected[name] = 1
+    return expected
+
+
+def packaged_files(dump: str) -> dict[str, list[tuple[str, str]]]:
+    """Each resource's files in an APK, from `aapt2 dump resources`: "type/name" -> [(configuration, path)], the
+    default configuration as "". aapt2 prints "(<configuration>) (file) <path> type=XML" under each resource, then
+    "Flag disabled values:" and the values of build flags that are off, which never apply."""
+    files: dict[str, list[tuple[str, str]]] = {}
+    current: list[tuple[str, str]] | None = None
+    for line in dump.splitlines():
+        if match := AAPT2_RESOURCE.match(line):
+            current = files.setdefault(f"{match.group(1)}/{match.group(2)}", [])
+        elif line.strip() == "Flag disabled values:":
+            current = None
+        elif current is not None and (match := AAPT2_FILE.match(line)):
+            configuration = match.group(1).strip()
+            current.append(("" if configuration.lower() == "default" else configuration, match.group(2)))
+    return files
+
+
+def check_packaged_xml(dump: str, expected: dict[str, int]) -> list[str]:
+    """The release APK must hold each file in exactly as many configurations as were checked, the default among them:
+    one more is a variant nobody checked (a library's, or the app's own outside the checked directories)."""
+    problems = []
+    files = packaged_files(dump)
+    for name, count in sorted(expected.items()):
+        found = files.get(f"xml/{name}")
+        if not found:
+            near = [line.strip() for line in dump.splitlines() if name in line][:5]
+            problems.append(f"the release APK lists no file for @xml/{name} (aapt2 dump resources; lines naming it: {near})")
+            continue
+        configurations = [configuration or "default" for configuration, _ in found]
+        if len(found) != count or "default" not in configurations:
+            problems.append(
+                f"the release APK ships @xml/{name} in the configurations {configurations} ({[path for _, path in found]}), "
+                f"but {count} checked here, the default among them: a variant nobody checked would apply where it matches",
+            )
+    return problems
+
+
+def find_aapt2() -> str | None:
+    """aapt2 of the newest build-tools in the Android SDK."""
+    candidates = []
+    for home in filter(None, (os.environ.get("ANDROID_HOME"), os.environ.get("ANDROID_SDK_ROOT"))):
+        candidates += glob.glob(os.path.join(home, "build-tools", "*", "aapt2"))
+
+    def version(path: str) -> list[int]:
+        return [int(part) if part.isdigit() else -1 for part in re.split(r"[.-]", os.path.basename(os.path.dirname(path)))]
+
+    return max(candidates, key=version) if candidates else None
+
+
+def check_apk(expected: dict[str, int], apk: str | None = None, aapt2: str | None = None) -> tuple[list[str], list[str]]:
+    apks = [apk] if apk else sorted(glob.glob("app/build/outputs/apk/release/*.apk"))
+    if len(apks) != 1:
+        return [f"expected one release APK, found {apks}; run assembleRelease first"], []
+    tool = aapt2 or find_aapt2()
+    if not tool:
+        return ["aapt2 not found under $ANDROID_HOME or $ANDROID_SDK_ROOT (build-tools): the release APK can't be checked"], []
+    try:
+        result = subprocess.run([tool, "dump", "resources", apks[0]], capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError) as error:
+        return [f"{tool} dump resources {apks[0]}: {error}"], []
+    if result.returncode != 0:
+        return [f"{tool} dump resources {apks[0]} exited {result.returncode}: {result.stderr.strip()[-500:]}"], []
+    problems = check_packaged_xml(result.stdout, expected)
+    files = packaged_files(result.stdout)
+    facts = [f"release APK {apks[0]} (aapt2 {os.path.basename(os.path.dirname(tool))}): " + "; ".join(
+        f"@xml/{name} {[configuration or 'default' for configuration, _ in files.get(f'xml/{name}', [])]}" for name in sorted(expected)
+    )]
+    return problems, facts
+
+
 def escape(text: str) -> str:
     return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
@@ -234,12 +335,15 @@ def main(argv: list[str]) -> int:
             return 2
         path = found[0]
     problems, facts = check(path)
+    apk_problems, apk_facts = check_apk(expected_xml(path), argv[2] if len(argv) > 2 else None)
+    problems += apk_problems
+    facts += apk_facts
     # The manifest comes from the code under test: print it with workflow commands off.
     token = secrets.token_hex(16)
     print(f"::stop-commands::{token}")
     print(f"Release manifest {path}")
     print("\n".join(f"  {fact}" for fact in facts))
-    print("\n".join(f"PROBLEM {problem}" for problem in problems) or "OK: permissions, backups, debuggable, cleartext, trust, exports")
+    print("\n".join(f"PROBLEM {problem}" for problem in problems) or "OK: permissions, backups, debuggable, cleartext, trust, exports, packaged files")
     print(f"::{token}::")
     if problems:
         print(f"::error title=release manifest::{escape(chr(10).join(problems))}")

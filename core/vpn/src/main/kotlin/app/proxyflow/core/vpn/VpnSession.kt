@@ -186,7 +186,7 @@ class VpnSession(
     /** A connected marker was written for the session that runs, so its end removes it. */
     private var markerWritten = false
 
-    /** Whose session that marker is: a switch to another profile writes that profile's, a reconnection keeps it. */
+    /** Whose session that marker is: a switch to another profile writes that profile's, a reconnection or restart keeps it. */
     private var markerProfile: String? = null
 
     /** [protection]'s writes, in the order the session makes them (DataStore keeps them in order only one at a time). */
@@ -383,6 +383,8 @@ class VpnSession(
         val reconnecting = tun != null
         // The interface stays with no engine: from now traffic is held (a switch's, or a restart's while connected).
         if (reconnecting && heldSinceMillis == null) heldSinceMillis = clock()
+        // Held for this profile from now: after a switch (or a switch back) the marker names it, since now (ADR-0013 §4).
+        if (reconnecting) writeMarker(profile.id, clock())
         log("connect ${profile.id}${if (reconnecting) " (reconnect)" else ""}")
         attemptStartedMillis = clock()
         val previous = state.value
@@ -655,7 +657,9 @@ class VpnSession(
 
     /**
      * The marker the next process finds if this one ends with the VPN up (M8): once per profile's session — a
-     * reconnection keeps the session's, a switch to another profile writes that one's (it replaces the marker before).
+     * reconnection or a restart of the same profile keeps the session's; a switch to another profile writes that
+     * one's as it begins, since traffic is held for it from then (it replaces the marker before), whether or not it
+     * connects.
      */
     private fun writeMarker(profileId: String?, sinceMillis: Long) {
         if (markerWritten && markerProfile == profileId) return

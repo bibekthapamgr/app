@@ -26,17 +26,20 @@ restart_adbd() {
     # attempt 3, API 35: "device offline" when the script then asked whether tcpdump still ran): wait until a command
     # really runs as that user. adb itself can lose the device across the restart (run 41690836372, API 35: "adb root"
     # failed and the device stayed offline, so the phone's captures were never pulled): then it connects again and
-    # tries once more, up to three times.
-    local want=0 _try _
+    # tries once more, up to three times — all within 4 minutes, so the step's own time limit is never spent here.
+    local want=0 deadline=$((SECONDS + 240)) _try _
     if [ "$1" = unroot ]; then want=2000; fi
     for _try in 1 2 3; do
+        [ "$SECONDS" -lt "$deadline" ] || break
         if timeout 30 adb "$1" >/dev/null 2>&1; then
             for _ in $(seq 1 30); do
+                [ "$SECONDS" -lt "$deadline" ] || break
                 sleep 2
                 timeout 10 adb wait-for-device >/dev/null 2>&1 || continue
                 if [ "$(timeout 10 adb shell id -u 2>/dev/null | tr -d '\r')" = "$want" ]; then return 0; fi
             done
         fi
+        [ "$SECONDS" -lt "$deadline" ] || break
         timeout 20 adb reconnect >/dev/null 2>&1 || true
         timeout 60 adb wait-for-device >/dev/null 2>&1 || true
     done
@@ -325,10 +328,17 @@ if [ "$GUEST_CAPTURE" = 1 ]; then
     sleep 3
     echo "captured on the phone: $(timeout 30 adb shell 'ls -l /data/local/tmp/pf-*.pcap' 2>&1 | tr -d '\r' | awk '{print $NF, $5}' | paste -sd ';' -)" >> "$OUT/guest-capture.txt"
     for iface in $(cat "$OUT/guest-interfaces.txt"); do
-        # Once more after adb has the device again, should the first pull fail (the device offline for a moment).
-        timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1 ||
-            { timeout 60 adb wait-for-device >/dev/null 2>&1; timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1; } ||
-            echo "pull of pf-$iface.pcap failed or timed out" >> "$OUT/guest-capture.txt"
+        # Once more after adb has the device again, should the first pull fail at once (the device offline for a
+        # moment); one that took its whole time limit is not tried again, so the step's own limit is not spent on it.
+        pull_started=$SECONDS
+        if ! timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1; then
+            if [ $((SECONDS - pull_started)) -lt 60 ] && timeout 60 adb wait-for-device >/dev/null 2>&1 &&
+                timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1; then
+                echo "pulled pf-$iface.pcap at the second try" >> "$OUT/guest-capture.txt"
+            else
+                echo "pull of pf-$iface.pcap failed or timed out" >> "$OUT/guest-capture.txt"
+            fi
+        fi
     done
 fi
 timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties /data/local/tmp/proxyflow-ca.pem /data/local/tmp/pf-client.apk \

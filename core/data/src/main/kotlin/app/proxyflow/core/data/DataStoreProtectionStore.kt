@@ -15,6 +15,7 @@ import app.proxyflow.core.model.KillSwitchStatus
 import app.proxyflow.core.model.SystemKillSwitch
 import java.io.IOException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
@@ -23,15 +24,18 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 
 /**
  * [ProtectionStore] in its own Preferences DataStore file. A file that can't be read reads as empty (nothing known),
  * so the screens that show it never fail on it; writes that fail throw to the caller, which logs them.
  *
- * Every write of this file goes through here, and after each one the flows read DataStore afresh: DataStore's own
- * flow can miss a write for a collector that started while that write was on its way (it reads the old file under
- * the write's new version, then drops the write's own update as not newer). On the emulators that kept an
- * interruption from a test that began to wait for it just then (M8, run 41690836372); Home could miss it the same way.
+ * Every write of this file goes through here, and after each one the flows read DataStore afresh: DataStore before
+ * 1.3.0 could miss a write in its flow for a collector that started while that write was on its way (it read the old
+ * file under the write's new version, then dropped the write's own update as not newer; fixed in 1.3.0-alpha03). On
+ * the emulators, with 1.1.7, that kept an interruption from a test that began to wait for it just then (M8, run
+ * 41690836372); Home could have missed it the same way. ProxyFlow now uses 1.3.0, and the store still reads again,
+ * so what Home shows of an interruption never rests on that fix alone.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : ProtectionStore {
@@ -42,9 +46,10 @@ class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : 
         dataStore.data.catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
     }
 
+    /** A write once begun is finished, even if its caller is cancelled meanwhile: the read again then sees it. */
     private suspend fun write(change: (MutablePreferences) -> Unit) {
         try {
-            dataStore.edit { change(it) }
+            withContext(NonCancellable) { dataStore.edit { change(it) } }
         } finally {
             writes.update { it + 1 }
         }

@@ -390,6 +390,64 @@ class KillSwitchTest {
         eventually("the marker is gone") { protection.connected == null }
     }
 
+    /**
+     * A switch that never connects (the sign-in refused) holds traffic for that profile, so the marker names it from
+     * the switch; going back to the first profile an hour later starts its session, and its marker, afresh.
+     */
+    @Test
+    fun aSwitchThatFailsNamesThatProfileAndGoingBackStartsAfresh() {
+        val first = connect()
+        eventually("the first profile's marker") { protection.connected?.profileId == first.id }
+        val second = saveOsaka()
+        now.set(NOW + 3_600_000)
+        engine.answer = PreflightAnswer(ok = false, code = "AUTH_FAILED")
+        session.connect(second.id)
+        await { it.profileId == second.id && it.status == ConnectionStatus.Blocked }
+        eventually("the second profile's marker, from the switch") { protection.connected?.profileId == second.id }
+        assertEquals(ConnectedMarker(second.id, NOW + 3_600_000, FakeHistory.PID, FakeHistory.BOOT), protection.connected)
+
+        now.set(NOW + 7_200_000)
+        engine.answer = PreflightAnswer(ok = true)
+        session.connect(first.id)
+        val back = await { it.status == ConnectionStatus.Connected && it.profileId == first.id }
+        assertEquals("the first profile's new session", NOW + 7_200_000, back.connectedSinceMillis)
+        eventually("the first profile's marker again") { protection.connected?.profileId == first.id }
+        assertEquals(ConnectedMarker(first.id, NOW + 7_200_000, FakeHistory.PID, FakeHistory.BOOT), protection.connected)
+    }
+
+    /** The same while the other profile is still being checked: going back is a new session of the first one. */
+    @Test
+    fun goingBackWhileTheOtherProfileIsCheckedStartsTheFirstAfresh() {
+        val first = connect()
+        eventually("the first profile's marker") { protection.connected?.profileId == first.id }
+        val second = saveOsaka()
+        val check = CountDownLatch(1) // held well past any wait of this test, so the second profile never connects
+        engine.probeHook = { if (it.id == second.id) check.await(6 * TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS) }
+        val back = try {
+            now.set(NOW + 3_600_000)
+            session.connect(second.id)
+            eventually("the second profile is checked") { log.count("probe ${second.id}") > 0 }
+            eventually("the second profile's marker, from the switch") { protection.connected?.profileId == second.id }
+            assertFalse("the second profile has not connected", state.value.status == ConnectionStatus.Connected)
+
+            now.set(NOW + 7_200_000)
+            session.connect(first.id)
+            await { it.status == ConnectionStatus.Connected && it.profileId == first.id }
+        } finally {
+            check.countDown()
+        }
+        assertEquals(NOW + 7_200_000, back.connectedSinceMillis)
+        eventually("the first profile's marker again") { protection.connected?.profileId == first.id }
+        assertEquals(ConnectedMarker(first.id, NOW + 7_200_000, FakeHistory.PID, FakeHistory.BOOT), protection.connected)
+    }
+
+    private fun saveOsaka(): ProxyProfile = runBlocking {
+        profiles.repository.save(
+            null,
+            ProxyProfileInput(name = "Osaka", protocol = ProxyProtocol.SOCKS5, server = "osaka.example.com", port = "1080"),
+        )
+    }
+
     /** Dismissing removes the interruption Home showed, never one that replaced it meanwhile (unseen). */
     @Test
     fun dismissingRemovesOnlyTheInterruptionThatWasShown() {

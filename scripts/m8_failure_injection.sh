@@ -212,6 +212,9 @@ release_owner() { # B: the device owner given up (so the test APK can be uninsta
 }
 
 on_exit() {
+    # A second stop (the time limit's, while a first one is handled) must not cut the clean-up or the steps short: each
+    # adb call here has its own time limit, and the KILL that follows the time limit is the backstop.
+    trap '' TERM INT
     stop_instrument
     always_on_off
     release_owner
@@ -225,6 +228,9 @@ STEPS_PRINTED=""
 print_steps() {
     [ -z "$STEPS_PRINTED" ] || return 0
     STEPS_PRINTED=1
+    # Printed whole, or workflow commands stay off for the rest of the step: a stop meanwhile is ignored (what follows
+    # is clean-up with its own time limits).
+    trap '' TERM INT
     local token
     token="$(openssl rand -hex 16 2>/dev/null || echo "m8$RANDOM$RANDOM")"
     echo "::group::M8 failure injection steps (API $API)"
@@ -428,15 +434,19 @@ scenario_b() {
     done
     # Android may start ProxyFlow again after the last probe too: looked for once more just before the next step.
     if [ -z "$back" ] && line="$(wait_log "$start" 0 "ProxyFlowVpn *: always-on start")"; then back="$line"; fi
-    [ -n "$back" ] || [ -z "$(app_pid)" ] || note "B: a ProxyFlow process runs again (pid $(app_pid)), not started as Always-on VPN"
+    local running
+    running="$(app_pid)"
     if [ -n "$back" ]; then
-        note "B: Android started ProxyFlow again (pid $(app_pid)): $(echo "$back" | cut -c1-120)"
-        # am instrument force-stops a ProxyFlow Android started again: if it had connected (or held traffic), the next
-        # start finds that connection, force-stopped; if not, the one killed above.
-        [ "$API" -ge 30 ] && EXPECT="force_stopped,$EXPECT"
+        note "B: Android started ProxyFlow again (pid $running): $(echo "$back" | cut -c1-120)"
+    elif [ -n "$running" ]; then
+        note "B: a ProxyFlow process runs again (pid $running), not started as Always-on VPN so far"
     else
         note "B: Android did not start ProxyFlow again within the probes"
     fi
+    # am instrument force-stops a ProxyFlow that runs again: if it had connected (or held traffic) by then — a process
+    # running without the line may log its Always-on VPN start in the moment before — the next start finds that
+    # connection, force-stopped; if not, the one killed above.
+    if [ -n "$back$running" ] && [ "$API" -ge 30 ]; then EXPECT="force_stopped,$EXPECT"; fi
     if instrument afterLockdownKill "$token" "$EXPECT" 150 "$since"; then
         note "B: the next start: passed (kept what Android said; blocked before connecting; connected again while Android blocks; expected $EXPECT)"
     else

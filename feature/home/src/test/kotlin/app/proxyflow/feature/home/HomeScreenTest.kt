@@ -352,7 +352,7 @@ class HomeScreenTest {
         assertEquals(listOf("kill switch guide", "kill switch guide"), calls)
     }
 
-    /** With Android's kill switch on, stopping and a failed check say apps have no internet, not the normal network. */
+    /** With Android's kill switch on when last read, stopping and a failed check say apps may have no internet, not the normal network. */
     @Test
     fun withAndroidsKillSwitchOnStoppingSaysAppsHaveNoInternet() {
         val blocked = ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.ENGINE_STOPPED))
@@ -364,7 +364,9 @@ class HomeScreenTest {
 
         state = ready(ConnectionState(profileId = "p1", error = ConnectionError("PROXY_UNREACHABLE")), killSwitch = KILL_SWITCH_ON)
         compose.waitForIdle()
-        scrolledTo("You're not connected — with Android's system kill switch on, apps have no internet.").assertIsDisplayed()
+        scrolledTo(
+            "You're not connected. Android's system kill switch was on when ProxyFlow last checked: if it still is, apps have no internet.",
+        ).assertIsDisplayed()
     }
 
     /** M8: the last process ended while connected; Home says when and why, and what that meant for apps, until seen. */

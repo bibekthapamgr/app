@@ -228,7 +228,7 @@
     <string name="home_prevent_title">Prevent this next time</string>
     <string name="home_prevent_message">Turn on Always-on VPN with \u201cBlock connections without VPN\u201d so Android blocks traffic when ProxyFlow isn\'t running.</string>
     <string name="home_not_connected_note_always_on">Apps have no internet if \u201cBlock connections without VPN\u201d is on in Android\'s VPN settings; otherwise they use your normal network.</string>
-    <string name="home_not_connected_note_kill_switch">You\'re not connected — with Android\'s system kill switch on, apps have no internet.</string>
+    <string name="home_not_connected_note_kill_switch">You\'re not connected. Android\'s system kill switch was on when ProxyFlow last checked: if it still is, apps have no internet.</string>
     <string name="home_stop_message_kill_switch">Android\'s system kill switch was on when ProxyFlow last checked: if it still is, apps will have no internet until you connect again.</string>
 
     <!-- M8: the last process ended while connected, without the connection being stopped. -->
