@@ -33,7 +33,7 @@ stateDiagram-v2
 Rules that apply to every state:
 
 - **Connected** is shown only after the first successful proxy handshake, never just because the TUN interface exists.
-- **Connecting** runs a pre-flight handshake with the proxy *before* the VPN interface is established. If it fails, nothing was changed on the phone: the user sees the specific error in the B6b layout ("You're not connected — apps are still using your normal network").
+- **Connecting** runs a pre-flight handshake with the proxy *before* the VPN interface is established. If it fails, nothing was changed on the phone: the user sees the specific error in the B6b layout ("You're not connected: apps use your normal network unless Android's system kill switch is on"; until M8, "You're not connected — apps are still using your normal network").
 - Once connected, in **Reconnecting, Error and Offline** the VPN interface stays up and the engine refuses new flows → traffic is blocked (B5, B6a, B6c, B7). Leaving these states always requires an explicit user action labelled "Stop and use normal network".
 - **Revoked** is outside ProxyFlow's control: Android removed the VPN. Only Always-on + "Block connections without VPN" keeps traffic blocked (`02-traffic-support-matrix.md` §4).
 

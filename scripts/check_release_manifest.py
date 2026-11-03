@@ -20,8 +20,8 @@ fails CI unless:
 - what the release APK itself ships (M8) for each @xml file the manifest points at — the network security config and
   both backup rule files — passes the same checks, in every configuration it ships (`aapt2 dump resources`, then
   `aapt2 dump xmltree` of each file): a library's resource of the same name and qualifiers loses to the app's, but a
-  qualified variant the app lacks (xml-v31/…) or the release build type's own copy ships too, and Android takes it
-  where it applies.
+  qualified variant the app lacks (xml-v31/…) ships beside it and applies where it matches, and the release build
+  type's own copy replaces main's.
 
 Usage: check_release_manifest.py [merged AndroidManifest.xml [release APK]]
 (defaults: the release build's merged manifest under app/build/intermediates and its APK under app/build/outputs;
@@ -243,9 +243,12 @@ def check(manifest_path: str) -> tuple[list[str], list[str]]:
 # `aapt2 dump resources`: a resource's line, then one line per configuration with its file.
 AAPT2_RESOURCE = re.compile(r"^\s*resource 0x[0-9a-fA-F]+ (\w+)/([\w.]+)")
 AAPT2_FILE = re.compile(r"^\s*\(([^)]*)\) \(file\) (\S+)")
-# `aapt2 dump xmltree`: "E: <name> (line=N)" for an element, its children indented below its "A: <name>=<value>"
-# attribute lines; a namespace's "N:" line and text's "T:" line need nothing here.
-AAPT2_ELEMENT = re.compile(r"^(\s*)E: (?:\S*:)?([^\s:]+) \(line=\d+\)\s*$")
+# `aapt2 dump xmltree` (tools/aapt2/Debug.cpp, XmlPrinter): "E: [<namespace>:]<name> (line=N)" for an element, its
+# "A: [<namespace>:]<name>=<value>" attribute lines one level in and its children two; an element that declares
+# namespaces comes after an "N: <prefix>=<uri>" line for each, every one a level deeper, so the first of them is at the
+# element's own depth; text's "T:" lines need nothing here.
+AAPT2_ELEMENT = re.compile(r"^(\s*)E: (\S+) \(line=\d+\)\s*$")
+AAPT2_NAMESPACE = re.compile(r"^(\s*)N: ")
 AAPT2_ATTRIBUTE = re.compile(r"^\s*A: (.*)$")
 
 
@@ -277,11 +280,21 @@ def packaged_files(dump: str) -> dict[str, list[tuple[str, str]]]:
     return files
 
 
+def clark(name: str) -> str:
+    """aapt2's `<namespace>:<name>` as ElementTree's `{<namespace>}<name>`; a name without one as it is (a name has no
+    colon of its own: aapt2 compiles no undeclared prefix)."""
+    if ":" not in name:
+        return name
+    namespace, local = name.rsplit(":", 1)
+    return f"{{{namespace}}}{local}"
+
+
 def xml_attribute(text: str) -> tuple[str, str]:
-    """An attribute as `aapt2 dump xmltree` prints it — `name="value" (Raw: "value")`, a compiled `name=false` or
-    `name=@raw/file`, a namespace and resource id before the name — as (name, value), the raw value where printed."""
+    """An attribute as `aapt2 dump xmltree` prints it — a string as `name="value" (Raw: "value")`, a boolean as
+    `name=false`, a reference as `name=@0x7f…`, a namespace and resource id around the name — as (name, value), the
+    name in ElementTree's form, the raw value where printed."""
     head, _, value = text.partition("=")
-    name = re.sub(r"\(0x[0-9a-fA-F]+\)$", "", head).rsplit(":", 1)[-1]
+    name = clark(re.sub(r"\(0x[0-9a-fA-F]+\)$", "", head))
     raw = re.search(r' \(Raw: "(.*)"\)$', value)
     if raw:
         return name, raw.group(1)
@@ -291,22 +304,27 @@ def xml_attribute(text: str) -> tuple[str, str]:
 
 
 def xmltree_root(dump: str) -> ET.Element | None:
-    """The element tree `aapt2 dump xmltree` printed for one file, attributes and all; None if it printed none, or
-    more than one top element (it never does for a file that parsed)."""
+    """The element tree `aapt2 dump xmltree` printed for one file, attributes and all, namespaced names in
+    ElementTree's form; None if it printed none, or more than one top element (it never does for a file that parsed)."""
     root: ET.Element | None = None
     open_elements: list[tuple[int, ET.Element]] = []
+    declared: int | None = None  # the depth of the "N:" lines just before an element: the element's own
     for line in dump.splitlines():
-        if match := AAPT2_ELEMENT.match(line):
-            indent = len(match.group(1))
-            while open_elements and open_elements[-1][0] >= indent:
+        if namespace := AAPT2_NAMESPACE.match(line):
+            if declared is None:
+                declared = len(namespace.group(1))
+        elif match := AAPT2_ELEMENT.match(line):
+            depth = len(match.group(1)) if declared is None else declared
+            declared = None
+            while open_elements and open_elements[-1][0] >= depth:
                 open_elements.pop()
             if open_elements:
-                element = ET.SubElement(open_elements[-1][1], match.group(2))
+                element = ET.SubElement(open_elements[-1][1], clark(match.group(2)))
             elif root is None:
-                element = root = ET.Element(match.group(2))
+                element = root = ET.Element(clark(match.group(2)))
             else:
                 return None
-            open_elements.append((indent, element))
+            open_elements.append((depth, element))
         elif open_elements and (match := AAPT2_ATTRIBUTE.match(line)):
             name, value = xml_attribute(match.group(1))
             open_elements[-1][1].set(name, value)
@@ -314,10 +332,13 @@ def xmltree_root(dump: str) -> ET.Element | None:
 
 
 def check_packaged_file(attribute: str, root: ET.Element, where: str) -> list[str]:
-    """The checks the source files get, on what the APK ships."""
+    """The checks the source files get, on what the APK ships; and no namespaced element or attribute, which these
+    files never use and Android would read by its local name (a `<certificates>` or `src` from another namespace)."""
+    namespaced = sorted({name for element in root.iter() for name in (element.tag, *element.attrib) if name.startswith("{")})
+    problems = [f"{where}: names in a namespace, which these files never use: {namespaced}"] if namespaced else []
     if attribute == "networkSecurityConfig":
-        return check_network_security_root(root, where)
-    return check_rules_root(root, where, BACKUP_RULES[attribute])
+        return problems + check_network_security_root(root, where)
+    return problems + check_rules_root(root, where, BACKUP_RULES[attribute])
 
 
 def find_aapt2() -> str | None:
@@ -346,8 +367,9 @@ def run_aapt2(tool: str, *args: str) -> tuple[str | None, str]:
 def check_apk(references: list[tuple[str, str]], apk: str | None = None, aapt2: str | None = None) -> tuple[list[str], list[str]]:
     """M8: what the release APK ships for each @xml file the manifest points at, read back with aapt2 and checked as
     the sources are — in every configuration it ships: a library's file of the same name and qualifiers loses to the
-    app's, but a qualified variant the app lacks (xml-v31/…) or a release build type's copy ships too, and Android
-    takes it where it applies. The default configuration must be among them (Android 10, the minimum, needs it)."""
+    app's, but a qualified variant the app lacks (xml-v31/…) ships beside it and applies where it matches, and a
+    release build type's copy replaces main's. The default configuration must be among them (Android 10, the minimum,
+    needs it)."""
     apks = [apk] if apk else sorted(glob.glob("app/build/outputs/apk/release/*.apk"))
     if len(apks) != 1:
         return [f"expected one release APK, found {apks}; run assembleRelease first"], []

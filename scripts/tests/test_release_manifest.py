@@ -161,15 +161,25 @@ SHIPPED = {
 LOOSE_NSC = NSC.replace('cleartextTrafficPermitted="false"', 'cleartextTrafficPermitted="true"')
 
 
+def printed(value: str) -> str:
+    """An attribute's value as aapt2 prints it read back from an APK: a boolean compiled (`false`), a reference as its
+    id (`@0x7f…`), a string with its raw value."""
+    if value in ("true", "false"):
+        return value
+    if value.startswith("@"):
+        return "@0x7f120000"
+    return f'"{value}" (Raw: "{value}")'
+
+
 def xmltree(text: str) -> str:
     """What `aapt2 dump xmltree` prints for a file (tools/aapt2/Debug.cpp, XmlPrinter): two spaces per level, an
-    element's attributes one level in, its children two, each string attribute with its raw value."""
+    element's attributes one level in, its children two."""
     lines: list[str] = []
 
     def visit(element, level: int) -> None:
         lines.append(f"{'  ' * level}E: {element.tag} (line={len(lines) + 1})")
         for name, value in element.attrib.items():
-            lines.append(f'{"  " * (level + 1)}A: {name}="{value}" (Raw: "{value}")')
+            lines.append(f"{'  ' * (level + 1)}A: {name}={printed(value)}")
         for child in element:
             visit(child, level + 2)
 
@@ -254,10 +264,65 @@ class PackagedResourcesTest(unittest.TestCase):
 
     def test_aapt2s_ways_of_printing_an_attribute_are_read(self):
         read = check_release_manifest.xml_attribute
-        self.assertEqual(("cleartextTrafficPermitted", "false"), read('cleartextTrafficPermitted="false" (Raw: "false")'))
+        self.assertEqual(("src", "system"), read('src="system" (Raw: "system")'))
         self.assertEqual(("cleartextTrafficPermitted", "false"), read("cleartextTrafficPermitted=false"))
-        self.assertEqual(("src", "@raw/extra_ca"), read("src=@raw/extra_ca"))
-        self.assertEqual(("name", "x"), read('http://schemas.android.com/apk/res/android:name(0x01010003)="x" (Raw: "x")'))
+        self.assertEqual(("src", "@0x7f120000"), read("src=@0x7f120000"))
+        self.assertEqual(
+            ("{http://schemas.android.com/apk/res/android}name", "x"),
+            read('http://schemas.android.com/apk/res/android:name(0x01010003)="x" (Raw: "x")'),
+        )
+        self.assertEqual(("{urn:x}src", "system"), read('urn:x:src="system" (Raw: "system")'))
+
+    def test_a_namespace_declared_on_an_element_doesnt_hide_it_or_its_siblings(self):
+        # aapt2 prints an element that declares a namespace one level deeper, after its "N:" line: it is still its
+        # predecessor's sibling. A second, user <certificates> there, or an <include> after the excludes, must count.
+        user_ca = (
+            "E: network-security-config (line=1)\n"
+            "    E: base-config (line=2)\n"
+            "      A: cleartextTrafficPermitted=false\n"
+            "        E: trust-anchors (line=3)\n"
+            "            E: certificates (line=4)\n"
+            '              A: src="system" (Raw: "system")\n'
+            "            N: x=urn:x (line=5)\n"
+            "              E: certificates (line=5)\n"
+            '                A: src="user" (Raw: "user")\n'
+        )
+        root = check_release_manifest.xmltree_root(user_ca)
+        self.assertEqual(2, len(root.find("base-config/trust-anchors")))
+        problems = check_release_manifest.check_packaged_file("networkSecurityConfig", root, "nsc")
+        self.assertTrue(any("system's certificates alone" in p for p in problems), problems)
+
+        excludes = "".join(
+            f'    E: exclude (line={n})\n      A: domain="{d}" (Raw: "{d}")\n      A: path="." (Raw: ".")\n'
+            for n, d in enumerate(sorted(check_release_manifest.BACKUP_DOMAINS), start=2)
+        )
+        included = (
+            "E: full-backup-content (line=1)\n" + excludes + "    N: x=urn:x (line=9)\n      E: include (line=9)\n"
+            '        A: domain="file" (Raw: "file")\n        A: path="." (Raw: ".")\n'
+        )
+        root = check_release_manifest.xmltree_root(included)
+        self.assertEqual(["exclude"] * 5 + ["include"], [child.tag for child in root])
+        problems = check_release_manifest.check_packaged_file("fullBackupContent", root, "rules")
+        self.assertTrue(any("must not include anything" in p for p in problems), problems)
+
+    def test_a_namespaced_element_or_attribute_fails(self):
+        # Android reads these files' names by their local name: x:src would be src, x:domain-config a domain-config.
+        shadowed = (
+            "E: network-security-config (line=1)\n"
+            "    E: base-config (line=2)\n"
+            "      A: cleartextTrafficPermitted=false\n"
+            "        E: trust-anchors (line=3)\n"
+            "            N: x=urn:x (line=4)\n"
+            "              E: certificates (line=4)\n"
+            '                A: src="user" (Raw: "user")\n'
+            '                A: urn:x:src="system" (Raw: "system")\n'
+        )
+        problems = check_release_manifest.check_packaged_file("networkSecurityConfig", check_release_manifest.xmltree_root(shadowed), "nsc")
+        self.assertTrue(any("namespace" in p and "{urn:x}src" in p for p in problems), problems)
+        self.assertTrue(any("system's certificates alone" in p for p in problems), problems)
+        element = xmltree(NSC) + "    N: x=urn:x (line=9)\n      E: urn:x:domain-config (line=9)\n"
+        problems = check_release_manifest.check_packaged_file("networkSecurityConfig", check_release_manifest.xmltree_root(element), "nsc")
+        self.assertTrue(any("{urn:x}domain-config" in p and "namespace" in p for p in problems), problems)
 
     def test_a_tree_with_namespaces_and_text_is_read_whole(self):
         tree = (
