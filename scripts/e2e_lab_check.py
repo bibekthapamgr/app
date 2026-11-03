@@ -178,8 +178,9 @@ def main(argv: list[str]) -> int:
             got = via(host, port)
             check(f"{name} to {host}:{port}", got == "PROXYFLOW-DEST lab-check", got)
 
-    # The witness (M8): the phone reaches it directly, a proxy never can (each would connect to 10.0.2.2, where it is
-    # not listening).
+    # The witness (M8): the phone reaches it directly, a proxy never can. Dante would connect to 10.0.2.2, where the
+    # witness is not listening (it listens on the runner's loopback); Squid refuses the CONNECT before trying, as 8095
+    # is not one of its tunnel_ports. Either way no line through a proxy reaches it.
     witness = int(p["witness.port"])
     with socket.create_connection(("127.0.0.1", witness), timeout=5) as sock:
         check("the witness answers directly", exchange(sock, "lab-check") == "PROXYFLOW-DEST lab-check")

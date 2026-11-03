@@ -95,6 +95,20 @@ class CrashReportsTest {
         assertTrue(reported.toString().startsWith(FailingMessage::class.java.name))
     }
 
+    /** An exception whose own code fails at every step still reaches Android's handler, which ends the process. */
+    @Test
+    fun anExceptionThatFailsEverythingStillReachesAndroidsHandler() {
+        val passed = mutableListOf<Throwable>()
+        val handler = CrashReports.SanitizingHandler { _, e -> passed += e }
+
+        handler.uncaughtException(Thread.currentThread(), FailingEverything())
+
+        val reported = passed.single()
+        assertEquals(CrashReports.MESSAGE_WITHHELD, reported.message)
+        assertTrue(reported.toString().startsWith(FailingEverything::class.java.name))
+        assertNoSecret(reported)
+    }
+
     @Test
     fun outOfMemoryIsPassedAsItIs() {
         val passed = mutableListOf<Throwable>()
@@ -135,6 +149,13 @@ class CrashReportsTest {
 
     class FailingMessage : RuntimeException() {
         override val message: String get() = throw IllegalStateException("no message")
+    }
+
+    /** Its message, its stack trace and its causes all fail. */
+    class FailingEverything : RuntimeException() {
+        override val message: String get() = throw IllegalStateException("no message from proxy.example.com")
+        override val cause: Throwable get() = throw IllegalStateException("no cause")
+        override fun getStackTrace(): Array<StackTraceElement> = throw IllegalStateException("no stack trace")
     }
 
     private companion object {

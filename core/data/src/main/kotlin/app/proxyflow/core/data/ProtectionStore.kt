@@ -28,8 +28,14 @@ interface ProtectionStore {
     /** The connection was stopped (or it never connected): nothing is left behind. */
     suspend fun clearConnected()
 
-    /** What a previous process left behind, removed as it is read; null when its connection was stopped. */
-    suspend fun takeConnected(): ConnectedMarker?
+    /**
+     * What a previous process left behind, or null when its connection was stopped. Reading leaves it: only
+     * [interrupted] removes it, so a process that ends before it has recorded the interruption leaves it to the next.
+     */
+    suspend fun connectedMarker(): ConnectedMarker?
+
+    /** In one write: [value] becomes the interruption the user has not seen yet, and the marker it came from is removed. */
+    suspend fun interrupted(value: Interruption)
 }
 
 /**
@@ -46,7 +52,7 @@ class InMemoryProtectionStore(
     connected: ConnectedMarker? = null,
 ) : ProtectionStore {
     private val switch = MutableStateFlow(killSwitch)
-    private val interrupted = MutableStateFlow(interruption)
+    private val unseen = MutableStateFlow(interruption)
 
     /** The marker as stored now (tests). */
     @Volatile var connected: ConnectedMarker? = connected
@@ -58,10 +64,10 @@ class InMemoryProtectionStore(
         switch.value = value
     }
 
-    override val interruption: Flow<Interruption?> = interrupted.asStateFlow()
+    override val interruption: Flow<Interruption?> = unseen.asStateFlow()
 
     override suspend fun setInterruption(value: Interruption?) {
-        interrupted.value = value
+        unseen.value = value
     }
 
     override suspend fun markConnected(marker: ConnectedMarker) {
@@ -72,5 +78,10 @@ class InMemoryProtectionStore(
         connected = null
     }
 
-    override suspend fun takeConnected(): ConnectedMarker? = connected.also { connected = null }
+    override suspend fun connectedMarker(): ConnectedMarker? = connected
+
+    override suspend fun interrupted(value: Interruption) {
+        unseen.value = value
+        connected = null
+    }
 }

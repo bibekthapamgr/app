@@ -38,7 +38,8 @@
 #   UDP sink             10.99.0.1:9999 and [fd99::1]:9999: UDP must never arrive
 #
 # The witness (M8) is the other way round: 127.0.0.1:8095, which the phone reaches directly as 10.0.2.2:8095 but a
-# proxy never can (it would connect to 10.0.2.2:8095, where nothing listens). Every line it logs got out around
+# proxy never can (Dante would connect to 10.0.2.2:8095, where nothing listens; Squid refuses the port, not one of its
+# tunnel_ports). Every line it logs got out around
 # ProxyFlow: scripts/m8_failure_injection.sh sends lines to it after ProxyFlow's process is killed, where only Android's
 # "Block connections without VPN" can stop them.
 #

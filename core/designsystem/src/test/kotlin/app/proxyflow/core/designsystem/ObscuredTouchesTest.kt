@@ -13,17 +13,20 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.component.PfConfirmDialog
+import app.proxyflow.core.designsystem.component.RefusalNotice
 import app.proxyflow.core.designsystem.component.refusingObscuredTouches
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
  * Taps that pass through another app's window are dropped (threat model S4, M8): Android marks such a touch with
- * FLAG_WINDOW_IS_OBSCURED or FLAG_WINDOW_IS_PARTIALLY_OBSCURED, and the touches here carry those flags as Android's
- * would, sent to the screen the way Compose's own test input sends its touches.
+ * FLAG_WINDOW_IS_OBSCURED, and the touches here carry Android's flags as Android's would, sent to the screen the way
+ * Compose's own test input sends its touches.
  */
 @RunWith(AndroidJUnit4::class)
 class ObscuredTouchesTest {
@@ -50,9 +53,36 @@ class ObscuredTouchesTest {
         assertEquals(0, clicks)
         assertEquals(1, refusals)
 
-        tap("Disconnect", MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED)
+        tap("Disconnect", MotionEvent.FLAG_WINDOW_IS_OBSCURED)
         assertEquals(0, clicks)
         assertEquals("once for each gesture dropped", 2, refusals)
+    }
+
+    /**
+     * Another window over some other part of the screen (a chat bubble in a corner) marks every touch partially
+     * obscured, where the finger is or not: as with Android's own filterTouchesWhenObscured, that tap goes through.
+     */
+    @Test
+    fun aWindowElsewhereOnTheScreenDoesNotStopTheTap() {
+        show()
+        tap("Disconnect", MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED)
+        assertEquals(1, clicks)
+        assertEquals(0, refusals)
+    }
+
+    /** The default message comes at most once per interval, however many taps an overlay makes. */
+    @Test
+    fun theMessageIsNotRepeatedForEveryTap() {
+        var now = 10_000L
+        val notice = RefusalNotice(intervalMillis = 3_500) { now }
+        assertTrue(notice.due())
+        now += 1_000
+        assertFalse(notice.due())
+        now += 2_499
+        assertFalse(notice.due())
+        now += 1
+        assertTrue("one interval after the last message", notice.due())
+        assertFalse(notice.due())
     }
 
     @Test

@@ -7,8 +7,9 @@ a known vulnerability rated HIGH or CRITICAL — or one whose rating can't be to
 names it with the reason it can't reach ProxyFlow and a date by which that is looked at again. The Go engine's own
 dependencies are checked by govulncheck in the engine job; this covers the Kotlin and Android side.
 
-A rating comes from the advisory's own severity where it gives one (GitHub's advisories do), otherwise from its
-CVSS v3 vector, scored here by the CVSS 3.1 specification. OSV not answering fails the check: it can't be shown clean.
+A rating is the higher of the advisory's own severity (GitHub's advisories give one) and its CVSS v3 vector's, scored
+here by the CVSS 3.1 specification. OSV not answering fails the check: it can't be shown clean. So does a line of the
+tree that can't be read, or a library Gradle could not resolve: what is not read is not shown clean either.
 
 Usage: osv_scan.py <gradle dependencies output> [--allowlist FILE]
 """
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import http.client
 import json
 import math
 import os
@@ -32,24 +34,67 @@ VULN = "https://api.osv.dev/v1/vulns/"
 FAILING = {"HIGH", "CRITICAL", "UNKNOWN"}
 DEFAULT_ALLOWLIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "osv_allowlist.json")
 
-# "+--- group:artifact:1.0", "|    \\--- group:artifact:1.0 -> 1.1 (*)", "+--- group:artifact -> 1.1" (a BOM's version).
-LINE = re.compile(
-    r"^[| ]*[+\\]--- (?P<coordinates>[^\s:]+:[^\s:]+)(?::(?P<version>\{[^}]*\}|[^\s]+))?"
-    r"(?: -> (?P<resolved>[^\s]+))?(?P<marks>(?: \([^)]*\))*)\s*$",
+# A line of Gradle's tree: "+--- …" or "\\--- …", indented with "|" and spaces.
+TREE_LINE = re.compile(r"^[| ]*[+\\]--- (?P<entry>.+?)\s*$")
+# "group:artifact:1.0", "group:artifact:1.0 -> 1.1 (*)", "group:artifact -> 1.1" (a BOM's version),
+# "group:artifact:{strictly 1.0} -> 1.0", "group:artifact:1.0 -> other.group:other:2.0" (a module replaced by another).
+ENTRY = re.compile(
+    r"^(?P<coordinates>[^\s:]+:[^\s:]+)(?::(?P<version>\{[^}]*\}|[^\s{}]+))?"
+    r"(?: -> (?P<resolved>[^\s]+))?(?P<marks>(?: \([^)]*\))*)$",
 )
+# The version a rich declaration settles on when Gradle prints no "->": {strictly 1.0}, {require 1.0; reject 1.1}…
+RICH = re.compile(r"\b(?:strictly|require|prefer) ([^\s;}]+)")
+
+
+def read_tree(lines: list[str]) -> tuple[dict[str, str], list[str]]:
+    """group:artifact -> the version Gradle resolved, from its dependency tree (projects and constraints left out), and
+    the lines that could not be read or name a library Gradle could not resolve."""
+    found: dict[str, str] = {}
+    unread: list[str] = []
+    for line in lines:
+        tree = TREE_LINE.match(line.rstrip())
+        if not tree:
+            continue  # a heading, a legend, a blank line: not a dependency
+        entry = tree.group("entry")
+        if entry.startswith("project "):
+            continue  # one of ProxyFlow's own modules
+        if entry.endswith(" FAILED"):
+            unread.append(f"Gradle could not resolve {entry[: -len(' FAILED')]}")
+            continue
+        m = ENTRY.match(entry)
+        if not m:
+            unread.append(f"a dependency line that can't be read: {entry[:160]}")
+            continue
+        if "(c)" in m.group("marks") or "(n)" in m.group("marks"):
+            continue  # a constraint or an unresolved declaration: not on the classpath as such
+        coordinates, resolved, declared = m.group("coordinates"), m.group("resolved"), m.group("version")
+        if resolved and resolved.count(":") == 2:
+            # Replaced by another module: that one is on the classpath, at its own version.
+            group, artifact, version = resolved.split(":")
+            found[f"{group}:{artifact}"] = version
+            continue
+        if resolved and ":" not in resolved:
+            found[coordinates] = resolved
+            continue
+        if resolved:
+            unread.append(f"a dependency line that can't be read: {entry[:160]}")
+            continue
+        if declared and declared.startswith("{"):
+            rich = RICH.search(declared)
+            if not rich:
+                unread.append(f"a version Gradle settled without saying which: {entry[:160]}")
+                continue
+            declared = rich.group(1)
+        if not declared or any(c in declared for c in "+[]()"):
+            unread.append(f"a library without a resolved version: {entry[:160]}")
+            continue
+        found[coordinates] = declared
+    return found, unread
 
 
 def resolved_libraries(lines: list[str]) -> dict[str, str]:
-    """group:artifact -> the version Gradle resolved, from its dependency tree; projects and constraints left out."""
-    found: dict[str, str] = {}
-    for line in lines:
-        m = LINE.match(line.rstrip())
-        if not m or "(c)" in m.group("marks") or "(n)" in m.group("marks"):
-            continue  # a constraint or an unresolved declaration: not on the classpath as such
-        version = m.group("resolved") or m.group("version")
-        if version and not version.startswith("{"):
-            found[m.group("coordinates")] = version
-    return found
+    """group:artifact -> the version Gradle resolved (see read_tree)."""
+    return read_tree(lines)[0]
 
 
 # --- CVSS 3.x base score (https://www.first.org/cvss/v3.1/specification-document, section 7) ------------------------
@@ -100,16 +145,22 @@ def rating(score: float) -> str:
     return "LOW" if score > 0 else "NONE"
 
 
+LEVELS = ["NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+
 def severity_of(advisory: dict) -> tuple[str, str]:
-    """The advisory's rating, and where it came from."""
+    """The advisory's rating — the higher of its own and its CVSS v3 vector's — and where it came from."""
+    rated: list[tuple[str, str]] = []
     own = str((advisory.get("database_specific") or {}).get("severity") or "").upper()
     if own:
-        return ("MEDIUM" if own == "MODERATE" else own), "the advisory's own rating"
+        rated.append(("MEDIUM" if own == "MODERATE" else own, "the advisory's own rating"))
     scores = [s for entry in advisory.get("severity") or [] if (s := cvss3_score(str(entry.get("score", "")))) is not None]
     if scores:
-        best = max(scores)
-        return rating(best), f"CVSS v3 {best}"
-    return "UNKNOWN", "no rating and no CVSS v3 vector"
+        rated.append((rating(max(scores)), f"CVSS v3 {max(scores)}"))
+    known = [r for r in rated if r[0] in LEVELS]
+    if not known:
+        return "UNKNOWN", f"a rating not understood: {own}" if own else "no rating and no CVSS v3 vector"
+    return max(known, key=lambda r: LEVELS.index(r[0]))
 
 
 # --- OSV ------------------------------------------------------------------------------------------------------------
@@ -121,8 +172,8 @@ def post_json(url: str, body: dict | None) -> dict:
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
                 return json.load(response)
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-            last = e
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException, json.JSONDecodeError) as e:
+            last = e  # a reset or cut connection too: asked again
             time.sleep(2**attempt)
     raise RuntimeError(f"OSV did not answer {url}: {last}")
 
@@ -171,11 +222,11 @@ def check(
 ) -> tuple[list[str], list[str]]:
     """(facts, problems) for the libraries in Gradle's dependency tree."""
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
-    libraries = resolved_libraries(tree)
+    libraries, unread = read_tree(tree)
     facts = [f"{len(libraries)} libraries on the release runtime classpath, each asked of OSV at its resolved version"]
-    problems: list[str] = []
+    problems: list[str] = list(unread)
     if not libraries:
-        return facts, ["no library found in the dependency tree: the Gradle output was not read"]
+        return facts, problems + ["no library found in the dependency tree: the Gradle output was not read"]
     for library, ids in sorted(query(libraries, fetch).items()):
         for advisory_id in ids:
             advisory = fetch(VULN + advisory_id, None)

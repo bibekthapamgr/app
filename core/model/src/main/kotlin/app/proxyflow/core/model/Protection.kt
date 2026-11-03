@@ -27,6 +27,12 @@ enum class KillSwitchStatus(val key: String) {
 
     /** Neither: when ProxyFlow's VPN is not running, apps use the normal network. */
     Off("off"),
+    ;
+
+    companion object {
+        /** The status with [key]; null for none or a key a later version wrote. */
+        fun of(key: String?): KillSwitchStatus? = entries.firstOrNull { it.key == key }
+    }
 }
 
 /**
@@ -34,9 +40,11 @@ enum class KillSwitchStatus(val key: String) {
  * removed the VPN with the process, so from then until ProxyFlow connected again apps used the normal network —
  * unless Android's kill switch blocked them.
  *
- * @param connectedSinceMillis when that connection was established (wall clock).
+ * @param connectedSinceMillis when that connection was established, or its traffic first held (wall clock).
  * @param endedAtMillis when Android says the process ended (Android 11 and later), or null when it does not say.
  * @param detectedAtMillis when the next process found out.
+ * @param killSwitch Android's kill switch as ProxyFlow last read it before that process ended — what applied to apps
+ *   from then on, as far as ProxyFlow knows; null when it never read one.
  */
 data class Interruption(
     val profileId: String?,
@@ -44,6 +52,7 @@ data class Interruption(
     val endedAtMillis: Long?,
     val reason: ExitReason,
     val detectedAtMillis: Long,
+    val killSwitch: KillSwitchStatus? = null,
 )
 
 /**

@@ -32,7 +32,9 @@ import org.junit.runner.RunWith
  * have Android's Always-on VPN with "Block connections without VPN" start it — checking from outside what got out
  * meanwhile (the lab's witness, the captures, Android's crash report). Gradle's run of the device tests skips every step.
  *
- * What a step expects is passed in too: `-e expect <ExitReason key>` for how Android says the last process ended.
+ * What a step expects is passed in too: `-e expect <ExitReason key>[,<key>…]` for how Android says the last process
+ * ended, and `-e since <ms>`, the phone's time before the scenario connected, so an interruption an earlier scenario left
+ * is never taken for this one's.
  */
 @RunWith(AndroidJUnit4::class)
 class KillSwitchEndToEndTest {
@@ -41,6 +43,10 @@ class KillSwitchEndToEndTest {
 
     /** The run's token for this step, so the script finds this step's lines and no earlier one's. */
     private val token: String get() = arguments.getString("token") ?: "-"
+
+    /** The phone's time (ms) before the scenario's connection: the interruption to check began after it. */
+    private val since: Long
+        get() = checkNotNull(arguments.getString("since")?.toLongOrNull()) { "no -e since <ms>: the script passes it" }
 
     private fun only(step: String) =
         assumeTrue("run by scripts/m8_failure_injection.sh only (-e m8 $step)", arguments.getString("m8") == step)
@@ -99,7 +105,7 @@ class KillSwitchEndToEndTest {
     /**
      * After the last process ended while connected (killed, crashed): this one starts Disconnected with nothing of the
      * old connection left, has found the interruption with the reason Android gives ([expected]), logged it, and kept
-     * it for Home.
+     * it for Home — and, having read it, still connects nothing of its own accord (ADR-0013 §5).
      */
     @Test
     fun afterProcessDeath() {
@@ -110,6 +116,8 @@ class KillSwitchEndToEndTest {
         app.settleDisconnected()
         eventually("no status notification is left") { app.notification(ProxyFlowVpnService.STATUS_NOTIFICATION_ID) == null }
         checkInterruption()
+        assertEquals("nothing connected once the interruption was read", ConnectionStatus.Disconnected, app.controller.state.value.status)
+        assertTrue("no VPN interface: ${Descriptors.tun()}", Descriptors.tun().isEmpty())
     }
 
     /**
@@ -124,15 +132,33 @@ class KillSwitchEndToEndTest {
         say("kept kill switch: ${killSwitch.status.key}, checked at ${killSwitch.checkedAtMillis}")
         assertEquals("what Android said while ProxyFlow ran for Always-on VPN", KillSwitchStatus.On, killSwitch.status)
         checkInterruption()
+        assertEquals(ConnectionStatus.Disconnected, app.controller.state.value.status)
+        // Still Android's blocking, not ProxyFlow's: the shell (which Android blocks; ProxyFlow's own uid it lets through)
+        // can't reach the witness, which only a connection around ProxyFlow reaches.
+        val witnessPort = checkNotNull(E2eConfig.properties()["witness.port"]?.toIntOrNull()) { "no witness.port in the lab's setup" }
+        val probe = FromShell.tcp(RUNNER, witnessPort, "PF8-B-check-$token", 3_000)
+        say("blocked before connecting: $probe")
+        assertTrue("Android still blocks the shell while ProxyFlow is not connected: $probe", LOCKDOWN_REFUSAL.containsMatchIn(probe))
         connectChosen("lockdown-reconnected")
         say("connected again while Android blocks: lines reach the destination through the proxy")
         app.disconnectAndSettle()
     }
 
-    /** `-e expect key[,key…]`: the reasons Android may give for how the last process ended, the first the likeliest. */
+    /**
+     * `-e expect key[,key…]`: the reasons Android may give for how the last process ended, the first the likeliest; a key
+     * that names no reason fails (a typo would otherwise accept "unknown"). Only an interruption of a connection made
+     * after [since] counts: one an earlier scenario left is not this one's.
+     */
     private fun checkInterruption() {
-        val expected = arguments.getString("expect").orEmpty().split(',').map { ExitReason.of(it.trim()) }
-        val found: Interruption = runBlocking { withTimeout(WAIT_MS) { app.runtime.protection.interruption.filterNotNull().first() } }
+        val expected = arguments.getString("expect").orEmpty().split(',').map { key ->
+            ExitReason.entries.firstOrNull { it.key == key.trim() } ?: throw AssertionError("-e expect: no reason has the key \"$key\"")
+        }
+        val after = since
+        val found: Interruption = runBlocking {
+            withTimeout(INTERRUPTION_WAIT_MS) {
+                app.runtime.protection.interruption.filterNotNull().first { it.connectedSinceMillis >= after }
+            }
+        }
         say("interruption: ${found.reason.key}, ended at ${found.endedAtMillis ?: "-"}, connected since ${found.connectedSinceMillis}")
         assertTrue("how Android says the last process ended: ${found.reason}, expected one of $expected", found.reason in expected)
         assertEquals(chosen, found.profileId)
@@ -140,7 +166,10 @@ class KillSwitchEndToEndTest {
             val ended = assertNotNullAndGet("Android 11+ dates it", found.endedAtMillis)
             assertTrue("it ended after it connected", ended >= found.connectedSinceMillis)
         }
-        val logged = app.awaitLog("the interruption") { it.event == LogEvent.SessionInterrupted && it.profileId == chosen }
+        // Its own entry, dated when that process ended (or when it was found): not an earlier scenario's.
+        val logged = app.awaitLog("the interruption") {
+            it.event == LogEvent.SessionInterrupted && it.profileId == chosen && it.timeMillis >= after
+        }
         assertEquals(found.reason.key, logged.details[LogDetail.REASON])
         runBlocking { app.runtime.protection.setInterruption(null) }
     }
@@ -162,5 +191,14 @@ class KillSwitchEndToEndTest {
         const val HOLD_MS = 180_000L
         const val SETUP_MS = 60_000L
         const val WAIT_MS = 15_000L
+
+        /** Android's answer about the last process can be slow (ActivityManager, with the phone busy): a minute at most. */
+        const val INTERRUPTION_WAIT_MS = 60_000L
+
+        /** The runner, as the emulator reaches it. */
+        const val RUNNER = "10.0.2.2"
+
+        /** How a connect that Android's "Block connections without VPN" refuses fails. */
+        val LOCKDOWN_REFUSAL = Regex("EACCES|Permission denied|EPERM|Operation not permitted")
     }
 }

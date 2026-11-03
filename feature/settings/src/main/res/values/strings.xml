@@ -28,7 +28,7 @@
     <string name="guide_status_off">not set up</string>
     <string name="guide_status_unknown">not checked yet</string>
     <string name="guide_step_1">Tap Open VPN settings below.</string>
-    <string name="guide_step_2">Tap the settings icon next to ProxyFlow.</string>
+    <string name="guide_step_2">Tap the settings icon next to ProxyFlow. It\'s listed there once you\'ve connected with ProxyFlow at least once.</string>
     <string name="guide_step_3">Turn on Always-on VPN.</string>
     <string name="guide_step_4">Turn on Block connections without VPN.</string>
     <string name="guide_vary">Menu names vary by phone maker. With blocking on, apps can\'t go online while ProxyFlow is off — turn it off again in the same place to use your normal network.</string>

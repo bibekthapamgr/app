@@ -22,21 +22,37 @@ internal object CrashReports {
         Thread.setDefaultUncaughtExceptionHandler(SanitizingHandler(current))
     }
 
-    /** Passes on [error] with its messages sanitized; never fails itself, whatever the exception holds. */
+    /**
+     * Passes on [error] with its messages sanitized. Whatever the exception holds or does, the handler Android
+     * installed runs next with something: it is what ends the process and keeps the crash report.
+     */
     class SanitizingHandler(private val next: Thread.UncaughtExceptionHandler?) : Thread.UncaughtExceptionHandler {
         override fun uncaughtException(thread: Thread, error: Throwable) {
-            // Out of memory: copying could fail the same way, and Android's message for it names no data.
-            val reported = if (error is OutOfMemoryError) {
-                error
-            } else {
-                try {
-                    sanitized(error)
-                } catch (e: Throwable) {
-                    // The exception could not even be copied (its own code failed): none of its text is passed on.
-                    ReportedThrowable(error.javaClass.name, MESSAGE_WITHHELD, null).also { it.stackTrace = error.stackTrace }
-                }
+            val reported = try {
+                reportOf(error)
+            } catch (e: Throwable) {
+                LAST_RESORT // not even a stand-in could be made (out of memory): one that says nothing
             }
             next?.uncaughtException(thread, reported)
+        }
+    }
+
+    /** What Android's handler gets for [error]. */
+    private fun reportOf(error: Throwable): Throwable {
+        // Out of memory: copying could fail the same way, and Android's message for it names no data.
+        if (error is OutOfMemoryError) return error
+        return try {
+            sanitized(error)
+        } catch (e: Throwable) {
+            // The exception could not even be copied (its own code failed): none of its text is passed on, and its
+            // stack trace only if that can still be read.
+            ReportedThrowable(error.javaClass.name, MESSAGE_WITHHELD, null).also { stand ->
+                try {
+                    stand.stackTrace = error.stackTrace
+                } catch (e: Throwable) {
+                    // the stand-in keeps its own
+                }
+            }
         }
     }
 
@@ -87,4 +103,7 @@ internal object CrashReports {
 
     const val MESSAGE_WITHHELD = "[message withheld]"
     private const val MAX_DEPTH = 16
+
+    /** Made with the handler, for when nothing else can be: names no class and holds no text. */
+    private val LAST_RESORT = ReportedThrowable(Throwable::class.java.name, MESSAGE_WITHHELD, null)
 }

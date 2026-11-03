@@ -322,7 +322,7 @@ jobs:
     needs: engine
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 100
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -379,8 +379,9 @@ jobs:
       - name: Keystore, storage, engine and VPN tests on an emulator (API ${{ matrix.api-level }}), its uplink captured
         id: emulator
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
-        # Inside the job's limit, so the evidence, the digest and the upload below still run if the emulator hangs.
-        timeout-minutes: 78
+        # Inside the job's limit, so the evidence, the digest and the upload below still run if the emulator hangs:
+        # boot (up to 15 min), the device tests (up to 55), M8's failure injection (up to 13) and the pulls after it.
+        timeout-minutes: 95
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}

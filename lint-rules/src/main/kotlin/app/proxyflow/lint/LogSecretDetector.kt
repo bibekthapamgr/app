@@ -25,9 +25,9 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor
  * writes to logcat — `android.util.Log`, the VPN layer's own log (`VpnLog.add`, and the session's
  * `log` function), `println` — may not pass:
  *
- * - a value whose name says it is a credential, a server or a destination (`password`, `username`,
- *   `secret`, `credential`, `host`, `server`, `endpoint`, `address`, `destination`, `sni`, `url`,
- *   `payload`), wherever it appears in the statement;
+ * - a value whose name says it is a credential, a server or a destination (`password`, `pass`, `pwd`,
+ *   `username`, `secret`, `token`, `credential`, `host`, `server`, `endpoint`, `address`, `ip`,
+ *   `domain`, `destination`, `target`, `sni`, `url`, `payload`), wherever it appears in the statement;
  * - bytes or characters (`ByteArray`, `CharArray`, `ByteBuffer`), the engine's secret, credentials
  *   read from storage or a profile being edited, wherever they appear;
  * - a whole profile, or any of its fields but its random `id` and its `protocol`;
@@ -231,11 +231,14 @@ class LogSecretDetector :
 
         private val LOG_METHODS = setOf("v", "d", "i", "w", "e", "wtf", "println")
 
-        /** Words of identifiers (compared without a plural "s"). */
+        /**
+         * Words of identifiers, compared without a plural "s" — so "pass" is "pas" and "address" "addres" ("passes", a
+         * count of passes, is "passe" and not one of them).
+         */
         private val DENIED_WORDS = setOf(
-            "password", "passwd", "username", "user", "secret", "credential", "host", "hostname", "server", "endpoint",
-            "addres", "addresse",
-            "address", "destination", "dst", "sni", "url", "uri", "payload", "packet",
+            "password", "passwd", "pas", "pwd", "username", "user", "secret", "token", "credential",
+            "host", "hostname", "server", "endpoint", "addres", "addresse", "address", "ip", "domain",
+            "destination", "dst", "target", "sni", "url", "uri", "payload", "packet",
         )
 
         /** Between the words of an identifier: before an upper-case letter, at an underscore or a digit run. */

@@ -63,6 +63,12 @@ interface ConnectionController {
      * shows the status calls it when it is shown (M8). The answer arrives through [ProtectionStore.killSwitch].
      */
     fun checkSystemKillSwitch() = Unit
+
+    /**
+     * The interrupted connection Home shows has been seen, or the user connects again: it is cleared through the
+     * session, in order with its own writes, so one found as the process starts is never cleared before it is kept.
+     */
+    fun dismissInterruption() = Unit
 }
 
 /** For builds and tests without a VPN service: always disconnected, connecting is not available. */

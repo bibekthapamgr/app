@@ -5,19 +5,29 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.proxyflow.core.model.ExitReason
 import app.proxyflow.core.model.Interruption
+import app.proxyflow.core.model.KillSwitchStatus
 import app.proxyflow.core.model.SystemKillSwitch
+import java.io.IOException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
-/** [ProtectionStore] in its own Preferences DataStore file. */
+/**
+ * [ProtectionStore] in its own Preferences DataStore file. A file that can't be read reads as empty (nothing known),
+ * so the screens that show it never fail on it; writes that fail throw to the caller, which logs them.
+ */
 class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : ProtectionStore {
-    override val killSwitch: Flow<SystemKillSwitch?> = dataStore.data.map { prefs ->
+    private val prefs: Flow<Preferences> = dataStore.data.catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+
+    override val killSwitch: Flow<SystemKillSwitch?> = prefs.map { prefs ->
         val checkedAt = prefs[KILL_SWITCH_CHECKED] ?: return@map null
         SystemKillSwitch(
             alwaysOn = prefs[KILL_SWITCH_ALWAYS_ON] ?: false,
@@ -34,7 +44,7 @@ class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : 
         }
     }
 
-    override val interruption: Flow<Interruption?> = dataStore.data.map { prefs ->
+    override val interruption: Flow<Interruption?> = prefs.map { prefs ->
         val since = prefs[INTERRUPTED_SINCE] ?: return@map null
         Interruption(
             profileId = prefs[INTERRUPTED_PROFILE],
@@ -42,19 +52,12 @@ class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : 
             endedAtMillis = prefs[INTERRUPTED_ENDED],
             reason = ExitReason.of(prefs[INTERRUPTED_REASON]),
             detectedAtMillis = prefs[INTERRUPTED_DETECTED] ?: since,
+            killSwitch = KillSwitchStatus.of(prefs[INTERRUPTED_KILL_SWITCH]),
         )
     }.distinctUntilChanged()
 
     override suspend fun setInterruption(value: Interruption?) {
-        dataStore.edit { prefs ->
-            INTERRUPTION_KEYS.forEach { prefs.remove(it) }
-            if (value == null) return@edit
-            value.profileId?.let { prefs[INTERRUPTED_PROFILE] = it }
-            prefs[INTERRUPTED_SINCE] = value.connectedSinceMillis
-            value.endedAtMillis?.let { prefs[INTERRUPTED_ENDED] = it }
-            prefs[INTERRUPTED_REASON] = value.reason.key
-            prefs[INTERRUPTED_DETECTED] = value.detectedAtMillis
-        }
+        dataStore.edit { prefs -> prefs.putInterruption(value) }
     }
 
     override suspend fun markConnected(marker: ConnectedMarker) {
@@ -71,15 +74,29 @@ class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : 
         dataStore.edit { it.removeMarker() }
     }
 
-    override suspend fun takeConnected(): ConnectedMarker? {
-        var taken: ConnectedMarker? = null
+    override suspend fun connectedMarker(): ConnectedMarker? {
+        val prefs = prefs.first()
+        val since = prefs[CONNECTED_SINCE] ?: return null
+        val pid = prefs[CONNECTED_PID] ?: return null
+        return ConnectedMarker(prefs[CONNECTED_PROFILE], since, pid, prefs[CONNECTED_BOOT])
+    }
+
+    override suspend fun interrupted(value: Interruption) {
         dataStore.edit { prefs ->
-            val since = prefs[CONNECTED_SINCE]
-            val pid = prefs[CONNECTED_PID]
-            if (since != null && pid != null) taken = ConnectedMarker(prefs[CONNECTED_PROFILE], since, pid, prefs[CONNECTED_BOOT])
+            prefs.putInterruption(value)
             prefs.removeMarker()
         }
-        return taken
+    }
+
+    private fun MutablePreferences.putInterruption(value: Interruption?) {
+        INTERRUPTION_KEYS.forEach { remove(it) }
+        if (value == null) return
+        value.profileId?.let { this[INTERRUPTED_PROFILE] = it }
+        this[INTERRUPTED_SINCE] = value.connectedSinceMillis
+        value.endedAtMillis?.let { this[INTERRUPTED_ENDED] = it }
+        this[INTERRUPTED_REASON] = value.reason.key
+        this[INTERRUPTED_DETECTED] = value.detectedAtMillis
+        value.killSwitch?.let { this[INTERRUPTED_KILL_SWITCH] = it.key }
     }
 
     private fun MutablePreferences.removeMarker() {
@@ -96,7 +113,16 @@ class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : 
         val INTERRUPTED_ENDED = longPreferencesKey("interrupted_ended_at")
         val INTERRUPTED_REASON = stringPreferencesKey("interrupted_reason")
         val INTERRUPTED_DETECTED = longPreferencesKey("interrupted_detected_at")
-        val INTERRUPTION_KEYS = listOf(INTERRUPTED_PROFILE, INTERRUPTED_SINCE, INTERRUPTED_ENDED, INTERRUPTED_REASON, INTERRUPTED_DETECTED)
+        val INTERRUPTED_KILL_SWITCH = stringPreferencesKey("interrupted_kill_switch")
+        val INTERRUPTION_KEYS =
+            listOf(
+                INTERRUPTED_PROFILE,
+                INTERRUPTED_SINCE,
+                INTERRUPTED_ENDED,
+                INTERRUPTED_REASON,
+                INTERRUPTED_DETECTED,
+                INTERRUPTED_KILL_SWITCH,
+            )
 
         val CONNECTED_PROFILE = stringPreferencesKey("connected_profile_id")
         val CONNECTED_SINCE = longPreferencesKey("connected_since")

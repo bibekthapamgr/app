@@ -2,6 +2,7 @@ package app.proxyflow.core.vpn
 
 import app.proxyflow.core.data.ConnectedMarker
 import app.proxyflow.core.data.InMemoryProtectionStore
+import app.proxyflow.core.data.ProtectionStore
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.ConnectionState
@@ -98,6 +99,31 @@ class KillSwitchTest {
         history = history,
     ).also { started = it }
 
+    /** A session on [store] instead of [protection] (a store that fails, or that counts its reads). */
+    private fun newSession(store: ProtectionStore) = VpnSession(
+        profiles = profiles.repository,
+        engine = engine,
+        services = {
+            started?.attach(host, alwaysOn = false, startId = host.started())
+            true
+        },
+        state = state,
+        scope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job])),
+        clock = { now.get() },
+        timing = VpnSession.Timing(
+            preflightTimeoutMillis = 2_000,
+            serviceStartTimeoutMillis = 1_000,
+            routingTimeoutMillis = 2_000,
+            routingPollMillis = 5,
+        ),
+        log = sessionLog::add,
+        retry = { policy },
+        random = { 0.5 },
+        diagnostics = sink,
+        protection = store,
+        history = history,
+    )
+
     @After
     fun tearDown() {
         engine.gate?.countDown()
@@ -139,12 +165,16 @@ class KillSwitchTest {
             establish in 0 until log.indexOf("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}"),
         )
         assertEquals(ConnectionStatus.Connecting, state.value.status)
+        assertTrue("Home says traffic is held, and Cancel asks first", state.value.held)
         assertFalse("no engine yet: what apps send is held", engine.running)
+        eventually("held traffic is the VPN running: the marker is written") { protection.connected != null }
         assertEquals("always_on", entries.first { it.event == LogEvent.ConnectRequested }.details[LogDetail.BY])
 
         engine.gate?.countDown()
         val connected = await { it.status == ConnectionStatus.Connected }
         assertEquals(profile.id, connected.profileId)
+        assertFalse(connected.held)
+        assertEquals("one marker for the session", 1, history.markers.get().toInt())
         assertEquals("one interface, the held one", 1, host.tuns.size)
         assertTrue("the engine reads it", engine.running)
         assertEquals(LogEvent.Connected, entries.last { it.event == LogEvent.Connected || it.event == LogEvent.Reconnected }.event)
@@ -174,6 +204,24 @@ class KillSwitchTest {
         assertEquals(profile.id, connected.profileId)
         assertEquals(1, host.tuns.size)
         assertFalse(host.tuns.single().closed)
+    }
+
+    /** A failure that isn't the proxy's (an unexpected one) during an Always-on start's attempts ends them: bounded. */
+    @Test
+    fun anUnexpectedFailureDuringAnAlwaysOnStartsAttemptsBlocks() {
+        choose(save())
+        policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000), jitter = 0.0)
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        alwaysOnStart()
+        await { it.status == ConnectionStatus.Reconnecting && it.reconnect != null }
+
+        host.guardError = IllegalStateException("bug") // the next attempt throws where nothing expects it
+        session.retryNow()
+        val blocked = await { it.status == ConnectionStatus.Blocked }
+
+        assertEquals(ConnectionError.INTERNAL, blocked.error?.code)
+        assertFalse("traffic stays held", host.tuns.single().closed)
+        assertEquals("no attempt started over", 1, sessionLog.count("reconnecting: always_on_start"))
     }
 
     @Test
@@ -350,7 +398,7 @@ class KillSwitchTest {
             runBlocking { protection.interruption.first() },
         )
         assertEquals(left, history.asked.single())
-        assertNull("the marker is taken", protection.connected)
+        assertNull("the marker became the interruption", protection.connected)
         eventually("logged") { entries.any { it.event == LogEvent.SessionInterrupted } }
         val logged = entries.single { it.event == LogEvent.SessionInterrupted }
         assertEquals(LogEntry.Level.Error, logged.level)
@@ -361,6 +409,66 @@ class KillSwitchTest {
             mapOf(LogDetail.REASON to "low_memory", LogDetail.END_TIME to "exact", LogDetail.DURATION_MS to "540000"),
             logged.details,
         )
+        // Found and kept, and nothing more: the next start connects nothing of its own accord (ADR-0013 §5).
+        Thread.sleep(50)
+        assertEquals(ConnectionStatus.Disconnected, state.value.status)
+        assertTrue("no interface: ${log.all}", host.tuns.isEmpty())
+        assertEquals("no check of the proxy, no engine: ${log.all}", 0, log.count("probe ") + log.count("start ") + log.count("establish"))
+    }
+
+    /** What applied to apps after the process ended is what ProxyFlow last read then, not what it reads later. */
+    @Test
+    fun anInterruptionKeepsTheKillSwitchAsItWasWhenTheProcessEnded() {
+        val before = SystemKillSwitch(alwaysOn = true, blocksWithoutVpn = true, checkedAtMillis = NOW - 700_000)
+        protection = InMemoryProtectionStore(
+            killSwitch = before,
+            connected = ConnectedMarker("p-left", NOW - 600_000, pid = 4242, bootCount = FakeHistory.BOOT),
+        )
+        history.ending = ProcessHistory.Ending(ExitReason.Killed, atMillis = NOW - 60_000)
+
+        session.checkSystemKillSwitch()
+        eventually("the interruption is kept") { runBlocking { protection.interruption.first() } != null }
+        assertEquals(KillSwitchStatus.On, runBlocking { protection.interruption.first() }?.killSwitch)
+        eventually("logged") { entries.any { it.event == LogEvent.SessionInterrupted } }
+        assertEquals("yes", entries.single { it.event == LogEvent.SessionInterrupted }.details[LogDetail.BLOCKS_WITHOUT_VPN])
+
+        // Android says otherwise now: the interruption still says what applied then.
+        host.killSwitch = KillSwitchReading(alwaysOn = false, blocksWithoutVpn = false)
+        connect()
+        eventually("the new reading is kept") { stored()?.status == KillSwitchStatus.Off }
+        assertEquals(KillSwitchStatus.On, runBlocking { protection.interruption.first() }?.killSwitch)
+    }
+
+    /** One write turns the marker into the interruption: a process that ends before it leaves the marker to the next. */
+    @Test
+    fun aMarkerStaysUntilItsInterruptionIsWritten() {
+        val left = ConnectedMarker("p-left", NOW - 600_000, pid = 4242, bootCount = FakeHistory.BOOT)
+        protection = InMemoryProtectionStore(connected = left)
+        val base = protection
+        started = newSession(
+            object : ProtectionStore by base {
+                override suspend fun interrupted(value: Interruption) = throw java.io.IOException("disk full")
+            },
+        )
+
+        session.checkSystemKillSwitch()
+        eventually("Android is asked") { history.asked.size == 1 }
+        runBlocking { session.awaitIdle() }
+        assertEquals("not written: the marker is still there for the next process", left, runBlocking { base.connectedMarker() })
+    }
+
+    /** Android's answer about the earlier process is asked off the event loop: a slow one never holds the session up. */
+    @Test
+    fun aSlowAnswerAboutTheLastProcessNeverHoldsUpTheSession() {
+        protection = InMemoryProtectionStore(connected = ConnectedMarker("p-left", NOW - 600_000, pid = 4242, bootCount = null))
+        val answer = CountDownLatch(1)
+        history.gate = answer
+
+        val profile = connect()
+        assertEquals("connected while Android had not answered yet", ConnectionStatus.Connected, state.value.status)
+        answer.countDown()
+        eventually("the interruption is kept once Android answers") { runBlocking { protection.interruption.first() } != null }
+        assertEquals(profile.id, state.value.profileId)
     }
 
     @Test
@@ -378,9 +486,16 @@ class KillSwitchTest {
 
     @Test
     fun aStoppedConnectionLeavesNothingForTheNextProcess() {
+        val reads = AtomicLong()
+        val base = protection
+        started = newSession(
+            object : ProtectionStore by base {
+                override suspend fun connectedMarker(): ConnectedMarker? = base.connectedMarker().also { reads.incrementAndGet() }
+            },
+        )
         session.checkSystemKillSwitch()
+        eventually("the session looked for a marker") { reads.get() == 1L }
         runBlocking { session.awaitIdle() }
-        Thread.sleep(50)
         assertTrue(entries.none { it.event == LogEvent.SessionInterrupted })
         assertNull(runBlocking { protection.interruption.first() })
         assertTrue(history.asked.isEmpty())
@@ -470,6 +585,8 @@ class KillSwitchTest {
     /** This process is [PID] after boot [BOOT]; an earlier one ended as [ending] says. */
     private class FakeHistory : ProcessHistory {
         @Volatile var ending = ProcessHistory.Ending(ExitReason.Unknown, null)
+
+        @Volatile var gate: CountDownLatch? = null
         val asked = CopyOnWriteArrayList<ConnectedMarker>()
         val markers = AtomicLong()
 
@@ -480,6 +597,7 @@ class KillSwitchTest {
 
         override fun ending(marker: ConnectedMarker): ProcessHistory.Ending {
             asked += marker
+            gate?.await(5, java.util.concurrent.TimeUnit.SECONDS) // Android answering slowly right after a process died
             return ending
         }
 

@@ -218,7 +218,11 @@ class FakeHost(private val log: CallLog) : VpnHost {
         return listOfNotNull(tuns.lastOrNull { !it.closed }?.let { VpnNetwork(id = NETWORK_ID, interfaceName = it.name, ready = true) })
     }
 
+    /** Thrown by [socketGuard]: a platform call failing where nothing expects it. */
+    @Volatile var guardError: RuntimeException? = null
+
     override fun socketGuard(): SocketGuard {
+        guardError?.let { throw it }
         guardsOpen.incrementAndGet()
         return object : SocketGuard {
             override fun track(fd: Int) {

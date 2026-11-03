@@ -15,6 +15,7 @@ import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ExitReason
 import app.proxyflow.core.model.Interruption
+import app.proxyflow.core.model.KillSwitchStatus
 import app.proxyflow.core.model.LogDetail
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
@@ -198,11 +199,22 @@ class VpnSession(
         loop = scope.launch(CoroutineExceptionHandler { _, e -> log("event loop ended: ${e.javaClass.simpleName}") }) {
             for (event in events) dispatch(event)
         }
-        // What an earlier process left first, then every write in order. A store that fails loses that write only.
+        // What an earlier process left comes first, off the event loop (Android's answer about how that process ended
+        // can take a while right after it): a marker found becomes an interruption in one write, so a process that ends
+        // meanwhile leaves the marker to the next. Then every write in order; a store that fails loses that write only.
         writer = scope.launch(blocking + CoroutineExceptionHandler { _, e -> log("protection store ended: ${e.javaClass.simpleName}") }) {
-            val left = runCatching { protection.takeConnected() }.getOrNull()
             val seen = runCatching { protection.killSwitch.first() }.getOrNull()
-            send(Event.Started(left, seen))
+            val interruption = runCatching { protection.connectedMarker() }.getOrNull()?.let { interruptionOf(it, seen) }
+            if (interruption != null) {
+                try {
+                    protection.interrupted(interruption)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    log("protection store write failed: ${e.javaClass.simpleName}")
+                }
+            }
+            send(Event.Started(interruption, seen))
             for (write in writes) {
                 try {
                     protection.write()
@@ -248,6 +260,9 @@ class VpnSession(
 
     /** The phone's default network as Android reports it to the service: null when it has none. */
     fun underlyingNetwork(network: NetworkInfo?) = send(Event.Network(network))
+
+    /** The user has seen the interrupted connection (Home), or connected again: it is cleared, in order with the session's writes. */
+    fun dismissInterruption() = persist { setInterruption(null) }
 
     /** Asks Android about its kill switch now, when an interface exists (a screen showing the status, M8); otherwise nothing. */
     fun checkSystemKillSwitch() = send(Event.CheckKillSwitch)
@@ -305,7 +320,7 @@ class VpnSession(
                 is Event.RetryDue -> onRetryDue(event.token)
                 is Event.JobFailed -> onJobFailed(event)
                 is Event.ServiceStartTimedOut -> onServiceStartTimedOut(event.token)
-                is Event.Started -> onStarted(event.left, event.seen)
+                is Event.Started -> onStarted(event.interruption, event.seen)
                 Event.CheckKillSwitch -> checkKillSwitch()
                 is Event.Unanswered -> onUnanswered(event)
                 is Event.Barrier -> event.done.complete(Unit)
@@ -345,7 +360,11 @@ class VpnSession(
     /** [alwaysOn]: Android started it for Always-on VPN, so traffic is held from the start (M8). */
     private suspend fun beginConnect(profileId: String, alwaysOn: Boolean = false) {
         // Looked up before anything is stopped: a profile that is gone leaves a running connection alone.
-        val profile = profiles.get(profileId) ?: return profileMissing(profileId)
+        val profile = profiles.get(profileId) ?: return if (alwaysOn) {
+            host?.let { alwaysOnWithoutProfile(it) } ?: Unit // deleted since it was read as the chosen one
+        } else {
+            profileMissing(profileId)
+        }
         cancelAttempt()
         recovery = null
         startedByAlwaysOn = alwaysOn
@@ -473,8 +492,9 @@ class VpnSession(
         if (released === detached) released = null
         if (host !== detached) return
         host = null
-        // Android keeps a VPN service bound while its interface exists, so this happens with a
-        // connection only on the way to process death; release what is left.
+        // Android keeps a VPN service bound while its interface exists, so this happens with a connection only when
+        // Android itself stopped the service (a process that is killed gets no call): the session ends and says so,
+        // as on a revocation, and the marker goes with it — the user sees this end, unlike a process death.
         if (tun != null || preflight != null || routing != null || pending != null || recovery != null) {
             log("service destroyed during a connection")
             end(ConnectionError(ConnectionError.INTERNAL, "the VPN service stopped"))
@@ -615,10 +635,27 @@ class VpnSession(
         tun = fresh
         routingBefore = before
         connectedOnce = true
-        if (heldSinceMillis == null) heldSinceMillis = clock()
+        val since = clock()
+        if (heldSinceMillis == null) heldSinceMillis = since
+        publish(state.value.copy(held = true))
+        // Traffic held is the VPN running: a process that ends now leaves apps to the normal network too.
+        writeMarker(state.value.profileId, since)
         // With an interface Android answers: Home can say what it does while the proxy is checked or retried.
         checkKillSwitch()
         return true
+    }
+
+    /** The marker the next process finds if this one ends with the VPN up (M8); once per session. */
+    private fun writeMarker(profileId: String?, sinceMillis: Long) {
+        if (markerWritten) return
+        val marker = try {
+            history.marker(profileId, sinceMillis)
+        } catch (e: Exception) {
+            log("no connected marker: ${e.javaClass.simpleName}")
+            return
+        }
+        markerWritten = true
+        persist { markConnected(marker) }
     }
 
     private fun startProtection(current: VpnHost, profile: ProxyProfile, secret: EngineSecret?) {
@@ -742,6 +779,7 @@ class VpnSession(
                 connectedSinceMillis = totals.sinceMillis,
                 error = null,
                 reconnect = null,
+                held = false,
             ),
         )
         if (recovered != null) {
@@ -759,11 +797,7 @@ class VpnSession(
         }
         host?.showStatus(state.value)
         // A new session (not a reconnection of this one): the next process finds it if this one ends without stopping it.
-        if (existing == null) {
-            val marker = history.marker(profileId, totals.sinceMillis)
-            markerWritten = true
-            persist { markConnected(marker) }
-        }
+        writeMarker(profileId, totals.sinceMillis)
         checkKillSwitch()
     }
 
@@ -826,36 +860,49 @@ class VpnSession(
     }
 
     /**
-     * The first event: [left] is the marker of a process that ended while connected, without the connection being
-     * stopped. Android removed the VPN with it, so from then until ProxyFlow connected again apps used the normal
-     * network, unless Android's kill switch blocked them: logged with Android's reason, and kept for Home.
+     * How the process that left [left] ended — it ended while connected, without the connection being stopped: Android
+     * removed the VPN with it, so from then until ProxyFlow connected again apps used the normal network, unless
+     * Android's kill switch blocked them ([seen], what ProxyFlow last read before). Called by the writer, off the loop.
      */
-    private fun onStarted(left: ConnectedMarker?, seen: SystemKillSwitch?) {
-        if (lastKillSwitch == null) lastKillSwitch = seen
-        if (left == null) return
+    private fun interruptionOf(left: ConnectedMarker, seen: SystemKillSwitch?): Interruption {
+        val asked = System.nanoTime()
         val ending = runCatching { history.ending(left) }.getOrElse { ProcessHistory.Ending(ExitReason.Unknown, null) }
-        val now = clock()
-        val interruption = Interruption(
+        log(
+            "the last process ended while connected: ${ending.reason.key} (Android answered in ${(System.nanoTime() - asked) / 1_000_000} ms)",
+        )
+        return Interruption(
             profileId = left.profileId,
             connectedSinceMillis = left.sinceMillis,
             endedAtMillis = ending.atMillis,
             reason = ending.reason,
-            detectedAtMillis = now,
+            detectedAtMillis = clock(),
+            killSwitch = seen?.status,
         )
-        log("the last process ended while connected: ${ending.reason.key}")
+    }
+
+    /**
+     * The first event: what an earlier process left, already kept for Home ([interruption], or null), is logged; the
+     * kill switch as last stored becomes this session's last reading.
+     */
+    private fun onStarted(interruption: Interruption?, seen: SystemKillSwitch?) {
+        if (lastKillSwitch == null) lastKillSwitch = seen
+        if (interruption == null) return
+        val ended = interruption.endedAtMillis
+        val now = clock()
         note(
             LogEntry.Level.Error,
             LogEvent.SessionInterrupted,
             stage = ConnectionStage.Stopped,
-            profileId = left.profileId,
+            profileId = interruption.profileId,
             details = mapOf(
-                LogDetail.REASON to ending.reason.key,
-                LogDetail.END_TIME to if (ending.atMillis != null) "exact" else "unknown",
-                LogDetail.DURATION_MS to ending.atMillis?.let { (it - left.sinceMillis).coerceAtLeast(0).toString() },
+                LogDetail.REASON to interruption.reason.key,
+                LogDetail.END_TIME to if (ended != null) "exact" else "unknown",
+                LogDetail.DURATION_MS to ended?.let { (it - interruption.connectedSinceMillis).coerceAtLeast(0).toString() },
+                LogDetail.BLOCKS_WITHOUT_VPN to interruption.killSwitch?.let { if (it == KillSwitchStatus.On) "yes" else "no" },
             ),
-            timeMillis = ending.atMillis ?: now,
+            // Dated when it ended where Android says, unless that is older than the log keeps (the next start may come days later).
+            timeMillis = ended?.takeIf { now - it < INTERRUPTION_DATING_LIMIT_MS } ?: now,
         )
-        persist { setInterruption(interruption) }
     }
 
     /**
@@ -1111,7 +1158,8 @@ class VpnSession(
      */
     private fun fail(error: ConnectionError) {
         when {
-            startedByAlwaysOn && tun != null && RetryPolicy.recoverable(error.code) ->
+            // Its first failure only: a failure during the attempts that follow (an unexpected one) ends them, bounded.
+            startedByAlwaysOn && tun != null && recovery == null && RetryPolicy.recoverable(error.code) ->
                 startRecovery(ReconnectReason.AlwaysOnStart, error, immediate = false)
             connectedOnce -> block(error)
             else -> end(error)
@@ -1371,7 +1419,7 @@ class VpnSession(
         class ServiceStartTimedOut(val token: Long) : Event
 
         /** What an earlier process left behind, and the kill switch as last stored: the first event (M8). */
-        class Started(val left: ConnectedMarker?, val seen: SystemKillSwitch?) : Event
+        class Started(val interruption: Interruption?, val seen: SystemKillSwitch?) : Event
 
         data object CheckKillSwitch : Event
 
@@ -1392,6 +1440,9 @@ class VpnSession(
 
         /** [LogDetail.BY] for a connection Android started for Always-on VPN. */
         private const val BY_ALWAYS_ON = "always_on"
+
+        /** An interruption found later than this is logged when found: the log keeps 24 hours (ADR-0012). */
+        private const val INTERRUPTION_DATING_LIMIT_MS = 23 * 60 * 60 * 1000L
         private val BUSY = setOf(ConnectionStatus.Connecting, ConnectionStatus.Reconnecting, ConnectionStatus.Connected)
 
         /**

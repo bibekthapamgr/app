@@ -58,6 +58,10 @@ class ReleaseManifestTest(unittest.TestCase):
         previous = check_release_manifest.RES_XML
         check_release_manifest.RES_XML = self.res
         self.addCleanup(setattr, check_release_manifest, "RES_XML", previous)
+        self.release = os.path.join(self.tmp.name, "release-res")
+        previous_release = check_release_manifest.RELEASE_RES
+        check_release_manifest.RELEASE_RES = [self.release]
+        self.addCleanup(setattr, check_release_manifest, "RELEASE_RES", previous_release)
 
     def write(self, name: str, text: str) -> None:
         with open(os.path.join(self.res, name), "w", encoding="utf-8") as f:
@@ -85,6 +89,20 @@ class ReleaseManifestTest(unittest.TestCase):
             with self.subTest(why):
                 self.write("network_security_config.xml", config)
                 self.assertTrue(self.problems(manifest()), f"{why} must fail")
+
+    def test_a_variant_of_the_network_security_config_is_checked_too(self):
+        # Android takes xml-v31/… on Android 12+, and a release build type's own resources over main's.
+        loose = NSC.replace('cleartextTrafficPermitted="false"', 'cleartextTrafficPermitted="true"')
+        for directory in (os.path.join(self.tmp.name, "xml-v31"), os.path.join(self.release, "xml")):
+            with self.subTest(directory):
+                os.makedirs(directory)
+                with open(os.path.join(directory, "network_security_config.xml"), "w", encoding="utf-8") as f:
+                    f.write(loose)
+                problems = self.problems(manifest())
+                self.assertTrue(any(directory in p and "cleartext" in p for p in problems), problems)
+                with open(os.path.join(directory, "network_security_config.xml"), "w", encoding="utf-8") as f:
+                    f.write(NSC)
+                self.assertEqual([], self.problems(manifest()))
 
     def test_a_missing_network_security_config_fails(self):
         attributes = 'android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:fullBackupContent="@xml/backup_rules"'

@@ -37,7 +37,7 @@ No critical or high finding is open. Owner decisions that bear on security stay 
 
 While ProxyFlow's VPN interface exists, nothing goes around the proxy: the engine dials the proxy before it accepts an app's connection, has no other way out, and when it fails, stops, waits for a network or reconnects, the interface stays with no engine reading it, so apps' packets are held and dropped (ADR-0002, ADR-0004, ADR-0010 §5, ADR-0012 §6). M5–M7 verified each case on devices with packet captures, and M8 adds the Always-on VPN start (traffic held before the proxy check). Engine failure never removes the interface: `VpnSession.block` keeps it, `end` is reached only by the user (Disconnect, "Stop and use normal network"), revocation, consent withdrawn, or the service destroyed.
 
-What no app can hold: the interface going away. Android removes the VPN when the user disconnects, when another VPN app takes it (revocation), and when ProxyFlow's process ends. Without Android's kill switch, apps then use the normal network — the M8 failure injection shows it on every API level (scenario A: the shell reaches the witness directly within a second of the kill). With it on, Android blocks them (scenario B: every probe fails with `EACCES`, the witness hears nothing, no capture has a SYN to it). The app says this where it matters (ADR-0013 §1) and never claims more.
+What no app can hold: the interface going away. Android removes the VPN when the user disconnects, when another VPN app takes it (revocation), and when ProxyFlow's process ends. Without Android's kill switch, apps then use the normal network — the M8 failure injection's scenario A checks it on each API level (the shell must reach the witness directly after the kill). With it on, Android blocks them — scenario B checks the shell's TCP to the witness only: once Android has no VPN network left, every probe must be refused as Android's blocking refuses (`EACCES`), the witness must hear nothing, and no capture that sees the uplink through B may have a SYN to it (results: `docs/m8/failure-injection.md` §3). The app says this where it matters (ADR-0013 §1) and never claims more.
 
 ### 3.2 Credential encryption and key invalidation (A1)
 
@@ -47,7 +47,7 @@ Each set of credentials is sealed with its own AES-256-GCM key generated in the 
 
 - **Diagnostic log** (ADR-0012): typed entries, details under fixed keys, every value through `LogSanitizer` on write, read and export; profiles by random id. M8's new entries (`session_interrupted`, `system_kill_switch`) carry a reason key, yes/no and durations only.
 - **Logcat:** the VPN lifecycle log names profiles by id and states by fixed words; `LogSecret` fails CI on a statement passing a secret, a destination, bytes, a profile or an exception's message. M8's lines ("system kill switch: on", "the last process ended while connected: killed", "always-on start") are fixed words.
-- **Exceptions:** `ExceptionSecret` (M8) fails CI on ProxyFlow's code that builds an exception's message from a credential, server, destination, bytes, a profile or another exception's message; the crash handler sanitizes whatever reaches the top of a thread (§2 F5). Scenario C plants `user:PF8SECRET…@planted.pf8.invalid` in an exception's message on the emulators: Android's crash report names the exception with "[redacted]" in the secret's place, on every API level.
+- **Exceptions:** `ExceptionSecret` (M8) fails CI on ProxyFlow's code that builds an exception's message from a credential, server, destination, bytes, a profile or another exception's message; the crash handler sanitizes whatever reaches the top of a thread (§2 F5). Scenario C plants `pf8user:PF8SECRET…@planted.pf8.invalid` in an exception's message on the emulators: Android's crash report must name the exception and hold none of the sign-in — password, user or server (results: `docs/m8/failure-injection.md` §3).
 - **What Android writes itself:** the runtime's pre-handler logs an uncaught exception, message and all, to logcat before any app code runs (scenario C counts that line). Logcat is readable by ProxyFlow itself and over adb, not by other apps (READ_LOGS is a system permission). Residual risk R7.
 - **`ApplicationExitInfo`:** its description can hold an exception's message, so ProxyFlow never reads it — only the reason and the time.
 - **Export and Copy:** sanitized again, with no search text and no profile names (ADR-0012 §8).
@@ -66,7 +66,7 @@ Parsers of proxy replies are bounded and fuzzed (M4); hostnames are validated be
 
 | Bound | Value | Tested |
 |---|---|---|
-| TCP flows at once, set-ups included (`MaxConns`) | 1,024; the rest refused (`CONNECTION_LIMIT`) | `TestConnectionLimit` (2), `TestManyConnectionsAtOnceStayWithinMaxConns` (120 at once against 24: never more than 24 held, 96 refused, every slot freed, the engine serving after) |
+| TCP flows at once, set-ups included (`MaxConns`) | 1,024; the rest refused (`CONNECTION_LIMIT`) | `TestConnectionLimit` (2), `TestManyConnectionsAtOnceStayWithinMaxConns` (120 at once against 24: never more than 24 tunnels open at the proxy at once — counted at the proxy's side — 96 refused, every tunnel closed and every slot freed, the engine serving after) |
 | Handshakes held while tunnels are set up (`MaxInFlight`) | 512; SYNs over it dropped and counted, apps retry | `TestAHandshakeFloodIsHeldToMaxInFlight` (48 at once against 8, a proxy that never answers: never more than 8 dials, SYNs dropped and counted, each set-up ended at its timeout, the engine serving after) |
 | DNS sockets / DNS-over-TCP connections | 256 / 32 | `TestDNSFlowLimit`, `TestDNSOverTCPHasItsOwnSlots` |
 | Buffers per flow | netstack 64 KiB (at most 128 KiB) per direction, relay 32 KiB | `TestStalledFlowsHoldLittleMemory` (a stalled upload is held to the engine's buffers: the test allows 240 KiB, M4 measured 93 KiB) |
@@ -75,7 +75,7 @@ Parsers of proxy replies are bounded and fuzzed (M4); hostnames are validated be
 | Placeholder names | 16,384 (3.9–7.6 MiB) | M4's pool tests |
 | Malformed packets | dropped, the engine goes on | `TestMalformedPacketsAreDroppedAndTheEngineGoesOn`, `FuzzPacketLoop` |
 | Reconnect attempts | 8 over about two minutes, cancellable, one at a time | `ReconnectTest` (M7) |
-| Unanswered SOCKS5 sites remembered | 8 hashes | `TestUnansweredSOCKS5RequestsAreCountedApart` |
+| Unanswered SOCKS5 sites remembered | 8 hashes of hosts (not ports); the count starts over after 2 min without another | `TestUnansweredSOCKS5RequestsAreCountedApart`, `TestUnansweredCountStartsOverOnAnAnswer`, `TestUnansweredSitesAreHostsNotPorts` |
 | Diagnostic log | 5,000 entries, 24 h; 1,000 pending writes | `LogRepositoryTest`, `DiagnosticsRecorderTest` (M7) |
 | VPN lifecycle log in memory | 200 lines | — (a ring buffer) |
 
@@ -83,7 +83,7 @@ The session's own event queue is unbounded by design (lifecycle events must not 
 
 ### 3.7 UI integrity (S4)
 
-Taps through another app's window are dropped on the actions that let traffic out or delete data (ADR-0013 §8), tested with touches carrying Android's obscured flags (`ObscuredTouchesTest`). Android's VPN consent dialog is the system's.
+Taps through another app's window are dropped on the actions that let traffic out or delete data (ADR-0013 §8), tested with touches carrying Android's flags (`ObscuredTouchesTest`): `FLAG_WINDOW_IS_OBSCURED` is dropped, as Android's own `filterTouchesWhenObscured` does; `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`, which any window anywhere on screen sets, is let through, so a chat bubble doesn't make Disconnect unusable; the message for a dropped tap comes at most every 3.5 s. Android's VPN consent dialog is the system's.
 
 ### 3.8 Supply chain (E-3, A7)
 
@@ -94,7 +94,7 @@ Pinned versions (`gradle/libs.versions.toml`, `go.sum` rebuilt and compared agai
 Unchanged from the threat model's §5 unless noted; the full list is there.
 
 - **R1** (updated): without Android's kill switch, apps use the normal network when the VPN goes away — disconnect, revocation, process death. M8 measures it, tells the user afterwards (an interruption notice) and guides to the kill switch; it can't prevent it.
-- **R4** (updated): a netstack bug triggered by crafted packets — now fuzzed in CI; falls back to R1 behaviour. Android did not restart the always-on VPN after process death on the emulators, so with blocking on apps stay offline until the user opens ProxyFlow.
+- **R4** (updated): a netstack bug triggered by crafted packets — now fuzzed in CI; falls back to R1 behaviour. Android did not restart the always-on VPN after process death on the emulators while the failure injection watched (about 30 s), so with blocking on apps stay offline until the user opens ProxyFlow.
 - **R7** (new): Android's runtime writes an uncaught exception's message to logcat before any app handler; readable by the app and adb only. ProxyFlow's own messages hold no secrets (Lint).
 - **R8** (new): the kill switch's status shown while disconnected is what Android said when ProxyFlow last ran; the user may have changed it since. Shown with its time.
 

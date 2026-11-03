@@ -922,6 +922,33 @@ func TestUnansweredCountStartsOverOnAnAnswer(t *testing.T) {
 		unanswered(uint64(i))
 	}
 	check("sites are bounded", 100, maxUnansweredSites)
+
+	// Far apart, they are not in a row: the count starts over after a quiet spell.
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	s.proxyResult("", false, 0)
+	unanswered(1)
+	now = now.Add(unansweredQuiet + time.Second)
+	unanswered(2)
+	check("a quiet spell starts it over", 1, 1)
+	now = now.Add(unansweredQuiet / 2)
+	unanswered(3)
+	check("close together they go on", 2, 2)
+}
+
+// One site is one site whatever the port, by name or by address.
+func TestUnansweredSitesAreHostsNotPorts(t *testing.T) {
+	a := siteKey(adapters.Target{Host: "Slow.Example.", Port: 80})
+	if b := siteKey(adapters.Target{Host: "slow.example", Port: 443}); a != b {
+		t.Fatal("the same name on another port must be the same site")
+	}
+	if siteKey(adapters.Target{Host: "other.example", Port: 80}) == a {
+		t.Fatal("another name is another site")
+	}
+	ip := netip.MustParseAddr("203.0.113.9")
+	if siteKey(adapters.Target{Addr: ip, Port: 80}) != siteKey(adapters.Target{Addr: netip.AddrFrom16(ip.As16()), Port: 8443}) {
+		t.Fatal("an address, also IPv4-mapped, is one site whatever the port")
+	}
 }
 
 func TestIdleTimeoutCountsBothDirections(t *testing.T) {

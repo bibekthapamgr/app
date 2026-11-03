@@ -22,6 +22,7 @@ import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.DnsProblems
 import app.proxyflow.core.model.ExitReason
 import app.proxyflow.core.model.Interruption
+import app.proxyflow.core.model.KillSwitchStatus
 import app.proxyflow.core.model.LogDetail
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
@@ -120,6 +121,7 @@ class ScreenshotTest {
             endedAtMillis = SAMPLE_TIME,
             reason = ExitReason.LowMemory,
             detectedAtMillis = SAMPLE_TIME + 60_000,
+            killSwitch = KillSwitchStatus.AlwaysOnOnly,
         )
         val alwaysOnOnly = killSwitchOn.copy(blocksWithoutVpn = false)
         HomeScreen(home(ConnectionState.Idle, killSwitch = alwaysOnOnly, interruption = interruption), HomeActions())
@@ -128,6 +130,13 @@ class ScreenshotTest {
     @Test
     fun homeConnecting() = captureBothThemes("B3_home_connecting") {
         HomeScreen(home(ConnectionState(ConnectionStatus.Connecting, "p1", tokyo.name, step = ConnectStep.ProxyHandshake)), HomeActions())
+    }
+
+    /** B3 when Android started ProxyFlow as Always-on VPN (M8): the interface is up first and holds apps' traffic. */
+    @Test
+    fun homeConnectingHeld() = captureBothThemes("B3b_home_connecting_held") {
+        val held = ConnectionState(ConnectionStatus.Connecting, "p1", tokyo.name, step = ConnectStep.ProxyHandshake, held = true)
+        HomeScreen(home(held, killSwitch = killSwitchOn), HomeActions())
     }
 
     @Test

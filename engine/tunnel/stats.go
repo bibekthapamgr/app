@@ -69,13 +69,20 @@ type stats struct {
 	consecutive      int64
 	unanswered       int64               // SOCKS5 connection requests left unanswered in a row (M8)
 	unansweredSites  map[uint64]struct{} // hashes of their sites, at most maxUnansweredSites
+	unansweredAt     time.Time           // the last one; after unansweredQuiet without another the count starts over
+	now              func() time.Time    // the clock for unansweredAt (tests set it)
 }
 
 // maxUnansweredSites bounds the sites remembered for the unanswered count: the session needs a few, never more.
 const maxUnansweredSites = 8
 
+// unansweredQuiet: unanswered requests this far apart are not "in a row" — an idle phone whose apps reach two dead
+// sites an hour apart has no broken proxy.
+const unansweredQuiet = 2 * time.Minute
+
 func (s *stats) init() {
 	s.unansweredSites = map[uint64]struct{}{}
+	s.now = time.Now
 	s.failures = map[string]int64{}
 	s.hostnameFailures = map[string]int64{}
 	s.dns = map[string]int64{}
@@ -125,8 +132,9 @@ func (s *stats) udpRejectedByPort(p uint16) {
 
 // proxyResult tracks proxy health for the escalation rules (docs/m1/04 §4, M8). A success resets both counts. A
 // proxy-level failure adds one to the consecutive count. A SOCKS5 connection request left unanswered (unanswered) adds
-// one to the unanswered count and remembers the site (site, a hash of the target); any other target-level failure is an
-// answer from the proxy, so it starts the unanswered count over. CANCELED and the engine's own refusals leave both alone.
+// one to the unanswered count and remembers the site (site, a hash of the target's host); any other target-level
+// failure is an answer from the proxy, so it starts the unanswered count over, as does a quiet spell of
+// unansweredQuiet since the last unanswered one. CANCELED and the engine's own refusals leave both alone.
 func (s *stats) proxyResult(code adapters.Code, unanswered bool, site uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -137,6 +145,14 @@ func (s *stats) proxyResult(code adapters.Code, unanswered bool, site uint64) {
 	case code.IsProxyLevel():
 		s.consecutive++
 	case unanswered:
+		now := time.Now()
+		if s.now != nil {
+			now = s.now()
+		}
+		if !s.unansweredAt.IsZero() && now.Sub(s.unansweredAt) > unansweredQuiet {
+			s.resetUnanswered()
+		}
+		s.unansweredAt = now
 		s.unanswered++
 		if _, seen := s.unansweredSites[site]; seen || len(s.unansweredSites) < maxUnansweredSites {
 			s.unansweredSites[site] = struct{}{}
@@ -151,10 +167,15 @@ func (s *stats) resetUnanswered() {
 	clear(s.unansweredSites)
 }
 
-// siteKey identifies a target for the unanswered count without keeping it: a hash of its name or address and port.
+// siteKey identifies a target's site for the unanswered count without keeping it: a hash of its name or address,
+// whatever the port (one slow site reached on 80 and 443 is one site).
 func siteKey(t adapters.Target) uint64 {
+	host := t.Host
+	if host == "" {
+		host = t.Addr.Unmap().String()
+	}
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(strings.ToLower(t.HostPort())))
+	_, _ = h.Write([]byte(strings.ToLower(strings.TrimSuffix(host, "."))))
 	return h.Sum64()
 }
 

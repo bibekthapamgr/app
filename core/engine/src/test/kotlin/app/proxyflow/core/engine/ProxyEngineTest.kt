@@ -87,7 +87,7 @@ class ProxyEngineTest {
         val native = FakeNative()
         native.statusJson = """{"state":"failed","started_at":"2026-10-31T10:00:00Z","last_error":{"code":"ENGINE_STOPPED",""" +
             """"detail":"the TUN interface was closed","time":"2026-10-31T10:05:00Z"},"consecutive_proxy_failures":2,"flows":3,""" +
-            """"tcp_active":1,"something_new":true}"""
+            """"unanswered_requests":4,"unanswered_sites":2,"tcp_active":1,"something_new":true}"""
         native.statsJson = """{"state":"running","tcp_opened":5,"bytes_up":10,"bytes_down":20,"failures":{"AUTH_FAILED":2},""" +
             """"last_proxy_error":{"code":"AUTH_FAILED","detail":"x","time":"t"},"goroutines":12}"""
         native.flowsJson =
@@ -98,6 +98,8 @@ class ProxyEngineTest {
         assertEquals(EngineState.Failed, status.state)
         assertEquals("ENGINE_STOPPED", status.lastError?.code)
         assertEquals(2, status.consecutiveProxyFailures)
+        assertEquals("M8: SOCKS5 requests unanswered in a row", 4L, status.unansweredRequests)
+        assertEquals(2, status.unansweredSites)
         val stats = engine.stats()
         assertEquals(EngineState.Running, stats.state)
         assertEquals(mapOf("AUTH_FAILED" to 2L), stats.failures)
@@ -137,6 +139,9 @@ class ProxyEngineTest {
         val event = EngineJson.event("""{"time":"t","type":"conn_fail","conn_id":3,"proto":"tcp","port":443,"code":"TARGET_REFUSED"}""")
         assertEquals("conn_fail", event?.type)
         assertEquals("TARGET_REFUSED", event?.code)
+        assertFalse("absent unless the engine says so", event!!.unanswered)
+        val silent = EngineJson.event("""{"time":"t","type":"conn_fail","conn_id":4,"code":"TARGET_UNREACHABLE","unanswered":true}""")
+        assertTrue("M8: a SOCKS5 request left unanswered", silent!!.unanswered)
         assertNull(EngineJson.event("not json"))
     }
 

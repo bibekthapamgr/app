@@ -83,6 +83,41 @@ class LogSecretDetectorTest : LintDetectorTest() {
         ).expectErrorCount(5)
     }
 
+    /** M8 review: more names a credential or a destination goes by. */
+    fun testMoreNamesOfCredentialsAndDestinationsAreErrors() {
+        check(
+            """
+            package test
+            import android.util.Log
+            class Probe {
+                fun f(target: String, pass: String, pwd: String, token: String, clientIp: String, domains: List<String>) {
+                    Log.i("probe", "to " + target)
+                    Log.i("probe", "with ${'$'}pass")
+                    Log.i("probe", pwd)
+                    Log.i("probe", "bearer ${'$'}token")
+                    Log.i("probe", clientIp)
+                    Log.i("probe", "names ${'$'}domains")
+                }
+            }
+            """,
+        ).expectErrorCount(6)
+    }
+
+    /** Words are whole words of the name: these hold none. */
+    fun testWordsInsideOtherWordsAreFine() {
+        check(
+            """
+            package test
+            import android.util.Log
+            class Counter {
+                fun f(passes: Int, bypassed: Int, skipped: Int, ipv6Count: Int) {
+                    Log.i("counter", "passes ${'$'}passes, bypassed ${'$'}bypassed, skipped ${'$'}skipped, v6 ${'$'}ipv6Count")
+                }
+            }
+            """,
+        ).expectClean()
+    }
+
     fun testOtherFunctionsAreNotLogs() {
         check(
             """
@@ -134,6 +169,19 @@ class LogSecretDetectorTest : LintDetectorTest() {
             """,
             LogSecretDetector.EXCEPTION_ISSUE,
         ).expectClean()
+    }
+
+    /** An exception class's own message, passed to its superclass in the class header, is checked as any other. */
+    fun testASuperclassCallInAClassHeaderIsChecked() {
+        check(
+            """
+            package test
+            class ProxyUnreachable(host: String) : IllegalStateException("cannot reach " + host)
+            class TargetRefused(target: String, cause: Throwable) : RuntimeException("refused: ${'$'}target", cause)
+            class Failed(code: String, cause: Throwable) : RuntimeException("failed: ${'$'}code", cause)
+            """,
+            LogSecretDetector.EXCEPTION_ISSUE,
+        ).expectErrorCount(2)
     }
 
     fun testOnlyExceptionsMessagesAreChecked() {

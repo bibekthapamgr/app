@@ -198,4 +198,6 @@ internal class VpnConnectionController(private val runtime: VpnRuntime) : Connec
     override fun retryNow() = runtime.session.retryNow()
 
     override fun checkSystemKillSwitch() = runtime.session.checkSystemKillSwitch()
+
+    override fun dismissInterruption() = runtime.session.dismissInterruption()
 }

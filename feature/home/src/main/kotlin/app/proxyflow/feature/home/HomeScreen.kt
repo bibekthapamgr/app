@@ -325,9 +325,10 @@ private fun InterruptionNotice(interruption: Interruption, state: HomeUiState.Re
     } else {
         stringResource(R.string.home_interrupted_unknown_time, reason, shortWhen(interruption.connectedSinceMillis))
     }
+    // What applied to apps then: Android's kill switch as ProxyFlow last read it before that process ended.
     val meant = stringResource(
         when {
-            state.killSwitch?.status == KillSwitchStatus.On -> R.string.home_interrupted_blocked
+            interruption.killSwitch == KillSwitchStatus.On -> R.string.home_interrupted_blocked
             interruption.reason == ExitReason.PhoneRestarted -> R.string.home_interrupted_restart_leak
             else -> R.string.home_interrupted_leak
         },
@@ -458,12 +459,19 @@ private fun ConnectingContent(state: HomeUiState.Ready, actions: HomeActions) {
             Step(stringResource(label), progress)
         }
     }
-    Note(stringResource(R.string.home_connecting_note))
-    PfSecondaryButton(
-        text = stringResource(R.string.home_cancel),
-        onClick = actions.onDisconnect,
-        modifier = Modifier.fillMaxWidth(),
-    )
+    if (state.connection.held) {
+        // Android started ProxyFlow as Always-on VPN: the interface is up and holds apps' traffic (M8), so stopping
+        // sends them to the normal network — asked first, as on B5 and B6.
+        Note(stringResource(R.string.home_connecting_held_note))
+        StopButton(actions)
+    } else {
+        Note(stringResource(R.string.home_connecting_note))
+        PfSecondaryButton(
+            text = stringResource(R.string.home_cancel),
+            onClick = actions.onDisconnect,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 /** Switching profiles or restarting: the VPN interface stays, so traffic is held meanwhile. */

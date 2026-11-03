@@ -7,9 +7,11 @@ Run: python3 -m unittest discover -s scripts/tests -v
 from __future__ import annotations
 
 import datetime
+import io
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import osv_scan  # noqa: E402
@@ -69,6 +71,55 @@ class OsvScanTest(unittest.TestCase):
             },
             osv_scan.resolved_libraries(TREE),
         )
+
+    def test_a_replaced_module_is_asked_at_what_replaced_it(self):
+        tree = [
+            "+--- com.google.guava:listenablefuture:1.0 -> com.google.guava:guava:33.3.1-android",
+            "\\--- org.jetbrains.kotlin:kotlin-stdlib:{strictly 2.1.0}",
+        ]
+        libraries, unread = osv_scan.read_tree(tree)
+        self.assertEqual({"com.google.guava:guava": "33.3.1-android", "org.jetbrains.kotlin:kotlin-stdlib": "2.1.0"}, libraries)
+        self.assertEqual([], unread)
+
+    def test_a_line_that_cant_be_read_or_a_library_not_resolved_fails(self):
+        tree = TREE + [
+            "+--- com.example:missing:2.0 FAILED",
+            "+--- com.example:dynamic:1.+",
+            "+--- com.example:odd:{reject 1.0}",
+            "+--- com.example:weird:1.0 -> what:is:this:4",
+        ]
+        _, problems = osv_scan.check(tree, {}, FakeOsv({}), TODAY)
+        self.assertEqual(4, len(problems), problems)
+        self.assertIn("Gradle could not resolve com.example:missing:2.0", problems)
+        self.assertTrue(any("without a resolved version: com.example:dynamic:1.+" in p for p in problems))
+        self.assertTrue(any("settled without saying which: com.example:odd" in p for p in problems))
+        self.assertTrue(any("can't be read: com.example:weird" in p for p in problems))
+
+    def test_the_higher_of_the_advisorys_rating_and_its_cvss_score_counts(self):
+        vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"  # 9.1
+        self.assertEqual(("CRITICAL", "CVSS v3 9.1"), osv_scan.severity_of(advisory("GHSA-x", severity="MODERATE", vector=vector)))
+        self.assertEqual(("HIGH", "the advisory's own rating"), osv_scan.severity_of(advisory("GHSA-y", severity="HIGH", vector="CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N")))
+        self.assertEqual("UNKNOWN", osv_scan.severity_of(advisory("GHSA-z", severity="SEVERE"))[0])
+
+    def test_a_connection_reset_is_asked_again(self):
+        class Answer:
+            def __enter__(self):
+                return io.BytesIO(b'{"results": []}')
+
+            def __exit__(self, *exc):
+                return False
+
+        calls = []
+
+        def urlopen(request, timeout):
+            calls.append(request.full_url)
+            if len(calls) == 1:
+                raise ConnectionResetError(104, "Connection reset by peer")
+            return Answer()
+
+        with mock.patch.object(osv_scan.urllib.request, "urlopen", urlopen), mock.patch.object(osv_scan.time, "sleep"):
+            self.assertEqual({"results": []}, osv_scan.post_json(osv_scan.QUERY_BATCH, {"queries": []}))
+        self.assertEqual(2, len(calls))
 
     def test_a_high_or_critical_advisory_fails_and_a_moderate_one_is_reported(self):
         osv = FakeOsv({

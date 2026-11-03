@@ -288,10 +288,18 @@ kill "$LIVE_LOGCAT" 2>/dev/null || true
 
 # M8: failure injection (process death, Android's Always-on VPN with Block connections without VPN), after the tests
 # and their logcat, so the M5 to M7 evidence reads the tests alone; it has its own logcat (logcat-m8.txt). The captures
-# and the socket samples go on through it.
-bash scripts/m8_failure_injection.sh "$API" "$OUT"
-M8_STATUS=$?
-if [ "$M8_STATUS" != 0 ] && [ "$STATUS" = 0 ]; then STATUS=$M8_STATUS; fi
+# and the socket samples go on through it. Bounded, so the captures and samples pulled below are never lost to the
+# step's own time limit, and not run once the tests themselves ran out of time (m8_evidence.py then finds no steps).
+if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
+    echo "::error title=M8 failure injection (API $API)::Not run: the device tests ran out of time."
+else
+    timeout --kill-after=1m "${M8_TIMEOUT:-12m}" bash scripts/m8_failure_injection.sh "$API" "$OUT"
+    M8_STATUS=$?
+    if [ "$M8_STATUS" = 124 ] || [ "$M8_STATUS" = 137 ]; then
+        echo "::error title=M8 failure injection (API $API)::Stopped after ${M8_TIMEOUT:-12m}: the steps it took are in m8-steps.txt."
+    fi
+    if [ "$M8_STATUS" != 0 ] && [ "$STATUS" = 0 ]; then STATUS=$M8_STATUS; fi
+fi
 timeout 30 adb shell 'pkill -f pf-connecting.sh' >/dev/null 2>&1 || true
 timeout 120 adb pull /data/local/tmp/pf-connecting.txt "$OUT/phone-connecting.txt" >/dev/null 2>&1 || echo "no socket samples" > "$OUT/phone-connecting.txt"
 timeout 60 adb shell pm list packages -U 2>/dev/null | tr -d '\r' > "$OUT/packages-uids.txt" || true

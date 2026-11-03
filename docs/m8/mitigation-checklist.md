@@ -12,7 +12,7 @@ Legend: ✅ in place and checked automatically on every CI run · 🔁 in place,
 | ✅ | While the VPN interface exists, every failure holds traffic: engine failure, proxy refusing or hanging, certificate change, reconnecting, offline, switch, restart (I-5) | Device tests M5–M7 with captures |
 | ✅ | An Always-on VPN start holds traffic before the proxy check and retries with traffic held (I-5, ADR-0013 §3) | `KillSwitchTest`; device scenario B |
 | ✅ | Always-on VPN connects only the profile the user chose; none chosen → nothing connects, the user is told | `KillSwitchTest`, `HomeViewModelTest`, `HomeScreenTest` |
-| ✅ | Process death while connected: measured on devices with and without Android's kill switch; found and explained on the next start (I-6) | `scripts/m8_failure_injection.sh` + `scripts/m8_evidence.py`, API 29/34/35/36 |
+| ⏳ | Process death while connected: measured on devices with and without Android's kill switch; found and explained on the next start (I-6) | `scripts/m8_failure_injection.sh` + `scripts/m8_evidence.py`, API 29/34/35/36, on every CI run; ✅ once a run passes on all four (`docs/m8/failure-injection.md` §3) |
 | ⚠️ | Without Android's kill switch, apps use the normal network when the VPN goes away (R1) | Told in E1/E1b, E2, B2, B6d and after an interruption |
 | ✅ | DNS never leaves the phone except the proxy's own name (I-4) | `m6_evidence.py` |
 | ✅ | UDP refused, ping unanswered, IPv6 handled (I-7, I-8, I-13) | Device tests M6; `TestPingIsNeverAnswered`, `TestEchoFilterBlocksOutboundReplies` |

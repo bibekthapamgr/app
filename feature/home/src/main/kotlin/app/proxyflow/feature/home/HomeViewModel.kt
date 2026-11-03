@@ -79,7 +79,7 @@ sealed interface HomeDialog {
 class HomeViewModel(
     private val profiles: ProfileRepository,
     private val connection: ConnectionController,
-    private val protection: ProtectionStore = InMemoryProtectionStore(),
+    protection: ProtectionStore = InMemoryProtectionStore(),
 ) : ViewModel() {
     private val dialog = MutableStateFlow<HomeDialog?>(null)
     private var notificationRequestTaken = false
@@ -154,16 +154,14 @@ class HomeViewModel(
      */
     private fun connectNow(profileId: String) {
         connection.connect(profileId)
+        connection.dismissInterruption()
         viewModelScope.launch {
             if (profiles.chosenProfileId.first() != profileId) profiles.setActive(profileId)
-            protection.setInterruption(null)
         }
     }
 
     /** The notice that ProxyFlow was stopped while connected, acknowledged (M8). */
-    fun dismissInterruption() {
-        viewModelScope.launch { protection.setInterruption(null) }
-    }
+    fun dismissInterruption() = connection.dismissInterruption()
 
     /** Home is shown: while ProxyFlow is connected, Android is asked about its kill switch again (M8). */
     fun checkKillSwitch() = connection.checkSystemKillSwitch()

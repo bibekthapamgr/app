@@ -55,7 +55,10 @@ internal class AndroidProcessHistory(context: Context) : ProcessHistory {
             ApplicationExitInfo.REASON_CRASH_NATIVE -> ExitReason.NativeCrash
             ApplicationExitInfo.REASON_ANR -> ExitReason.NotResponding
             ApplicationExitInfo.REASON_SIGNALED -> ExitReason.Killed
-            ApplicationExitInfo.REASON_USER_REQUESTED, ApplicationExitInfo.REASON_USER_STOPPED -> ExitReason.ForceStopped
+            ApplicationExitInfo.REASON_USER_REQUESTED -> ExitReason.ForceStopped
+            // The Android user the process ran as was stopped (a work profile turned off, say): not ProxyFlow
+            // force-stopped, so it is one of Android's other reasons.
+            ApplicationExitInfo.REASON_USER_STOPPED -> ExitReason.Other
             ApplicationExitInfo.REASON_PERMISSION_CHANGE -> ExitReason.PermissionChanged
             REASON_PACKAGE_UPDATED -> ExitReason.Updated
             ApplicationExitInfo.REASON_UNKNOWN -> ExitReason.Unknown

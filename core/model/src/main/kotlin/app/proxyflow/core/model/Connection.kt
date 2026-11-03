@@ -144,6 +144,9 @@ data class ConnectionError(val code: String, val detail: String? = null) {
  * @param error why the last attempt ended (with [ConnectionStatus.Disconnected]) or why
  *   traffic is blocked (with [ConnectionStatus.Blocked]); null after a normal disconnect.
  * @param reconnect set while ProxyFlow reconnects on its own (board B5).
+ * @param held while [ConnectionStatus.Connecting]: the VPN interface is already up and holds apps' traffic — Android
+ *   started ProxyFlow as Always-on VPN (M8, ADR-0013 §3) — so cancelling sends apps to the normal network, unlike a
+ *   connect that changes nothing on the phone until it passes.
  */
 data class ConnectionState(
     val status: ConnectionStatus = ConnectionStatus.Disconnected,
@@ -154,6 +157,7 @@ data class ConnectionState(
     val connectedSinceMillis: Long? = null,
     val error: ConnectionError? = null,
     val reconnect: ReconnectInfo? = null,
+    val held: Boolean = false,
 ) {
     /** Connecting or up: a new connect for the same profile has nothing to do. */
     val active: Boolean get() = status != ConnectionStatus.Disconnected

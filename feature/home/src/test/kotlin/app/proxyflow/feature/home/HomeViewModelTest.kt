@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.InMemoryProtectionStore
+import app.proxyflow.core.data.ProtectionStore
 import app.proxyflow.core.data.UnavailableConnectionController
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -284,7 +286,7 @@ class HomeViewModelTest {
 
         assertEquals(listOf(saved.id), controller.connects)
         assertEquals(saved.id, profiles.chosenProfileId.first())
-        assertNull("connecting again is seeing it", protection.interruption.first())
+        assertTrue("connecting again is seeing it, cleared through the session", "dismissInterruption" in controller.calls)
     }
 
     @Test
@@ -293,7 +295,7 @@ class HomeViewModelTest {
         val interruption = Interruption("p1", connectedSinceMillis = 1, endedAtMillis = 2, reason = ExitReason.Crash, detectedAtMillis = 3)
         val protection = InMemoryProtectionStore(killSwitch = killSwitch, interruption = interruption)
         profiles.save(null, ProxyProfileInput(server = "proxy.example.com", port = "1080"))
-        val controller = RecordingController()
+        val controller = RecordingController(protection = protection)
         val viewModel = HomeViewModel(profiles, controller, protection)
         observe(viewModel)
         assertEquals(killSwitch, ready(viewModel).killSwitch)
@@ -305,7 +307,7 @@ class HomeViewModelTest {
         assertEquals("what Android said stays", killSwitch, ready(viewModel).killSwitch)
 
         viewModel.checkKillSwitch()
-        assertEquals(listOf("checkSystemKillSwitch"), controller.calls)
+        assertEquals(listOf("dismissInterruption", "checkSystemKillSwitch"), controller.calls)
     }
 
     /** Android started ProxyFlow as Always-on VPN with no proxy chosen: no profile's error, shown whichever profile Home shows. */
@@ -343,8 +345,12 @@ class HomeViewModelTest {
 
     private fun ready(viewModel: HomeViewModel) = viewModel.uiState.value as HomeUiState.Ready
 
-    private class RecordingController(override val canConnect: Boolean = true, private val consent: Intent? = null) :
-        ConnectionController {
+    /** [protection]: the store the session would clear an interruption in. */
+    private class RecordingController(
+        override val canConnect: Boolean = true,
+        private val consent: Intent? = null,
+        private val protection: ProtectionStore? = null,
+    ) : ConnectionController {
         val current = MutableStateFlow(ConnectionState.Idle)
         override val state: StateFlow<ConnectionState> = current
         val calls = mutableListOf<String>()
@@ -376,6 +382,11 @@ class HomeViewModelTest {
 
         override fun checkSystemKillSwitch() {
             calls += "checkSystemKillSwitch"
+        }
+
+        override fun dismissInterruption() {
+            calls += "dismissInterruption"
+            runBlocking { protection?.setInterruption(null) }
         }
     }
 }

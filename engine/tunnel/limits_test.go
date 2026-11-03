@@ -43,32 +43,49 @@ func (d *countingDialer) Dial(ctx context.Context, t adapters.Target) (net.Conn,
 	return d.next.Dial(ctx, t)
 }
 
-// Many more connections at once than MaxConns: never more open than the bound, the rest refused and counted, every
-// slot freed when they close, and the engine goes on serving.
+// liveDialer counts the tunnels open at once: dialled through the proxy and not yet closed by the engine.
+type liveDialer struct {
+	next      TunnelDialer
+	now, most atomic.Int64
+}
+
+func (d *liveDialer) Dial(ctx context.Context, t adapters.Target) (net.Conn, error) {
+	c, err := d.next.Dial(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	n := d.now.Add(1)
+	for {
+		most := d.most.Load()
+		if n <= most || d.most.CompareAndSwap(most, n) {
+			break
+		}
+	}
+	return &countedConn{Conn: c, done: func() { d.now.Add(-1) }}, nil
+}
+
+type countedConn struct {
+	net.Conn
+	once sync.Once
+	done func()
+}
+
+func (c *countedConn) Close() error {
+	c.once.Do(c.done)
+	return c.Conn.Close()
+}
+
+// Many more connections at once than MaxConns: never more tunnels open than the bound, the rest refused and counted,
+// every tunnel closed when the apps' connections close, and the engine goes on serving.
 func TestManyConnectionsAtOnceStayWithinMaxConns(t *testing.T) {
 	proxytest.CheckLeaks(t)
 	const limit, attempts = 24, 120
-	e, d := startEngine(t, nil, func(c *Config) { c.MaxConns = limit })
-	t.Cleanup(d.closeQuiet)
+	fake := &fakeDialer{}
+	t.Cleanup(fake.closeQuiet)
+	dialer := &liveDialer{next: fake}
+	e, _ := startEngine(t, dialer, func(c *Config) { c.MaxConns = limit })
 	ip := resolve(t, e.cs, "quiet.test")
 
-	stop := make(chan struct{})
-	var most atomic.Int64
-	sampled := make(chan struct{})
-	go func() { // the engine's slots in use (flows open or being set up), sampled throughout
-		defer close(sampled)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			if n := int64(len(e.sem)); n > most.Load() {
-				most.Store(n)
-			}
-			time.Sleep(time.Millisecond)
-		}
-	}()
 	var (
 		mu    sync.Mutex
 		open  []net.Conn
@@ -92,25 +109,24 @@ func TestManyConnectionsAtOnceStayWithinMaxConns(t *testing.T) {
 		}(uint16(10_000 + i))
 	}
 	wg.Wait()
-	close(stop)
-	<-sampled
 	if n := len(open); n > limit {
 		t.Fatalf("%d connections open at MaxConns=%d", n, limit)
 	}
-	if m := most.Load(); m > limit {
-		t.Fatalf("the engine held %d flows at once at MaxConns=%d", m, limit)
+	if m := dialer.most.Load(); m > limit {
+		t.Fatalf("%d tunnels open at once at MaxConns=%d", m, limit)
 	}
 	if got := e.Stats().Failures["CONNECTION_LIMIT"]; got < 1 {
 		t.Fatalf("connections over the limit were not refused as CONNECTION_LIMIT: %v", e.Stats().Failures)
 	}
-	t.Logf("%d of %d attempts open (limit %d), %d refused at the limit, %d timed out on the test's client, most at once %d",
-		len(open), attempts, limit, e.Stats().Failures["CONNECTION_LIMIT"], other.Load(), most.Load())
+	t.Logf("%d of %d attempts open (limit %d), %d refused at the limit, %d timed out on the test's client, at most %d tunnels at once",
+		len(open), attempts, limit, e.Stats().Failures["CONNECTION_LIMIT"], other.Load(), dialer.most.Load())
 
 	for _, c := range open {
 		_ = c.Close()
 	}
-	d.closeQuiet()
+	fake.closeQuiet()
 	waitFor(t, func() bool { st := e.Stats(); return st.TCPActive == 0 && st.TCPConnecting == 0 }, "every slot to be freed")
+	waitFor(t, func() bool { return dialer.now.Load() == 0 }, "every tunnel to be closed")
 	c := dialOK(t, e, resolve(t, e.cs, "ok.test"), 80)
 	defer c.Close()
 	roundTrip(t, c, "after the burst")

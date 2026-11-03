@@ -12,6 +12,7 @@ import datetime
 import io
 import ipaddress
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -89,8 +90,8 @@ def pcap(path: str, packets: list) -> None:
         f.write(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 101))  # raw IP
         for item in packets:
             when, packet = item if isinstance(item, tuple) else (None, item)
-            seconds = int(when.timestamp()) if when else 0
-            f.write(struct.pack("<IIII", seconds, 0, len(packet), len(packet)) + packet)
+            micros = round(when.timestamp() * 1_000_000) if when else 0
+            f.write(struct.pack("<IIII", micros // 1_000_000, micros % 1_000_000, len(packet), len(packet)) + packet)
 
 
 def dns_response(name: str, address: str) -> bytes:
@@ -876,12 +877,14 @@ def m8_steps(killed_by: str = "SIGKILL (run-as)") -> list[tuple[float, str]]:
         (36, "B: VPN: NetworkAgentInfo{VPN CONNECTED}"),
         (37, "B: killing pid 5626 (Always-on VPN, Block connections without VPN)"),
         (38, f"B: killed pid 5626 by {killed_by}"),
+        (38.5, "B: VPN after the kill: none"),
     ]
     steps += [(38 + n, f"B: witness probe {n} with ProxyFlow gone: {EACCES}") for n in range(1, 41)]
     steps += [
         (79, "B: Android did not start ProxyFlow again within the probes"),
-        (95, "B: the next start: passed (kept what Android said; connected again while Android blocks; expected killed,other,low_memory)"),
-        (96, "B: found: kept kill switch: on, checked at 1793721012000 interruption: killed, ended at 1793721016000, connected since 1793721011000"),
+        (95, "B: the next start: passed (kept what Android said; blocked before connecting; connected again while Android blocks; expected killed,other,low_memory)"),
+        (96, "B: found: kept kill switch: on, checked at 1793721012000 interruption: killed, ended at 1793721016000, connected since 1793721011000 "
+             f"blocked before connecting: {EACCES}"),
         (97, "B: status: result 1: always-on app.proxyflow.android.debug lockdown true"),
         (98, "B: Always-on VPN off: result 1: always-on none"),
         (99, "B: ProxyFlow force-stopped"),
@@ -910,7 +913,10 @@ class M8EvidenceTest(unittest.TestCase):
     WITNESS = ["1.0 127.0.0.1:5000 PF8-before", "2.0 127.0.0.1:5001 PF8-A-A204-2", "3.0 127.0.0.1:5002 PF8-B-after-B77-1"]
     DROPBOX = "Process: app.proxyflow.android.debug\njava.lang.IllegalStateException: PF8-planted-C55 proxy <redacted> failed\n\tat a.b(c)\n"
 
-    def run_m8(self, steps=None, witness=None, dropbox=DROPBOX, captures=None) -> tuple[int, str]:
+    # The phone's tcpdump on wlan0 ran from before the tests to after M8 (scripts/e2e_device.sh's lines).
+    GUEST = ["tcpdump on: wlan0", "tcpdump at the start: 812", "tcpdump at the start on: wlan0", "tcpdump at the end: 812", "tcpdump at the end on: wlan0"]
+
+    def run_m8(self, steps=None, witness=None, dropbox=DROPBOX, captures=None, guest=GUEST, raw_steps=None) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as pf, tempfile.TemporaryDirectory() as out:
             with open(os.path.join(pf, "log-baseline.properties"), "w") as f:
                 f.write("witness.log=1\n")  # the lab's own check of the witness came before the run
@@ -918,6 +924,9 @@ class M8EvidenceTest(unittest.TestCase):
                 f.writelines(line + "\n" for line in ["0.5 127.0.0.1:4999 lab-check"] + (self.WITNESS if witness is None else witness))
             with open(os.path.join(out, "m8-steps.txt"), "w") as f:
                 f.writelines(f"{T0 + seconds:.6f} {text}\n" for seconds, text in (m8_steps() if steps is None else steps))
+                f.writelines(line + "\n" for line in raw_steps or [])
+            with open(os.path.join(out, "guest-capture.txt"), "w") as f:
+                f.writelines(line + "\n" for line in guest)
             if dropbox is not None:
                 with open(os.path.join(out, "m8-dropbox-C55.txt"), "w") as f:
                     f.write(dropbox)
@@ -935,11 +944,14 @@ class M8EvidenceTest(unittest.TestCase):
         self.assertIn("A: killed while connected by SIGKILL (run-as)", written)
         self.assertIn("A: the shell reached the witness directly 3.0 s after the kill (probe 2); the witness logged it 1 time(s), from 127.0.0.1:5001", written)
         self.assertIn("A: the next start found the interruption: reason killed, end time given", written)
-        self.assertIn("B: 40 probes of the witness with ProxyFlow gone, 0 answered; failures: ['EACCES (Permission denied)']", written)
+        self.assertIn("B: Android had no VPN network 0.5 s after the kill", written)
+        self.assertIn("B: 40 probes of the witness with ProxyFlow gone, 40 refused as Android's blocking refuses: ['EACCES (Permission denied)']", written)
         self.assertIn("B: Android did not start ProxyFlow again within the 40 probes (40 s)", written)
-        self.assertIn("C: Android's crash report has the exception (PF8-planted-C55), not the planted secret", written)
+        self.assertIn("blocked before connecting: ERROR ConnectException", written)
+        self.assertIn("C: Android's crash report has the exception (PF8-planted-C55), none of the planted sign-in", written)
         self.assertIn("C: the next start found the interruption: reason crash", written)
-        self.assertIn("guest-wlan0.pcap: 3 SYNs to the witness; 1 with A's direct line (it sees the uplink); 0 while B blocked", written)
+        self.assertIn("guest-wlan0.pcap: 3 SYNs to the witness, A's and B-after's among them; its clock is the phone's -0.3 to +0.7 s; 0 while B blocked", written)
+        self.assertIn("witness: 3 lines after the lab's own checks, 0 that no step sent on purpose", written)
 
     def test_the_witness_hearing_a_line_sent_while_blocking_was_on_fails(self):
         status, written = self.run_m8(witness=self.WITNESS + ["4.0 127.0.0.1:5003 PF8-B-B77-7"])
@@ -973,7 +985,55 @@ class M8EvidenceTest(unittest.TestCase):
     def test_a_crash_report_with_the_planted_secret_fails(self):
         status, written = self.run_m8(dropbox=self.DROPBOX + "Caused by: pf8user:PF8SECRETC55@planted.pf8.invalid\n")
         self.assertEqual(1, status)
-        self.assertIn("PROBLEM: C: Android's crash report (m8-dropbox-C55.txt) has the planted secret", written)
+        self.assertIn("PROBLEM: C: Android's crash report (m8-dropbox-C55.txt) has the planted sign-in: the password, the user, the server", written)
+        # Its user or its server alone is part of the sign-in too.
+        status, written = self.run_m8(dropbox=self.DROPBOX + "Caused by: [redacted] at planted.pf8.invalid\n")
+        self.assertEqual(1, status)
+        self.assertIn("has the planted sign-in: the server", written)
+
+    def test_a_probe_that_fails_some_other_way_is_not_androids_blocking(self):
+        # adb gone, a timeout (the line went somewhere that held it), a refusal by a proxy (ProxyFlow still running):
+        # none shows that Android blocked the connection.
+        for answer in ("error: device offline", "", "ERROR SocketTimeoutException: connect timed out",
+                       "ERROR ConnectException: failed to connect to /10.0.2.2 (port 8095) from /198.18.0.1 (port 43744): ECONNREFUSED (Connection refused)"):
+            steps = [(s, t.replace(EACCES, answer) if t.startswith("B: witness probe 7 ") else t) for s, t in m8_steps()]
+            status, written = self.run_m8(steps=steps)
+            self.assertEqual(1, status, answer)
+            self.assertIn("PROBLEM: B: 1 probe(s) with ProxyFlow gone not refused as Android's blocking refuses", written)
+
+    def test_probes_while_androids_vpn_is_still_there_say_nothing(self):
+        steps = [(s, "B: VPN after the kill: NetworkAgentInfo{network{103} ni{VPN CONNECTED extra: }}" if t == "B: VPN after the kill: none" else t)
+                 for s, t in m8_steps()]
+        status, written = self.run_m8(steps=steps)
+        self.assertEqual(1, status)
+        self.assertIn("PROBLEM: B: Android's VPN network was not seen gone before the probes", written)
+        status, written = self.run_m8(steps=[(s, t) for s, t in m8_steps() if not t.startswith("B: VPN after the kill")])
+        self.assertEqual(1, status)
+        self.assertIn("PROBLEM: B: Android's VPN network was not seen gone before the probes: not looked at", written)
+
+    def test_android_starting_proxyflow_again_ends_the_probes(self):
+        steps = [(s, t) for s, t in m8_steps() if not re.match(r"B: witness probe (1[0-9]|[2-4][0-9]) with", t) and "did not start" not in t]
+        steps += [(48.2, "B: witness probe 10 reached ProxyFlow started again: ERROR SocketTimeoutException: connect timed out"),
+                  (48.4, "B: Android started ProxyFlow again (pid 5702): 11-03 15:49:59.625 +0000 5702 5702 I ProxyFlowVpn: always-on start")]
+        status, written = self.run_m8(steps=sorted(steps))
+        self.assertEqual(0, status, written)
+        self.assertIn("B: Android started ProxyFlow again 10.4 s after the kill within the 9 probes", written)
+        self.assertIn("the probe then went to its new VPN: ERROR SocketTimeoutException", written)
+
+    def test_anything_else_the_witness_hears_fails(self):
+        # A connection that sent nothing ("-") while B ran, and a line no step sends.
+        status, written = self.run_m8(witness=self.WITNESS[:2] + ["2.5 127.0.0.1:5009 -"] + self.WITNESS[2:])
+        self.assertEqual(1, status)
+        self.assertIn("PROBLEM: the witness heard lines no step sent around ProxyFlow on purpose: ['2.5 127.0.0.1:5009 -']", written)
+        self.assertIn("PROBLEM: B: the witness heard something while B ran (between A's line and the first once the setting was off)", written)
+        status, written = self.run_m8(witness=self.WITNESS + ["9.0 127.0.0.1:5010 hello"])
+        self.assertEqual(1, status)
+        self.assertIn("PROBLEM: the witness heard lines no step sent around ProxyFlow on purpose: ['9.0 127.0.0.1:5010 hello']", written)
+
+    def test_the_shells_check_before_reconnecting_reaching_the_witness_fails(self):
+        status, written = self.run_m8(witness=self.WITNESS[:2] + ["2.4 127.0.0.1:5011 PF8-B-check-B77"] + self.WITNESS[2:])
+        self.assertEqual(1, status)
+        self.assertIn("PROBLEM: B: the witness heard lines sent while blocking was on", written)
 
     def test_a_step_the_script_failed_or_a_scenario_that_did_not_run_fails(self):
         steps = m8_steps() + [(141, "FAILED C: the next start: expected one of [Crash]")]
@@ -999,9 +1059,32 @@ class M8EvidenceTest(unittest.TestCase):
         # Only the line before the tests: this capture saw nothing of M8, so its "no SYN while blocked" says nothing.
         status, written = self.run_m8(captures=[witness_syn(0.6, 41000)])
         self.assertEqual(1, status)
-        self.assertIn("0 with A's direct line (it does not see the uplink then)", written)
-        self.assertIn("its SYNs to the witness, in seconds from A's kill: [-10.0]", written)  # the capture keeps whole seconds here
-        self.assertIn("PROBLEM: no capture saw the SYN of A's direct line", written)
+        self.assertIn("guest-wlan0.pcap: 1 SYNs to the witness; none pair as A's and B-after's direct lines, so it does not see the uplink through B", written)
+        self.assertIn("PROBLEM: no capture saw the uplink through B", written)
+
+    def test_a_capture_that_sees_only_as_line_does_not_speak_for_b(self):
+        # tcpdump died, the file was cut, or the interface stopped being the uplink after A: B-after's SYN is missing.
+        status, written = self.run_m8(captures=[witness_syn(0.6, 41000), witness_syn(12.7, 41001)])
+        self.assertEqual(1, status)
+        self.assertIn("PROBLEM: no capture saw the uplink through B", written)
+
+    def test_a_capture_whose_tcpdump_stopped_early_does_not_count(self):
+        guest = [line for line in self.GUEST if not line.startswith("tcpdump at the end")] + ["tcpdump at the end: none", "tcpdump at the end on: "]
+        status, written = self.run_m8(guest=guest)
+        self.assertEqual(1, status)
+        self.assertIn("its tcpdump had stopped before the end of the tests, so it does not count as coverage", written)
+        self.assertIn("PROBLEM: no capture saw the uplink through B", written)
+
+    def test_a_capture_on_another_clock_is_lined_up_from_its_own_syns(self):
+        # The emulator's own capture runs on the runner's clock, here 2.5 s behind the phone's: B-after's direct line,
+        # just after the setting was turned off, is not taken for a leak, and the one SYN while blocked still is.
+        behind = [witness_syn(12.7 - 2.5, 41001), witness_syn(100.4 - 2.5, 41002)]
+        status, written = self.run_m8(captures=behind)
+        self.assertEqual(0, status, written)
+        self.assertIn("its clock is the phone's -2.8 to -1.8 s; 0 while B blocked", written)
+        status, written = self.run_m8(captures=behind + [witness_syn(95.5 - 2.5, 41003)])
+        self.assertEqual(1, status)
+        self.assertIn("PROBLEM: guest-wlan0.pcap: 1 SYN(s) to the witness while Block connections without VPN was on", written)
 
     def test_syns_are_read_from_ipv4_and_ipv6_and_only_to_the_witness(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1027,7 +1110,7 @@ class M8EvidenceTest(unittest.TestCase):
     def test_what_apps_send_to_proxyflows_addresses_after_the_vpn_is_gone_is_reported_not_failed(self):
         when = datetime.datetime.fromtimestamp(T0 + 11, tz=datetime.timezone.utc)
         stale = (when, ipv4(PHONE4, "198.18.0.2", 17, udp(40500, 53, dns_query("stale.example.org"))))
-        status, written = self.run_m8(captures=[witness_syn(12.7, 41001), stale])
+        status, written = self.run_m8(captures=[witness_syn(12.7, 41001), stale, witness_syn(100.4, 41002)])
         self.assertEqual(0, status, written)
         self.assertIn("guest-wlan0.pcap after A's kill (20 s): to ProxyFlow's addresses on the normal network {'UDP 198.18.0.2:53': 1}", written)
         self.assertIn("DNS names in it {'stale.example.org': 1}", written)
@@ -1035,6 +1118,12 @@ class M8EvidenceTest(unittest.TestCase):
 
     def test_steps_without_a_time_are_left_out(self):
         self.assertEqual([(1.5, "A: x")], m8_evidence.steps(["1.5 A: x", " B: no time", "", "garbage"]))
+
+    def test_a_failed_step_whose_time_could_not_be_read_still_fails(self):
+        self.assertEqual(["B: x", "C: y", "A: z"], m8_evidence.failures(["- FAILED B: x", " FAILED C: y", "1.5 FAILED A: z", "2.0 C: fine"]))
+        status, written = self.run_m8(raw_steps=["- FAILED B: the next start: adb: device offline"])
+        self.assertEqual(1, status)
+        self.assertIn("PROBLEM: the script: B: the next start: adb: device offline", written)
 
 
 if __name__ == "__main__":

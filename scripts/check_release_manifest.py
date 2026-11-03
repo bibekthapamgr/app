@@ -14,7 +14,8 @@ fails CI unless:
   app/src/main/res/xml that exclude every storage domain the app writes to;
 - it is not debuggable and does not opt in to cleartext traffic;
 - its network security config (M8) permits no cleartext and trusts the system's certificate authorities only, with
-  no per-domain exceptions, no user or bundled certificates and no pin overrides;
+  no per-domain exceptions, no user or bundled certificates and no pin overrides — in app/src/main/res/xml and in
+  every qualified variant of it (xml-v31…) and the release build type's own resources, any of which Android may use;
 - the only exported component without a permission is the launcher activity.
 
 Usage: check_release_manifest.py [merged AndroidManifest.xml]
@@ -24,12 +25,15 @@ Usage: check_release_manifest.py [merged AndroidManifest.xml]
 from __future__ import annotations
 
 import glob
+import os
 import secrets
 import sys
 import xml.etree.ElementTree as ET
 
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 RES_XML = "app/src/main/res/xml"
+# Other resources the release build takes files from besides main's: the release build type's own.
+RELEASE_RES = ["app/src/release/res"]
 
 # Each entry: permission (with ${applicationId} for the app's own) -> why the app needs it.
 ALLOWED_PERMISSIONS = {
@@ -95,12 +99,32 @@ def check_backup_rules(application: ET.Element) -> list[str]:
     return problems
 
 
+def config_files(name: str) -> list[str]:
+    """Every file the release build may take @xml/<name> from: main's res/xml and its qualified variants (xml-v31…, which
+    Android prefers where they apply), and the same in the release build type's own resources."""
+    files = []
+    for root in [os.path.dirname(RES_XML)] + RELEASE_RES:
+        files += sorted(glob.glob(os.path.join(root, "xml*", f"{name}.xml")))
+    return files
+
+
 def check_network_security_config(application: ET.Element, facts: list[str]) -> list[str]:
     """M8: the secure defaults written out, so neither a library nor a later change loosens them unnoticed."""
     reference = attr(application, "networkSecurityConfig")
     if not reference or not reference.startswith("@xml/"):
         return [f"android:networkSecurityConfig must point at an @xml file, found {reference!r}"]
-    path = f"{RES_XML}/{reference.removeprefix('@xml/')}.xml"
+    name = reference.removeprefix("@xml/")
+    main = f"{RES_XML}/{name}.xml"
+    paths = config_files(name)
+    problems = [] if os.path.normpath(main) in map(os.path.normpath, paths) else [f"android:networkSecurityConfig: cannot read {main}: no such file"]
+    for path in paths:
+        problems += check_network_security_file(path)
+    if not problems:
+        facts.append(f"network security config {', '.join(paths)}: no cleartext, system certificate authorities only")
+    return problems
+
+
+def check_network_security_file(path: str) -> list[str]:
     try:
         root = ET.parse(path).getroot()
     except (OSError, ET.ParseError) as error:
@@ -122,7 +146,6 @@ def check_network_security_config(application: ET.Element, facts: list[str]) -> 
         problems.append(f"{path}: the trust anchors must be the system's certificates alone, found {anchors}")
     if [c.tag for c in base if c.tag != "trust-anchors"]:
         problems.append(f"{path}: <base-config> may hold <trust-anchors> only, found {[c.tag for c in base]}")
-    facts.append(f"network security config {path}: no cleartext, system certificate authorities only")
     return problems
 
 

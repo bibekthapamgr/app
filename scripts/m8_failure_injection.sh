@@ -21,6 +21,10 @@
 # and captures for that. Each step is noted in m8-steps.txt and in logcat (tag ProxyFlowM8), with the phone's time;
 # scripts/m8_evidence.py checks them against the witness's log, the captures and the crash report.
 #
+# Whatever way it ends — a failed step, an early return, being stopped by its time limit (scripts/e2e_device.sh) — no
+# step is left running, Always-on VPN is turned off, the device owner given up and ProxyFlow's VPN consent given back
+# (on_exit), so nothing of one scenario is left to the next or to the end of the run.
+#
 # Usage: m8_failure_injection.sh <api level> <out dir>
 set -uo pipefail
 
@@ -42,12 +46,23 @@ WITNESS_PORT="$(sed -n 's/^witness.port=//p' /tmp/pf/e2e.properties)"
 DESTINATION_NAME="$(sed -n 's/^destination.name=//p' /tmp/pf/e2e.properties)"
 DESTINATION_PORT="$(sed -n 's/^destination.port=//p' /tmp/pf/e2e.properties)"
 STATUS=0
+LOGCAT_PID=""
+INSTRUMENT_PID=""   # the am instrument of a step that connects and then waits (connect_then)
+ALWAYS_ON_SET=""    # B set Always-on VPN: always_on_off turns it off again
+OWNER_SET=""        # B made the test APK device owner: release_owner gives it up again
+# How a connect fails that Android's "Block connections without VPN" refuses.
+LOCKDOWN_REFUSAL='EACCES|Permission denied|EPERM|Operation not permitted'
 
 # The phone's clock (logcat's, which the phone's own captures share), in seconds.
 phone_time() { timeout 10 adb shell 'echo $EPOCHREALTIME' 2>/dev/null | tr -d '\r'; }
 
-note() { # <text>: one line in m8-steps.txt and in logcat
-    echo "$(phone_time) $*" >> "$STEPS"
+# The phone's clock in milliseconds, for a step's -e since; empty when it could not be read.
+phone_ms() { phone_time | awk '$1 ~ /^[0-9]+(\.[0-9]+)?$/ { printf "%.0f", $1 * 1000 }'; }
+
+note() { # <text>: one line in m8-steps.txt ("-" for its time when the phone's clock could not be read) and in logcat
+    local when
+    when="$(phone_time)"
+    echo "${when:--} $*" >> "$STEPS"
     timeout 10 adb shell "log -t ProxyFlowM8 'step $(echo "$*" | tr -d "'")'" >/dev/null 2>&1 || true
 }
 
@@ -78,10 +93,13 @@ wait_log() { # <after line> <seconds> <pattern>: the first logcat line after <af
 
 step_output() { tr -d '\r' < "$OUT/m8-$1-$2.txt" 2>/dev/null; }
 
-instrument() { # <step> <token> <expect> [seconds]: one step of KillSwitchEndToEndTest; succeeds when it passed
-    timeout "${4:-150}" adb shell am instrument -w -e m8 "$1" -e token "$2" -e expect "$3" -e class "$STEP_CLASS#$1" "$RUNNER" \
-        > "$OUT/m8-$1-$2.txt" 2>&1
-    step_output "$1" "$2" | grep -q '^OK (1 test)'
+instrument() { # <step> <token> <expect> [seconds] [since ms]: one step of KillSwitchEndToEndTest; succeeds when it passed
+    timeout "${4:-150}" adb shell am instrument -w -e m8 "$1" -e token "$2" -e expect "$3" -e since "${5:-0}" \
+        -e class "$STEP_CLASS#$1" "$RUNNER" > "$OUT/m8-$1-$2.txt" 2>&1
+    if step_output "$1" "$2" | grep -q '^OK (1 test)'; then return 0; fi
+    # Nothing of a failed step is left running into the next (a timed-out am instrument leaves its process behind).
+    timeout 30 adb shell am force-stop "$APP_ID" >/dev/null 2>&1
+    return 1
 }
 
 step_failure() { step_output "$1" "$2" | grep -m4 -E 'Error|Exception|expected|FAIL' | paste -sd ' ' | cut -c1-700; }
@@ -93,11 +111,19 @@ admin() { # <command> [extras...]: what the lab's device owner answered (LabAdmi
 
 app_pid() { timeout 10 adb shell pidof "$APP_ID" 2>/dev/null | tr -d '\r' | awk '{print $1}'; }
 
-alive() { timeout 10 adb shell pidof "$APP_ID" 2>/dev/null | tr -d '\r' | tr ' ' '\n' | grep -qx "$1"; }
+alive() { # <pid>: 0 while the process runs, 1 once Android lists no such process, 2 when adb could not say
+    local out
+    out="$(timeout 10 adb shell "pidof $APP_ID; echo pidof-rc=\$?" 2>/dev/null | tr -d '\r')"
+    case "$out" in *pidof-rc=*) ;; *) return 2 ;; esac
+    echo "$out" | grep -v '^pidof-rc=' | tr ' ' '\n' | grep -qx "$1"
+}
 
-ended() { # <pid>: the process is gone within 5 s
+ended() { # <pid>: the process is gone within 5 s — as Android says, not because adb failed to answer
+    local _ said
     for _ in $(seq 1 10); do
-        alive "$1" || return 0
+        alive "$1"
+        said=$?
+        [ "$said" = 1 ] && return 0
         sleep 0.5
     done
     return 1
@@ -135,7 +161,53 @@ witness() { # <label>: one line to the witness; what came back
     client tcp 10.0.2.2 "$WITNESS_PORT" "PF8-$1" 3000
 }
 
-vpn_networks() { timeout 20 adb shell dumpsys connectivity 2>/dev/null | tr -d '\r' | grep -E 'VPN' | grep -E 'NetworkAgentInfo' | head -2 | cut -c1-240; }
+# The VPN networks Android has, one line each; "none"; or "unknown" when adb could not say. A network's line is
+# "NetworkAgentInfo{ ni{[type: VPN[], state: CONNECTED/…" (Android 10) or "NetworkAgentInfo{network{…} … ni{VPN CONNECTED …"
+# (later); the other networks' capabilities say NOT_VPN, so "VPN" alone would match them too.
+vpn_networks() {
+    local out
+    out="$(timeout 20 adb shell 'dumpsys connectivity; echo "dumpsys-rc=$?"' 2>/dev/null | tr -d '\r')"
+    case "$out" in *dumpsys-rc=0*) ;; *) echo unknown; return ;; esac
+    out="$(echo "$out" | grep -E 'NetworkAgentInfo\{' | grep -E 'ni\{(\[type: VPN\[[^]]*\], state: CONNECTED|VPN CONNECTED)' | head -2 | cut -c1-240)"
+    echo "${out:-none}"
+}
+
+# --- leaving nothing behind ----------------------------------------------------------------------------------------
+stop_instrument() { # a step that connects and then waits, if one still runs, and the app with it
+    if [ -n "$INSTRUMENT_PID" ]; then
+        kill "$INSTRUMENT_PID" 2>/dev/null
+        wait "$INSTRUMENT_PID" 2>/dev/null
+        INSTRUMENT_PID=""
+    fi
+    timeout 30 adb shell am force-stop "$APP_ID" >/dev/null 2>&1
+}
+
+always_on_off() { # B: Always-on VPN off again and ProxyFlow force-stopped, once
+    [ -n "$ALWAYS_ON_SET" ] || return 0
+    ALWAYS_ON_SET=""
+    note "B: Always-on VPN off: $(admin ALWAYS_ON --es package "''")"
+    timeout 30 adb shell am force-stop "$APP_ID" >/dev/null 2>&1
+    note "B: ProxyFlow force-stopped"
+}
+
+release_owner() { # B: the device owner given up (so the test APK can be uninstalled) and ProxyFlow's VPN consent back, once
+    [ -n "$OWNER_SET" ] || return 0
+    OWNER_SET=""
+    note "B: release: $(admin RELEASE)"
+    # Turning Always-on VPN off this way withdrew ProxyFlow's VPN consent on API 34 and 36 (run 41676441908: C then
+    # found no consent); what Android left is noted, and the consent the tests' own setup gives is given back for C.
+    note "B: VPN consent after the release: $(timeout 10 adb shell appops get "$APP_ID" ACTIVATE_VPN 2>&1 | tr -d '\r' | head -1)"
+    timeout 10 adb shell appops set "$APP_ID" ACTIVATE_VPN allow >/dev/null 2>&1 || fail "B: the VPN consent could not be given back"
+}
+
+on_exit() {
+    stop_instrument
+    always_on_off
+    release_owner
+    [ -z "$LOGCAT_PID" ] || kill "$LOGCAT_PID" 2>/dev/null
+}
+trap on_exit EXIT
+trap 'fail "stopped by a signal (its time limit?)"; exit 143' TERM INT
 
 # --- setup ---------------------------------------------------------------------------------------------------------
 if [ ! -f "$APP_APK" ] || [ ! -f "$TEST_APK" ]; then
@@ -149,6 +221,7 @@ LOGCAT_PID=$!
 sleep 1
 note "M8 failure injection on API $API: app $APP_ID, witness 10.0.2.2:$WITNESS_PORT, su $(timeout 10 adb shell 'command -v su || echo none' | tr -d '\r')"
 note "before: witness $(witness before)"
+[ -n "$(phone_ms)" ] || fail "the phone's clock could not be read: the steps can't be told apart from an earlier scenario's"
 
 if instrument prepare P1 -; then
     note "prepared: $(step_output prepare P1 | grep -m1 'OK (')"
@@ -168,15 +241,21 @@ connect_then() { # <label> <step> <token>
     INSTRUMENT_PID=$!
     if ! line="$(wait_log "$start" 120 "ProxyFlowM8.*$3 connected pid [0-9]+")"; then
         fail "$1: never connected: $(step_failure "$2" "$3")"
-        kill "$INSTRUMENT_PID" 2>/dev/null
+        stop_instrument
         return 1
     fi
     CONNECTED_PID="$(echo "$line" | sed -n 's/.*connected pid \([0-9]*\).*/\1/p')"
 }
 
+instrument_ended() { # the step that connected and waited ended with its process: its output, briefly
+    [ -z "$INSTRUMENT_PID" ] || wait "$INSTRUMENT_PID" 2>/dev/null
+    INSTRUMENT_PID=""
+}
+
 # --- A: killed while connected, no Always-on VPN --------------------------------------------------------------------
 scenario_a() {
-    local token="A$RANDOM" pid out n
+    local token="A$RANDOM" pid out n since
+    since="$(phone_ms)"
     note "A: connecting through the chosen profile, then the process is killed (no Always-on VPN)"
     connect_then A connectAndHold "$token" || return
     pid="$CONNECTED_PID"
@@ -184,8 +263,8 @@ scenario_a() {
     note "A: killing pid $pid while connected"
     kill_app "$pid"
     note "A: killed pid $pid by $KILLED_BY"
-    case "$KILLED_BY" in "NOT KILLED"*) fail "A: the process could not be killed: $KILLED_BY"; return ;; esac
-    wait "$INSTRUMENT_PID" 2>/dev/null
+    case "$KILLED_BY" in "NOT KILLED"*) fail "A: the process could not be killed: $KILLED_BY"; stop_instrument; return ;; esac
+    instrument_ended
     note "A: the instrumentation ended: $(step_output connectAndHold "$token" | grep -v '^$' | tail -2 | paste -sd ' ')"
     # Android removes the VPN with the process; then apps use the normal network.
     for n in $(seq 1 20); do
@@ -196,7 +275,7 @@ scenario_a() {
     done
     case "$out" in REPLY*) ;; *) fail "A: the witness was never reached after the kill (the negative control): $out" ;; esac
     note "A: VPN after the kill: $(vpn_networks | paste -sd ' ')"
-    if instrument afterProcessDeath "$token" "$EXPECT" 120; then
+    if instrument afterProcessDeath "$token" "$EXPECT" 120 "$since"; then
         note "A: the next start: passed ($(step_output afterProcessDeath "$token" | grep -m1 -o 'OK (.*'); expected $EXPECT)"
     else
         fail "A: the next start: $(step_failure afterProcessDeath "$token")"
@@ -206,20 +285,27 @@ scenario_a() {
 
 # --- C: a crash with a planted secret in its message ----------------------------------------------------------------
 scenario_c() {
-    local token="C$RANDOM" pid dropbox
+    local token="C$RANDOM" pid dropbox since n planted
+    since="$(phone_ms)"
     note "C: connecting, then an exception with a planted sign-in in its message crashes the app"
     connect_then C crashWithPlantedSecret "$token" || return
     pid="$CONNECTED_PID"
-    if ended "$pid" || ended "$pid"; then note "C: pid $pid crashed"; else fail "C: pid $pid did not end after the crash"; fi
-    wait "$INSTRUMENT_PID" 2>/dev/null
-    note "C: the instrumentation ended: $(step_output crashWithPlantedSecret "$token" | grep -v '^$' | grep -m2 -E 'shortMsg|INSTRUMENTATION_CODE' | paste -sd ' ' | sed "s/PF8SECRET$token/<planted secret>/g")"
-    sleep 2
+    if ended "$pid" || ended "$pid"; then note "C: pid $pid crashed"; else fail "C: pid $pid did not end after the crash"; stop_instrument; fi
+    instrument_ended
+    note "C: the instrumentation ended: $(step_output crashWithPlantedSecret "$token" | grep -v '^$' | grep -m2 -E 'shortMsg|INSTRUMENTATION_CODE' | paste -sd ' ' | sed -e "s/PF8SECRET$token/<planted secret>/g" -e 's/pf8user/<planted user>/g')"
+    # Android writes its crash report after the process has gone: looked for for up to 20 s.
     dropbox="$OUT/m8-dropbox-$token.txt"
-    timeout 60 adb shell dumpsys dropbox --print data_app_crash 2>/dev/null | tr -d '\r' > "$dropbox"
+    for n in $(seq 1 20); do
+        timeout 60 adb shell dumpsys dropbox --print data_app_crash 2>/dev/null | tr -d '\r' > "$dropbox"
+        grep -q "PF8-planted-$token" "$dropbox" && break
+        sleep 1
+    done
+    # The planted sign-in whole: its password, its user and its server (ADR-0013 §7: none of them in the report).
+    planted="$(grep -oE "PF8SECRET$token|pf8user|planted\.pf8\.invalid" "$dropbox" | sort -u | sed "s/PF8SECRET$token/the planted password/" | paste -sd ',' -)"
     if ! grep -q "PF8-planted-$token" "$dropbox"; then
-        fail "C: Android's crash report of the planted exception was not found ($(wc -l < "$dropbox") lines of crash reports)"
-    elif grep -q "PF8SECRET$token" "$dropbox"; then
-        fail "C: Android's crash report has the planted secret"
+        fail "C: Android's crash report of the planted exception was not found within 20 s ($(wc -l < "$dropbox") lines of crash reports)"
+    elif [ -n "$planted" ]; then
+        fail "C: Android's crash report has the planted sign-in: $planted"
     else
         note "C: Android's crash report names the exception, without the planted secret: $(grep -m1 "PF8-planted-$token" "$dropbox" | cut -c1-200)"
     fi
@@ -227,7 +313,7 @@ scenario_c() {
     note "C: the phone's log lines with the planted secret (Android's own, before any app code): $(grep -c "PF8SECRET$token" "$LOGCAT")"
     local expect=crash
     [ "$API" -lt 30 ] && expect=unknown
-    if instrument afterProcessDeath "$token" "$expect" 120; then
+    if instrument afterProcessDeath "$token" "$expect" 120 "$since"; then
         note "C: the next start: passed (expected $expect)"
     else
         fail "C: the next start: $(step_failure afterProcessDeath "$token")"
@@ -237,14 +323,18 @@ scenario_c() {
 
 # --- B: Always-on VPN with Block connections without VPN ----------------------------------------------------------
 scenario_b() {
-    local token="B$RANDOM" start line pid out n back=""
+    local token="B$RANDOM" start line pid out n back="" vpn since
+    since="$(phone_ms)"
+    OWNER_SET=1
     note "B: device owner: $(timeout 30 adb shell dpm set-device-owner "$TEST_ID/app.proxyflow.e2e.LabDeviceAdmin" 2>&1 | tr -d '\r' | paste -sd ' ')"
     start="$(lines)"
+    ALWAYS_ON_SET=1
     out="$(admin ALWAYS_ON --es package "$APP_ID" --ez lockdown true)"
     note "B: Always-on VPN with Block connections without VPN: $out"
-    case "$out" in *"lockdown true"*) ;; *) fail "B: Android did not take the setting: $out"; return ;; esac
+    case "$out" in *"lockdown true"*) ;; *) fail "B: Android did not take the setting: $out"; end_b; return ;; esac
     if ! line="$(wait_log "$start" 90 "ProxyFlowVpn *: connected ")"; then
         fail "B: Android's Always-on VPN start did not connect ProxyFlow within 90 s: $(tail -n "+$((start + 1))" "$LOGCAT" | grep -E 'ProxyFlowVpn' | tail -5 | paste -sd ' ' | cut -c1-600)"
+        end_b
         return
     fi
     pid="$(app_pid)"
@@ -260,32 +350,55 @@ scenario_b() {
     note "B: killing pid $pid (Always-on VPN, Block connections without VPN)"
     kill_app "$pid"
     note "B: killed pid $pid by $KILLED_BY"
-    case "$KILLED_BY" in "NOT KILLED"*) fail "B: the process could not be killed: $KILLED_BY" ;; esac
+    case "$KILLED_BY" in "NOT KILLED"*) fail "B: the process could not be killed: $KILLED_BY"; end_b; return ;; esac
+    # Android removes the VPN with the process: only then do the probes test Android's blocking, not ProxyFlow's.
+    for n in $(seq 1 20); do
+        vpn="$(vpn_networks)"
+        [ "$vpn" = none ] && break
+        sleep 0.25
+    done
+    note "B: VPN after the kill: $vpn"
+    if [ "$vpn" != none ]; then
+        fail "B: Android still had a VPN network 5 s after the kill, or could not say: $vpn"
+        end_b
+        return
+    fi
+    # Every probe must be refused as Android's blocking refuses it, until Android starts ProxyFlow again (if it does):
+    # a probe then goes to ProxyFlow's new VPN, which holds or refuses it — that is not a probe of Android's blocking.
     for n in $(seq 1 40); do
-        out="$(witness "B-$token-$n")"
-        note "B: witness probe $n with ProxyFlow gone: $out"
-        case "$out" in REPLY*) fail "B: the witness was reached while Block connections without VPN was on: $out" ;; esac
-        if line="$(wait_log "$start" 0 "ProxyFlowVpn *: connected ")"; then
+        if line="$(wait_log "$start" 0 "ProxyFlowVpn *: always-on start")"; then
             back="$line"
             break
+        fi
+        out="$(witness "B-$token-$n")"
+        if echo "$out" | grep -qE "$LOCKDOWN_REFUSAL"; then
+            note "B: witness probe $n with ProxyFlow gone: $out"
+        elif line="$(wait_log "$start" 3 "ProxyFlowVpn *: always-on start")"; then
+            note "B: witness probe $n reached ProxyFlow started again: $out"
+            back="$line"
+            break
+        else
+            note "B: witness probe $n with ProxyFlow gone: $out"
+            fail "B: witness probe $n was not refused as Android's blocking refuses: $out"
         fi
         sleep 0.5
     done
     if [ -n "$back" ]; then
         note "B: Android started ProxyFlow again (pid $(app_pid)): $(echo "$back" | cut -c1-120)"
+        # am instrument force-stops a ProxyFlow Android started again: if it had connected (or held traffic), the next
+        # start finds that connection, force-stopped; if not, the one killed above.
+        [ "$API" -ge 30 ] && EXPECT="force_stopped,$EXPECT"
     else
         note "B: Android did not start ProxyFlow again within the probes"
     fi
-    if instrument afterLockdownKill "$token" "$EXPECT" 150; then
-        note "B: the next start: passed (kept what Android said; connected again while Android blocks; expected $EXPECT)"
+    if instrument afterLockdownKill "$token" "$EXPECT" 150 "$since"; then
+        note "B: the next start: passed (kept what Android said; blocked before connecting; connected again while Android blocks; expected $EXPECT)"
     else
         fail "B: the next start: $(step_failure afterLockdownKill "$token")"
     fi
-    note "B: found: $(grep -E "ProxyFlowM8.*$token (interruption|kept kill switch):" "$LOGCAT" | sed 's/.*\(interruption\|kept kill switch\):/\1:/' | paste -sd ' ')"
+    note "B: found: $(grep -E "ProxyFlowM8.*$token (interruption|kept kill switch|blocked before connecting):" "$LOGCAT" | sed 's/.*\(interruption\|kept kill switch\|blocked before connecting\):/\1:/' | paste -sd ' ')"
     note "B: status: $(admin STATUS)"
-    note "B: Always-on VPN off: $(admin ALWAYS_ON --es package "''")"
-    timeout 30 adb shell am force-stop "$APP_ID" >/dev/null 2>&1
-    note "B: ProxyFlow force-stopped"
+    always_on_off
     for n in $(seq 1 20); do
         out="$(witness "B-after-$token-$n")"
         note "B: witness probe $n after the setting was turned off: $out"
@@ -293,11 +406,13 @@ scenario_b() {
         sleep 0.5
     done
     case "$out" in REPLY*) ;; *) fail "B: the witness was not reached once the setting was off: $out" ;; esac
-    note "B: release: $(admin RELEASE)"
-    # Turning Always-on VPN off this way withdrew ProxyFlow's VPN consent on API 34 (run 41676441908: C then found no
-    # consent); what Android left is noted, and the consent the tests' own setup gives is given back for C.
-    note "B: VPN consent after the release: $(timeout 10 adb shell appops get "$APP_ID" ACTIVATE_VPN 2>&1 | tr -d '\r' | head -1)"
-    timeout 10 adb shell appops set "$APP_ID" ACTIVATE_VPN allow >/dev/null 2>&1 || fail "B: the VPN consent could not be given back"
+    release_owner
+}
+
+end_b() { # B could not go on: nothing of it left for C
+    stop_instrument
+    always_on_off
+    release_owner
 }
 
 # B before C: a crash marks an app Android may then be slower to start in the background (as Always-on VPN does).
@@ -308,9 +423,13 @@ scenario_c
 if [ "$API" -ge 30 ]; then
     timeout 30 adb shell dumpsys activity exit-info "$APP_ID" 2>/dev/null | tr -d '\r' | grep -E 'ApplicationExitInfo|reason=|timestamp=' | head -60 > "$OUT/m8-exit-info.txt" || true
 fi
+stop_instrument
+always_on_off
+release_owner
 note "M8 failure injection done (status $STATUS)"
 sleep 1
 kill "$LOGCAT_PID" 2>/dev/null || true
+LOGCAT_PID=""
 # The steps in the job's log too: the evidence reads them through the API, which can't download artifacts.
 TOKEN="$(openssl rand -hex 16 2>/dev/null || echo "m8$RANDOM$RANDOM")"
 echo "::group::M8 failure injection steps (API $API)"
@@ -318,6 +437,15 @@ echo "::stop-commands::$TOKEN" # what the phone printed, with workflow commands 
 cat "$STEPS"
 echo "::$TOKEN::"
 echo "::endgroup::"
+if [ "$STATUS" != 0 ]; then
+    # What ProxyFlow, the steps and Android's activity manager logged meanwhile, to tell why (the planted sign-in masked).
+    echo "::group::M8 logcat, ProxyFlow's and Android's lines (API $API)"
+    echo "::stop-commands::$TOKEN"
+    grep -E 'ProxyFlowVpn|ProxyFlowM8|ProxyFlowE2E|AndroidRuntime|ActivityManager.*proxyflow' "$LOGCAT" |
+        sed -E -e 's/PF8SECRET[A-Za-z0-9]*/<planted password>/g' -e 's/pf8user/<planted user>/g' | tail -n 400
+    echo "::$TOKEN::"
+    echo "::endgroup::"
+fi
 timeout 60 adb uninstall "$TEST_ID" >/dev/null 2>&1 || true
 timeout 60 adb uninstall "$APP_ID" >/dev/null 2>&1 || true
 timeout 10 adb shell rm -f "$CLIENT" >/dev/null 2>&1 || true
