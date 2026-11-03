@@ -30,6 +30,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -367,6 +368,51 @@ class KillSwitchTest {
         assertEquals(1, history.markers.get().toInt())
     }
 
+    /** A switch ends the old profile's session: the marker becomes the new one's, so an end after it is put down right. */
+    @Test
+    fun aSwitchToAnotherProfileLeavesThatProfilesMarker() {
+        val first = connect()
+        eventually("the first profile's marker") { protection.connected?.profileId == first.id }
+        val second = runBlocking {
+            profiles.repository.save(
+                null,
+                ProxyProfileInput(name = "Osaka", protocol = ProxyProtocol.SOCKS5, server = "osaka.example.com", port = "1080"),
+            )
+        }
+        now.set(NOW + 3_600_000)
+        session.connect(second.id)
+        await { it.status == ConnectionStatus.Connected && it.profileId == second.id }
+
+        eventually("the second profile's marker") { protection.connected?.profileId == second.id }
+        assertEquals(ConnectedMarker(second.id, NOW + 3_600_000, FakeHistory.PID, FakeHistory.BOOT), protection.connected)
+        session.disconnect()
+        await { it.status == ConnectionStatus.Disconnected }
+        eventually("the marker is gone") { protection.connected == null }
+    }
+
+    /** Dismissing removes the interruption Home showed, never one that replaced it meanwhile (unseen). */
+    @Test
+    fun dismissingRemovesOnlyTheInterruptionThatWasShown() {
+        val shown = Interruption("p1", NOW - 600_000, NOW - 60_000, ExitReason.LowMemory, NOW - 1_000, KillSwitchStatus.Off)
+        val later = shown.copy(connectedSinceMillis = NOW - 30_000, endedAtMillis = NOW - 5_000, reason = ExitReason.Killed)
+        val base = InMemoryProtectionStore(interruption = later) // found by this process before Home's dismissal came
+        val looks = java.util.concurrent.atomic.AtomicInteger() // the writer reads the interruption only to dismiss
+        started = newSession(
+            object : ProtectionStore by base {
+                override val interruption = base.interruption.onStart { looks.incrementAndGet() }
+            },
+        )
+
+        session.dismissInterruption(shown)
+        session.dismissInterruption(shown)
+        // The writer takes them in order: once the second looks, the first is done, write and all.
+        eventually("the first dismissal is done") { looks.get() == 2 }
+        assertEquals("not the one shown: it stays", later, runBlocking { base.interruption.first() })
+
+        session.dismissInterruption(later)
+        eventually("the one shown is removed") { runBlocking { base.interruption.first() } == null }
+    }
+
     @Test
     fun aFailedFirstAttemptLeavesNoMarker() {
         val profile = save()
@@ -409,8 +455,9 @@ class KillSwitchTest {
             mapOf(LogDetail.REASON to "low_memory", LogDetail.END_TIME to "exact", LogDetail.DURATION_MS to "540000"),
             logged.details,
         )
-        // Found and kept, and nothing more: the next start connects nothing of its own accord (ADR-0013 §5).
-        Thread.sleep(50)
+        // Found and kept, and nothing more: the next start connects nothing of its own accord (ADR-0013 §5). Once the
+        // session has handled every event (the interruption's among them), a connection it began would show.
+        runBlocking { session.awaitIdle() }
         assertEquals(ConnectionStatus.Disconnected, state.value.status)
         assertTrue("no interface: ${log.all}", host.tuns.isEmpty())
         assertEquals("no check of the proxy, no engine: ${log.all}", 0, log.count("probe ") + log.count("start ") + log.count("establish"))

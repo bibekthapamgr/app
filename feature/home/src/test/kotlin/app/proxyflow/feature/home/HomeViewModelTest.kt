@@ -218,8 +218,8 @@ class HomeViewModelTest {
 
         viewModel.connect()
 
-        // Connecting also puts away a notice of an interrupted connection (M8): it is about the connection before.
-        assertEquals(listOf("clearError", "connect ${saved.id}", "dismissInterruption"), controller.calls)
+        // No notice of an interrupted connection is shown, so there is none to put away (M8).
+        assertEquals(listOf("clearError", "connect ${saved.id}"), controller.calls)
     }
 
     /** The diagnostics are shown while connected only, never for a connection that is gone (ADR-0011). */
@@ -287,7 +287,7 @@ class HomeViewModelTest {
 
         assertEquals(listOf(saved.id), controller.connects)
         assertEquals(saved.id, profiles.chosenProfileId.first())
-        assertTrue("connecting again is seeing it, cleared through the session", "dismissInterruption" in controller.calls)
+        assertTrue("connecting again is seeing it, cleared through the session", "dismissInterruption p0" in controller.calls)
     }
 
     @Test
@@ -308,7 +308,7 @@ class HomeViewModelTest {
         assertEquals("what Android said stays", killSwitch, ready(viewModel).killSwitch)
 
         viewModel.checkKillSwitch()
-        assertEquals(listOf("dismissInterruption", "checkSystemKillSwitch"), controller.calls)
+        assertEquals(listOf("dismissInterruption p1", "checkSystemKillSwitch"), controller.calls)
     }
 
     /** Android started ProxyFlow as Always-on VPN with no proxy chosen: no profile's error, shown whichever profile Home shows. */
@@ -385,9 +385,9 @@ class HomeViewModelTest {
             calls += "checkSystemKillSwitch"
         }
 
-        override fun dismissInterruption() {
-            calls += "dismissInterruption"
-            runBlocking { protection?.setInterruption(null) }
+        override fun dismissInterruption(shown: Interruption) {
+            calls += "dismissInterruption ${shown.profileId}"
+            runBlocking { if (protection?.interruption?.first() == shown) protection.setInterruption(null) }
         }
     }
 }

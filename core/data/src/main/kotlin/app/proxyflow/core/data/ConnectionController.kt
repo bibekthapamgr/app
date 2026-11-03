@@ -2,6 +2,7 @@ package app.proxyflow.core.data
 
 import android.content.Intent
 import app.proxyflow.core.model.ConnectionState
+import app.proxyflow.core.model.Interruption
 import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.TrafficStats
 import kotlinx.coroutines.flow.Flow
@@ -65,10 +66,11 @@ interface ConnectionController {
     fun checkSystemKillSwitch() = Unit
 
     /**
-     * The interrupted connection Home shows has been seen, or the user connects again: it is cleared through the
-     * session, in order with its own writes, so one found as the process starts is never cleared before it is kept.
+     * The interrupted connection Home shows, [shown], has been seen, or the user connects again: it is cleared through
+     * the session, in order with its own writes, and only if it is still the one stored — one found as the process
+     * starts, which Home has not shown yet, is never cleared unseen.
      */
-    fun dismissInterruption() = Unit
+    fun dismissInterruption(shown: Interruption) = Unit
 }
 
 /** For builds and tests without a VPN service: always disconnected, connecting is not available. */

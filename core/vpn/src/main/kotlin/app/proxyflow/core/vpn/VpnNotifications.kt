@@ -136,6 +136,7 @@ internal class VpnNotifications(private val context: Context) {
     private fun textOf(text: StatusContent.Text): Int = when (text) {
         StatusContent.Text.CHECKING_PROXY -> R.string.vpn_notification_checking_proxy
         StatusContent.Text.STARTING_PROTECTION -> R.string.vpn_notification_starting_protection
+        StatusContent.Text.HOLDING -> R.string.vpn_notification_holding
         StatusContent.Text.RECONNECTING -> R.string.vpn_notification_reconnecting_text
         StatusContent.Text.RECONNECTING_ATTEMPT -> R.string.vpn_notification_reconnecting_attempt
         StatusContent.Text.CONNECTED -> R.string.vpn_notification_connected_text

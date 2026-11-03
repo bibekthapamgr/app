@@ -23,6 +23,7 @@ internal data class StatusContent(
     enum class Text {
         CHECKING_PROXY,
         STARTING_PROTECTION,
+        HOLDING,
         RECONNECTING,
         RECONNECTING_ATTEMPT,
         CONNECTED,
@@ -39,11 +40,17 @@ internal data class StatusContent(
         private val RESTART_OR_DISCONNECT = listOf(Action.RESTART, Action.DISCONNECT)
 
         fun of(state: ConnectionState): StatusContent = when (state.status) {
-            ConnectionStatus.Connecting -> StatusContent(
-                Title.CONNECTING,
-                if (state.step == ConnectStep.Authenticated) Text.STARTING_PROTECTION else Text.CHECKING_PROXY,
-                listOf(Action.CANCEL),
-            )
+            // Android started ProxyFlow as Always-on VPN (M8): its interface holds apps' traffic from the start, so the way
+            // out is Disconnect — apps then use the normal network — not a Cancel that would leave the phone as it was.
+            ConnectionStatus.Connecting -> if (state.held) {
+                StatusContent(Title.CONNECTING, Text.HOLDING, listOf(Action.DISCONNECT))
+            } else {
+                StatusContent(
+                    Title.CONNECTING,
+                    if (state.step == ConnectStep.Authenticated) Text.STARTING_PROTECTION else Text.CHECKING_PROXY,
+                    listOf(Action.CANCEL),
+                )
+            }
             ConnectionStatus.Reconnecting -> when (val retry = state.reconnect) {
                 null -> StatusContent(Title.RECONNECTING, Text.RECONNECTING, listOf(Action.DISCONNECT))
                 else -> StatusContent(

@@ -59,6 +59,17 @@ phone_time() { timeout 10 adb shell 'echo $EPOCHREALTIME' 2>/dev/null | tr -d '\
 # The phone's clock in milliseconds, for a step's -e since; empty when it could not be read.
 phone_ms() { phone_time | awk '$1 ~ /^[0-9]+(\.[0-9]+)?$/ { printf "%.0f", $1 * 1000 }'; }
 
+since_now() { # the phone's time in ms before a scenario connects, asked twice at most; empty when it could not be read
+    local ms
+    ms="$(phone_ms)"
+    [ -n "$ms" ] || ms="$(phone_ms)"
+    echo "$ms"
+}
+
+no_since() { # <scenario>: it can't run: its next start could not tell its interruption from an earlier scenario's
+    fail "$1: the phone's clock could not be read, so the scenario did not run"
+}
+
 note() { # <text>: one line in m8-steps.txt ("-" for its time when the phone's clock could not be read) and in logcat
     local when
     when="$(phone_time)"
@@ -205,6 +216,31 @@ on_exit() {
     always_on_off
     release_owner
     [ -z "$LOGCAT_PID" ] || kill "$LOGCAT_PID" 2>/dev/null
+    print_steps
+}
+
+# The steps in the job's log: the evidence reads them through the API, which can't download artifacts. Once, on any
+# way out (stopped by the time limit too, after the clean-up's own notes).
+STEPS_PRINTED=""
+print_steps() {
+    [ -z "$STEPS_PRINTED" ] || return 0
+    STEPS_PRINTED=1
+    local token
+    token="$(openssl rand -hex 16 2>/dev/null || echo "m8$RANDOM$RANDOM")"
+    echo "::group::M8 failure injection steps (API $API)"
+    echo "::stop-commands::$token" # what the phone printed, with workflow commands off
+    cat "$STEPS"
+    echo "::$token::"
+    echo "::endgroup::"
+    if [ "$STATUS" != 0 ]; then
+        # What ProxyFlow, the steps and Android's activity manager logged meanwhile, to tell why (the planted sign-in masked).
+        echo "::group::M8 logcat, ProxyFlow's and Android's lines (API $API)"
+        echo "::stop-commands::$token"
+        grep -E 'ProxyFlowVpn|ProxyFlowM8|ProxyFlowE2E|AndroidRuntime|ActivityManager.*proxyflow' "$LOGCAT" |
+            sed -E -e 's/PF8SECRET[A-Za-z0-9]*/<planted password>/g' -e 's/pf8user/<planted user>/g' | tail -n 1500
+        echo "::$token::"
+        echo "::endgroup::"
+    fi
 }
 trap on_exit EXIT
 trap 'fail "stopped by a signal (its time limit?)"; exit 143' TERM INT
@@ -255,7 +291,8 @@ instrument_ended() { # the step that connected and waited ended with its process
 # --- A: killed while connected, no Always-on VPN --------------------------------------------------------------------
 scenario_a() {
     local token="A$RANDOM" pid out n since
-    since="$(phone_ms)"
+    since="$(since_now)"
+    [ -n "$since" ] || { no_since A; return; }
     note "A: connecting through the chosen profile, then the process is killed (no Always-on VPN)"
     connect_then A connectAndHold "$token" || return
     pid="$CONNECTED_PID"
@@ -286,7 +323,8 @@ scenario_a() {
 # --- C: a crash with a planted secret in its message ----------------------------------------------------------------
 scenario_c() {
     local token="C$RANDOM" pid dropbox since n planted
-    since="$(phone_ms)"
+    since="$(since_now)"
+    [ -n "$since" ] || { no_since C; return; }
     note "C: connecting, then an exception with a planted sign-in in its message crashes the app"
     connect_then C crashWithPlantedSecret "$token" || return
     pid="$CONNECTED_PID"
@@ -324,7 +362,8 @@ scenario_c() {
 # --- B: Always-on VPN with Block connections without VPN ----------------------------------------------------------
 scenario_b() {
     local token="B$RANDOM" start line pid out n back="" vpn since
-    since="$(phone_ms)"
+    since="$(since_now)"
+    [ -n "$since" ] || { no_since B; return; }
     OWNER_SET=1
     note "B: device owner: $(timeout 30 adb shell dpm set-device-owner "$TEST_ID/app.proxyflow.e2e.LabDeviceAdmin" 2>&1 | tr -d '\r' | paste -sd ' ')"
     start="$(lines)"
@@ -373,6 +412,10 @@ scenario_b() {
         out="$(witness "B-$token-$n")"
         if echo "$out" | grep -qE "$LOCKDOWN_REFUSAL"; then
             note "B: witness probe $n with ProxyFlow gone: $out"
+        elif [ "${out#REPLY}" != "$out" ]; then
+            # The witness answered: something got out around ProxyFlow, whatever started meanwhile.
+            note "B: witness probe $n with ProxyFlow gone: $out"
+            fail "B: the witness answered while Block connections without VPN was on: $out"
         elif line="$(wait_log "$start" 3 "ProxyFlowVpn *: always-on start")"; then
             note "B: witness probe $n reached ProxyFlow started again: $out"
             back="$line"
@@ -383,6 +426,9 @@ scenario_b() {
         fi
         sleep 0.5
     done
+    # Android may start ProxyFlow again after the last probe too: looked for once more just before the next step.
+    if [ -z "$back" ] && line="$(wait_log "$start" 0 "ProxyFlowVpn *: always-on start")"; then back="$line"; fi
+    [ -n "$back" ] || [ -z "$(app_pid)" ] || note "B: a ProxyFlow process runs again (pid $(app_pid)), not started as Always-on VPN"
     if [ -n "$back" ]; then
         note "B: Android started ProxyFlow again (pid $(app_pid)): $(echo "$back" | cut -c1-120)"
         # am instrument force-stops a ProxyFlow Android started again: if it had connected (or held traffic), the next
@@ -430,22 +476,7 @@ note "M8 failure injection done (status $STATUS)"
 sleep 1
 kill "$LOGCAT_PID" 2>/dev/null || true
 LOGCAT_PID=""
-# The steps in the job's log too: the evidence reads them through the API, which can't download artifacts.
-TOKEN="$(openssl rand -hex 16 2>/dev/null || echo "m8$RANDOM$RANDOM")"
-echo "::group::M8 failure injection steps (API $API)"
-echo "::stop-commands::$TOKEN" # what the phone printed, with workflow commands off
-cat "$STEPS"
-echo "::$TOKEN::"
-echo "::endgroup::"
-if [ "$STATUS" != 0 ]; then
-    # What ProxyFlow, the steps and Android's activity manager logged meanwhile, to tell why (the planted sign-in masked).
-    echo "::group::M8 logcat, ProxyFlow's and Android's lines (API $API)"
-    echo "::stop-commands::$TOKEN"
-    grep -E 'ProxyFlowVpn|ProxyFlowM8|ProxyFlowE2E|AndroidRuntime|ActivityManager.*proxyflow' "$LOGCAT" |
-        sed -E -e 's/PF8SECRET[A-Za-z0-9]*/<planted password>/g' -e 's/pf8user/<planted user>/g' | tail -n 1500
-    echo "::$TOKEN::"
-    echo "::endgroup::"
-fi
+print_steps
 timeout 60 adb uninstall "$TEST_ID" >/dev/null 2>&1 || true
 timeout 60 adb uninstall "$APP_ID" >/dev/null 2>&1 || true
 timeout 10 adb shell rm -f "$CLIENT" >/dev/null 2>&1 || true

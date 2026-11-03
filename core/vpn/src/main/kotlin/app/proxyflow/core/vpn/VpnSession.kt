@@ -186,6 +186,9 @@ class VpnSession(
     /** A connected marker was written for the session that runs, so its end removes it. */
     private var markerWritten = false
 
+    /** Whose session that marker is: a switch to another profile writes that profile's, a reconnection keeps it. */
+    private var markerProfile: String? = null
+
     /** [protection]'s writes, in the order the session makes them (DataStore keeps them in order only one at a time). */
     private val writes = Channel<suspend ProtectionStore.() -> Unit>(Channel.UNLIMITED)
     private val loop: Job
@@ -262,8 +265,12 @@ class VpnSession(
     /** The phone's default network as Android reports it to the service: null when it has none. */
     fun underlyingNetwork(network: NetworkInfo?) = send(Event.Network(network))
 
-    /** The user has seen the interrupted connection (Home), or connected again: it is cleared, in order with the session's writes. */
-    fun dismissInterruption() = persist { setInterruption(null) }
+    /**
+     * The user has seen the interrupted connection [shown] (Home), or connected again while Home showed it: it is
+     * cleared, in order with the session's writes — unless another has replaced it meanwhile, which the user hasn't
+     * seen (one the next process found just then).
+     */
+    fun dismissInterruption(shown: Interruption) = persist { if (interruption.first() == shown) setInterruption(null) }
 
     /** Asks Android about its kill switch now, when an interface exists (a screen showing the status, M8); otherwise nothing. */
     fun checkSystemKillSwitch() = send(Event.CheckKillSwitch)
@@ -646,9 +653,12 @@ class VpnSession(
         return true
     }
 
-    /** The marker the next process finds if this one ends with the VPN up (M8); once per session. */
+    /**
+     * The marker the next process finds if this one ends with the VPN up (M8): once per profile's session — a
+     * reconnection keeps the session's, a switch to another profile writes that one's (it replaces the marker before).
+     */
     private fun writeMarker(profileId: String?, sinceMillis: Long) {
-        if (markerWritten) return
+        if (markerWritten && markerProfile == profileId) return
         val marker = try {
             history.marker(profileId, sinceMillis)
         } catch (e: Exception) {
@@ -656,6 +666,7 @@ class VpnSession(
             return
         }
         markerWritten = true
+        markerProfile = profileId
         persist { markConnected(marker) }
     }
 
@@ -1205,6 +1216,7 @@ class VpnSession(
         heldSinceMillis = null
         if (markerWritten) {
             markerWritten = false
+            markerProfile = null
             persist { clearConnected() }
         }
         if (before.status != ConnectionStatus.Disconnected) log("disconnected${error?.let { ": ${it.code}" } ?: ""}")

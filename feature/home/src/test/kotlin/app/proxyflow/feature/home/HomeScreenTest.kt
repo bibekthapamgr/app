@@ -334,7 +334,9 @@ class HomeScreenTest {
 
         state = ready(ConnectionState.Idle, killSwitch = KILL_SWITCH_ON)
         compose.waitForIdle()
-        compose.onNodeWithText("Android's system kill switch was on when last checked: apps have no internet").assertIsDisplayed()
+        compose.onNodeWithText(
+            "Android's system kill switch was on when last checked: if it still is, apps have no internet",
+        ).assertIsDisplayed()
         shown("System kill switch is on: while ProxyFlow isn't connected, apps have no internet.", substring = true)
         scrolledTo("As Android last told ProxyFlow, at", substring = true).assertIsDisplayed()
         scrolledTo("About the system kill switch").performClick()
@@ -357,7 +359,7 @@ class HomeScreenTest {
         var state by mutableStateOf(ready(blocked, dialog = HomeDialog.ConfirmStop, killSwitch = KILL_SWITCH_ON))
         compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
         compose.onNodeWithText(
-            "Android's system kill switch was on when ProxyFlow last checked, so apps will have no internet until you connect again.",
+            "Android's system kill switch was on when ProxyFlow last checked: if it still is, apps will have no internet until you connect again.",
         ).assertIsDisplayed()
 
         state = ready(ConnectionState(profileId = "p1", error = ConnectionError("PROXY_UNREACHABLE")), killSwitch = KILL_SWITCH_ON)

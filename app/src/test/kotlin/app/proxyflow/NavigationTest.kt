@@ -55,14 +55,15 @@ class NavigationTest {
 
         compose.tab("Settings").performClick()
         compose.tab("Settings").assertIsSelected()
-        compose.onNodeWithText("Theme").assertIsDisplayed()
+        // Below the kill switch section (M8) on the test's small screen: scrolled to, as a user would.
+        compose.onNodeWithText("Theme").performScrollTo().assertIsDisplayed()
 
         // Settings → About (full screen, no bottom bar) → Back.
-        compose.onNodeWithText("About & privacy").performClick()
+        compose.onNodeWithText("About & privacy").performScrollTo().performClick()
         compose.onNodeWithText("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · free, no account").assertIsDisplayed()
         compose.tab("Home").assertDoesNotExist()
         compose.onNodeWithContentDescription("Back").performClick()
-        compose.onNodeWithText("Theme").assertIsDisplayed()
+        compose.onNodeWithText("Theme").performScrollTo().assertIsDisplayed()
 
         // Home → Add proxy → save a profile → Home shows it.
         compose.tab("Home").performClick()

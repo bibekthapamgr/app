@@ -11,6 +11,7 @@ import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.data.ProtectionStore
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.Interruption
 import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.TrafficStats
 import javax.net.ssl.X509TrustManager
@@ -199,5 +200,5 @@ internal class VpnConnectionController(private val runtime: VpnRuntime) : Connec
 
     override fun checkSystemKillSwitch() = runtime.session.checkSystemKillSwitch()
 
-    override fun dismissInterruption() = runtime.session.dismissInterruption()
+    override fun dismissInterruption(shown: Interruption) = runtime.session.dismissInterruption(shown)
 }

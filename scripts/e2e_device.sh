@@ -274,16 +274,10 @@ adb shell "setsid sh /data/local/tmp/pf-connecting.sh > /data/local/tmp/pf-conne
 # collected when a test hangs (scripts/m5_evidence.py reads how far the tests got from logcat).
 # Into a file, not through tee: a Gradle daemon that outlives a stopped build would hold a pipe open.
 GRADLE_LOG="$RUNNER_TEMP/gradle-2-device.log"
-if [ "${PF_M8_PROBE:-0}" = 1 ]; then
-    # Trying the M8 failure injection alone (a branch's probe): the instrumented tests are not run.
-    echo "PF_M8_PROBE=1: the instrumented tests are skipped" > "$GRADLE_LOG"
-    STATUS=0
-else
 timeout --kill-after=60s "${DEVICE_TESTS_TIMEOUT:-55m}" \
     ./gradlew :core:data:connectedDebugAndroidTest :core:engine:connectedDebugAndroidTest :app:connectedDebugAndroidTest \
     --continue > "$GRADLE_LOG" 2>&1
 STATUS=$?
-fi
 cat "$GRADLE_LOG"
 if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
     echo "::error title=Device tests (API $API)::The device tests ran past ${DEVICE_TESTS_TIMEOUT:-55m} and were stopped; the evidence lists from logcat which tests ran, failed or never finished."
@@ -300,10 +294,12 @@ kill "$LIVE_LOGCAT" 2>/dev/null || true
 if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
     echo "::error title=M8 failure injection (API $API)::Not run: the device tests ran out of time."
 else
-    timeout --kill-after=1m "${M8_TIMEOUT:-12m}" bash scripts/m8_failure_injection.sh "$API" "$OUT"
+    # Stopped at its limit, it cleans up first (Always-on VPN off, the device owner given up): bash runs its trap once
+    # the adb step it waits for ends — each has its own limit, the longest 150 s — so the kill comes 5 minutes later.
+    timeout --kill-after=5m "${M8_TIMEOUT:-10m}" bash scripts/m8_failure_injection.sh "$API" "$OUT"
     M8_STATUS=$?
-    if [ "$M8_STATUS" = 124 ] || [ "$M8_STATUS" = 137 ]; then
-        echo "::error title=M8 failure injection (API $API)::Stopped after ${M8_TIMEOUT:-12m}: the steps it took are in m8-steps.txt."
+    if [ "$M8_STATUS" = 124 ] || [ "$M8_STATUS" = 137 ] || [ "$M8_STATUS" = 143 ]; then
+        echo "::error title=M8 failure injection (API $API)::Stopped after ${M8_TIMEOUT:-10m}: the steps it took are in m8-steps.txt."
     fi
     if [ "$M8_STATUS" != 0 ] && [ "$STATUS" = 0 ]; then STATUS=$M8_STATUS; fi
 fi

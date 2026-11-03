@@ -11,6 +11,8 @@
     <string name="vpn_notification_connecting">Connecting…</string>
     <string name="vpn_notification_checking_proxy">Checking proxy — TLS and sign-in</string>
     <string name="vpn_notification_starting_protection">Starting the VPN</string>
+    <!-- M8: Android started ProxyFlow as Always-on VPN; its interface is up before the proxy is checked. -->
+    <string name="vpn_notification_holding">Always-on VPN · ProxyFlow sends nothing around your proxy meanwhile.</string>
     <string name="vpn_notification_reconnecting">Reconnecting… traffic paused</string>
     <string name="vpn_notification_reconnecting_text">ProxyFlow sends nothing around your proxy.</string>
     <string name="vpn_notification_reconnecting_attempt">Attempt %1$d of %2$d · ProxyFlow sends nothing around your proxy meanwhile.</string>

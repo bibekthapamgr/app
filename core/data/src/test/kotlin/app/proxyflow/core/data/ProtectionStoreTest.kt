@@ -1,7 +1,9 @@
 package app.proxyflow.core.data
 
+import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import app.proxyflow.core.model.ExitReason
 import app.proxyflow.core.model.Interruption
@@ -10,9 +12,14 @@ import app.proxyflow.core.model.SystemKillSwitch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -140,9 +147,47 @@ class ProtectionStoreTest {
         assertEquals(ConnectedMarker("p1", 1_000, 7, null), store.connectedMarker())
     }
 
+    /**
+     * DataStore's flow can leave out a write for a collector that started while the write was on its way; here a
+     * DataStore that never tells a collector of a later write: what the store writes reaches its collectors anyway,
+     * as Home's does (M8).
+     */
+    @Test
+    fun aWriteReachesCollectorsThatDataStoreLeftOut() = runTest(UnconfinedTestDispatcher()) {
+        val store = DataStoreProtectionStore(SnapshotDataStore())
+        val interruptions = mutableListOf<Interruption?>()
+        val killSwitches = mutableListOf<SystemKillSwitch?>()
+        backgroundScope.launch { store.interruption.collect { interruptions += it } }
+        backgroundScope.launch { store.killSwitch.collect { killSwitches += it } }
+
+        val interruption = Interruption("p1", 1_000, 2_000, ExitReason.Killed, 3_000, KillSwitchStatus.Off)
+        store.interrupted(interruption)
+        store.recordKillSwitch(SystemKillSwitch(alwaysOn = true, blocksWithoutVpn = true, checkedAtMillis = 4_000))
+        store.setInterruption(null)
+        advanceUntilIdle()
+
+        assertEquals(listOf(null, interruption, null), interruptions)
+        assertEquals(listOf(null, SystemKillSwitch(alwaysOn = true, blocksWithoutVpn = true, checkedAtMillis = 4_000)), killSwitches)
+    }
+
     @Test
     fun anUnknownReasonReadsAsUnknown() {
         assertEquals(ExitReason.Unknown, ExitReason.of("from_a_later_version"))
         assertEquals(ExitReason.LowMemory, ExitReason.of("low_memory"))
+    }
+
+    /** Gives each collector what it holds when the collector starts, and nothing after. */
+    private class SnapshotDataStore : DataStore<Preferences> {
+        @Volatile private var held: Preferences = emptyPreferences()
+
+        override val data: Flow<Preferences> = flow {
+            emit(held)
+            awaitCancellation()
+        }
+
+        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+            held = transform(held)
+            return held
+        }
     }
 }

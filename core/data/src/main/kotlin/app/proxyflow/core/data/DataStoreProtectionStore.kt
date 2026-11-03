@@ -14,18 +14,41 @@ import app.proxyflow.core.model.Interruption
 import app.proxyflow.core.model.KillSwitchStatus
 import app.proxyflow.core.model.SystemKillSwitch
 import java.io.IOException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 
 /**
  * [ProtectionStore] in its own Preferences DataStore file. A file that can't be read reads as empty (nothing known),
  * so the screens that show it never fail on it; writes that fail throw to the caller, which logs them.
+ *
+ * Every write of this file goes through here, and after each one the flows read DataStore afresh: DataStore's own
+ * flow can miss a write for a collector that started while that write was on its way (it reads the old file under
+ * the write's new version, then drops the write's own update as not newer). On the emulators that kept an
+ * interruption from a test that began to wait for it just then (M8, run 41690836372); Home could miss it the same way.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : ProtectionStore {
-    private val prefs: Flow<Preferences> = dataStore.data.catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+    /** Counts this store's writes, once each is done (or has failed): each is a reason to read again. */
+    private val writes = MutableStateFlow(0L)
+
+    private val prefs: Flow<Preferences> = writes.flatMapLatest {
+        dataStore.data.catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+    }
+
+    private suspend fun write(change: (MutablePreferences) -> Unit) {
+        try {
+            dataStore.edit { change(it) }
+        } finally {
+            writes.update { it + 1 }
+        }
+    }
 
     override val killSwitch: Flow<SystemKillSwitch?> = prefs.map { prefs ->
         val checkedAt = prefs[KILL_SWITCH_CHECKED] ?: return@map null
@@ -37,7 +60,7 @@ class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : 
     }.distinctUntilChanged()
 
     override suspend fun recordKillSwitch(value: SystemKillSwitch) {
-        dataStore.edit {
+        write {
             it[KILL_SWITCH_ALWAYS_ON] = value.alwaysOn
             it[KILL_SWITCH_BLOCKS] = value.blocksWithoutVpn
             it[KILL_SWITCH_CHECKED] = value.checkedAtMillis
@@ -57,11 +80,11 @@ class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : 
     }.distinctUntilChanged()
 
     override suspend fun setInterruption(value: Interruption?) {
-        dataStore.edit { prefs -> prefs.putInterruption(value) }
+        write { prefs -> prefs.putInterruption(value) }
     }
 
     override suspend fun markConnected(marker: ConnectedMarker) {
-        dataStore.edit { prefs ->
+        write { prefs ->
             prefs.removeMarker()
             marker.profileId?.let { prefs[CONNECTED_PROFILE] = it }
             prefs[CONNECTED_SINCE] = marker.sinceMillis
@@ -71,7 +94,7 @@ class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : 
     }
 
     override suspend fun clearConnected() {
-        dataStore.edit { it.removeMarker() }
+        write { it.removeMarker() }
     }
 
     override suspend fun connectedMarker(): ConnectedMarker? {
@@ -82,7 +105,7 @@ class DataStoreProtectionStore(private val dataStore: DataStore<Preferences>) : 
     }
 
     override suspend fun interrupted(value: Interruption) {
-        dataStore.edit { prefs ->
+        write { prefs ->
             prefs.putInterruption(value)
             prefs.removeMarker()
         }

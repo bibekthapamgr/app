@@ -76,6 +76,7 @@ class OsvScanTest(unittest.TestCase):
         tree = [
             "+--- com.google.guava:listenablefuture:1.0 -> com.google.guava:guava:33.3.1-android",
             "\\--- org.jetbrains.kotlin:kotlin-stdlib:{strictly 2.1.0}",
+            "+--- com.example:replaced:1.0 -> project :core:model",  # one of ProxyFlow's own modules instead
         ]
         libraries, unread = osv_scan.read_tree(tree)
         self.assertEqual({"com.google.guava:guava": "33.3.1-android", "org.jetbrains.kotlin:kotlin-stdlib": "2.1.0"}, libraries)

@@ -380,7 +380,7 @@ jobs:
         id: emulator
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         # Inside the job's limit, so the evidence, the digest and the upload below still run if the emulator hangs:
-        # boot (up to 15 min), the device tests (up to 55), M8's failure injection (up to 13) and the pulls after it.
+        # boot (up to 15 min), the device tests (up to 55), M8's failure injection (up to 15) and the pulls after it.
         timeout-minutes: 95
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -392,8 +392,6 @@ jobs:
           emulator-boot-timeout: 900
           disable-animations: true
           script: bash scripts/e2e_device.sh ${{ matrix.api-level }}
-        env:
-          PF_M8_PROBE: "1" # TEMPORARY (M8 branch): the failure injection alone, while it is being tried on each level
 
       - name: End-to-end evidence (the lab's logs, packet captures, logcat; emitted as annotations)
         if: ${{ !cancelled() && steps.proxies.outcome == 'success' && steps.emulator.outcome != 'skipped' }}

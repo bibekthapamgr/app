@@ -56,8 +56,8 @@ def read_tree(lines: list[str]) -> tuple[dict[str, str], list[str]]:
         if not tree:
             continue  # a heading, a legend, a blank line: not a dependency
         entry = tree.group("entry")
-        if entry.startswith("project "):
-            continue  # one of ProxyFlow's own modules
+        if entry.startswith("project ") or " -> project " in entry:
+            continue  # one of ProxyFlow's own modules, also when it replaces a library (a dependency substitution)
         if entry.endswith(" FAILED"):
             unread.append(f"Gradle could not resolve {entry[: -len(' FAILED')]}")
             continue

@@ -150,18 +150,21 @@ class HomeViewModel(
 
     /**
      * Connecting the profile Home shows is the user's choice of it (M8): Always-on VPN later connects it, and never a
-     * profile the user didn't pick. A notice of an interrupted connection has been seen once the user connects again.
+     * profile the user didn't pick. A notice of an interrupted connection Home shows has been seen once the user
+     * connects again; one not shown yet stays.
      */
     private fun connectNow(profileId: String) {
         connection.connect(profileId)
-        connection.dismissInterruption()
+        dismissInterruption()
         viewModelScope.launch {
             if (profiles.chosenProfileId.first() != profileId) profiles.setActive(profileId)
         }
     }
 
-    /** The notice that ProxyFlow was stopped while connected, acknowledged (M8). */
-    fun dismissInterruption() = connection.dismissInterruption()
+    /** The notice that ProxyFlow was stopped while connected, acknowledged (M8): the one Home shows, if it still is. */
+    fun dismissInterruption() {
+        (uiState.value as? HomeUiState.Ready)?.interruption?.let(connection::dismissInterruption)
+    }
 
     /** Home is shown: while ProxyFlow is connected, Android is asked about its kill switch again (M8). */
     fun checkKillSwitch() = connection.checkSystemKillSwitch()
