@@ -197,20 +197,23 @@ class ReconnectEndToEndTest {
      */
     @Test(timeout = TEST_TIMEOUT_MS)
     fun disconnectingWhileReconnectingCancelsIt() {
-        TestRetry.policy = RetryPolicy(delaysMillis = listOf(SHORT_WAIT_MS, SHORT_WAIT_MS, SHORT_WAIT_MS), jitter = 0.0)
+        TestRetry.policy = RetryPolicy(delaysMillis = listOf(CANCEL_WAIT_MS, CANCEL_WAIT_MS, CANCEL_WAIT_MS), jitter = 0.0)
         val profile = gated()
         app.connect(profile.id)
         assertSent("cancel-up")
 
         gate.refuse()
         assertNotNull(failUntilReconnecting("cancel").reconnect?.nextAttemptAtMillis)
+        // Still reconnecting when Disconnect comes; a reconnection already over would only show that it stays over.
+        val atDisconnect = app.controller.state.value
+        assertEquals("reconnecting at the disconnect\n${history.describe()}", ConnectionStatus.Reconnecting, atDisconnect.status)
         app.controller.disconnect()
         app.awaitStatus(ConnectionStatus.Disconnected)
         val stoppedAt = SystemClock.elapsedRealtime() // the session has handled the disconnect: no attempt may follow it
         app.settleDisconnected()
         eventually("no session job is left", diagnose = { Diagnostics.report(app) }) { app.runtime.session.activeJobs() == 0 }
         gate.forward(env.socksPort)
-        Thread.sleep(SHORT_WAIT_MS + NO_MORE_ATTEMPTS_MS)
+        Thread.sleep(CANCEL_WAIT_MS + NO_MORE_ATTEMPTS_MS)
 
         assertEquals(ConnectionStatus.Disconnected, app.controller.state.value.status)
         val attempts = app.runtime.log.recent().filter { it.substringBefore(' ').toLong() > stoppedAt && "reconnect attempt" in it }
@@ -478,7 +481,12 @@ class ReconnectEndToEndTest {
          * out its timeout), so Retry now still has most of it left to cut short.
          */
         const val LONG_WAIT_MS = 120_000L
-        const val SHORT_WAIT_MS = 3_000L
+
+        /**
+         * Long enough that the reconnection is still waiting when the test disconnects, however long the probe took (a
+         * line sent just as traffic is held waits out its 10 s timeout); short enough to wait past afterwards.
+         */
+        const val CANCEL_WAIT_MS = 15_000L
         const val NO_MORE_ATTEMPTS_MS = 2_000L
         const val FAILURE_HEARD_MS = 3_000L
         const val QUIET_MS = 2_000L
