@@ -113,11 +113,11 @@ jobs:
           python3 ../scripts/ci_build_facts.py --go-tests "$RUNNER_TEMP/go-test.json"
           exit $status
 
-      - name: Fuzz every parser (30 s each)
+      - name: Fuzz every parser and the packet loop (30 s each)
         if: ${{ !cancelled() }}
         run: |
           for target in adapters:FuzzReadSOCKS5Reply adapters:FuzzReadConnectResponse adapters:FuzzParseCredentials \
-                        adapters:FuzzConnectRequest fakedns:FuzzResponder; do
+                        adapters:FuzzConnectRequest fakedns:FuzzResponder tunnel:FuzzPacketLoop; do
             go test -run '^$' -fuzz "^${target#*:}\$" -fuzztime 30s "./${target%%:*}"
           done
 
@@ -198,9 +198,18 @@ jobs:
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: ./gradlew :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle-5-release.log"
 
-      - name: Release manifest (permissions, backups, debuggable, cleartext, exported components)
+      - name: Release manifest (permissions, backups, debuggable, cleartext, trust, exported components)
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: python3 scripts/check_release_manifest.py
+
+      # M8: every library the release build ships, at its resolved version, against OSV (osv.dev): a HIGH or
+      # CRITICAL advisory, or an unrated one, fails unless scripts/osv_allowlist.json says why it can't reach
+      # ProxyFlow. The engine's Go dependencies are checked by govulncheck in the engine job.
+      - name: Known vulnerabilities in the release build's libraries (OSV)
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: |
+          ./gradlew -q :app:dependencies --configuration releaseRuntimeClasspath > "$RUNNER_TEMP/release-runtime-classpath.txt"
+          python3 scripts/osv_scan.py "$RUNNER_TEMP/release-runtime-classpath.txt"
 
       # The checks the device jobs' evidence rests on, against synthetic packet captures and lab logs:
       # each kind of leak they look for must be found, and a clean run must pass.

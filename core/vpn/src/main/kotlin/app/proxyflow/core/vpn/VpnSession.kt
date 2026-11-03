@@ -616,6 +616,8 @@ class VpnSession(
         routingBefore = before
         connectedOnce = true
         if (heldSinceMillis == null) heldSinceMillis = clock()
+        // With an interface Android answers: Home can say what it does while the proxy is checked or retried.
+        checkKillSwitch()
         return true
     }
 

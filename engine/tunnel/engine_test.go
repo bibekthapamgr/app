@@ -120,7 +120,7 @@ func (d *fakeDialer) last() adapters.Target {
 	return d.targets[len(d.targets)-1]
 }
 
-func socketpair(t *testing.T) (int, int) {
+func socketpair(t testing.TB) (int, int) {
 	t.Helper()
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
@@ -132,7 +132,7 @@ func socketpair(t *testing.T) (int, int) {
 	return fds[0], fds[1]
 }
 
-func clientStack(t *testing.T, fd int) *stack.Stack {
+func clientStack(t testing.TB, fd int) *stack.Stack {
 	t.Helper()
 	s := stack.New(stack.Options{
 		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
@@ -155,12 +155,13 @@ type testEngine struct {
 	*Engine
 	cs     *stack.Stack
 	efd    int
+	cfd    int // the apps' end: what is written here reaches the engine as packets from the phone
 	events *eventLog
 }
 
 // startEngine starts an engine on a socketpair with a client stack on the
 // other end. dialer nil means a fakeDialer. Cleanup stops everything.
-func startEngine(t *testing.T, dialer TunnelDialer, opts ...func(*Config)) (*testEngine, *fakeDialer) {
+func startEngine(t testing.TB, dialer TunnelDialer, opts ...func(*Config)) (*testEngine, *fakeDialer) {
 	t.Helper()
 	efd, cfd := socketpair(t)
 	pool, _ := fakedns.NewPool(netip.MustParsePrefix("198.18.0.0/15"), 256, 0)
@@ -194,7 +195,7 @@ func startEngine(t *testing.T, dialer TunnelDialer, opts ...func(*Config)) (*tes
 	}
 	cs := clientStack(t, cfd)
 	t.Cleanup(func() { e.Stop(); cs.Close(); cs.Wait(); unix.Close(efd); unix.Close(cfd) })
-	return &testEngine{Engine: e, cs: cs, efd: efd, events: log}, fd
+	return &testEngine{Engine: e, cs: cs, efd: efd, cfd: cfd, events: log}, fd
 }
 
 // eventLog collects events (the engine delivers them on one goroutine).
@@ -229,7 +230,7 @@ func (l *eventLog) count(typ EventType) int {
 // 3 attempts). Retries matter only for the gVisor *test client* stack, which
 // under race-detector CPU starvation can miss a reply that arrives before its
 // UDP endpoint is ready; kernel clients (the real case) are unaffected.
-func resolve(t *testing.T, cs *stack.Stack, name string) netip.Addr {
+func resolve(t testing.TB, cs *stack.Stack, name string) netip.Addr {
 	t.Helper()
 	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 42, RecursionDesired: true})
 	_ = b.StartQuestions()

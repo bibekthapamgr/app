@@ -1024,6 +1024,15 @@ class M8EvidenceTest(unittest.TestCase):
             open(path, "wb").close()
             self.assertIsNotNone(m8_evidence.syns_to(path, GATEWAY, 8095)[1], "an empty capture is said to be unreadable")
 
+    def test_what_apps_send_to_proxyflows_addresses_after_the_vpn_is_gone_is_reported_not_failed(self):
+        when = datetime.datetime.fromtimestamp(T0 + 11, tz=datetime.timezone.utc)
+        stale = (when, ipv4(PHONE4, "198.18.0.2", 17, udp(40500, 53, dns_query("stale.example.org"))))
+        status, written = self.run_m8(captures=[witness_syn(12.7, 41001), stale])
+        self.assertEqual(0, status, written)
+        self.assertIn("guest-wlan0.pcap after A's kill (20 s): to ProxyFlow's addresses on the normal network {'UDP 198.18.0.2:53': 1}", written)
+        self.assertIn("DNS names in it {'stale.example.org': 1}", written)
+        self.assertIn("guest-wlan0.pcap after Always-on VPN was turned off (12 s): to ProxyFlow's addresses on the normal network nothing", written)
+
     def test_steps_without_a_time_are_left_out(self):
         self.assertEqual([(1.5, "A: x")], m8_evidence.steps(["1.5 A: x", " B: no time", "", "garbage"]))
 

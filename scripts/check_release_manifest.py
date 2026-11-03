@@ -13,6 +13,8 @@ fails CI unless:
   and fullBackupContent (Android 10 and 11) point at rule files in
   app/src/main/res/xml that exclude every storage domain the app writes to;
 - it is not debuggable and does not opt in to cleartext traffic;
+- its network security config (M8) permits no cleartext and trusts the system's certificate authorities only, with
+  no per-domain exceptions, no user or bundled certificates and no pin overrides;
 - the only exported component without a permission is the launcher activity.
 
 Usage: check_release_manifest.py [merged AndroidManifest.xml]
@@ -93,6 +95,37 @@ def check_backup_rules(application: ET.Element) -> list[str]:
     return problems
 
 
+def check_network_security_config(application: ET.Element, facts: list[str]) -> list[str]:
+    """M8: the secure defaults written out, so neither a library nor a later change loosens them unnoticed."""
+    reference = attr(application, "networkSecurityConfig")
+    if not reference or not reference.startswith("@xml/"):
+        return [f"android:networkSecurityConfig must point at an @xml file, found {reference!r}"]
+    path = f"{RES_XML}/{reference.removeprefix('@xml/')}.xml"
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError) as error:
+        return [f"android:networkSecurityConfig: cannot read {path}: {error}"]
+    problems = []
+    if root.tag != "network-security-config":
+        problems.append(f"{path}: the root element is <{root.tag}>, not <network-security-config>")
+    for element in root:
+        if element.tag != "base-config":
+            problems.append(f"{path}: <{element.tag}> is not allowed: one <base-config> for every connection")
+    bases = root.findall("base-config")
+    if len(bases) != 1:
+        return problems + [f"{path}: expected one <base-config>, found {len(bases)}"]
+    base = bases[0]
+    if base.get("cleartextTrafficPermitted") != "false":
+        problems.append(f'{path}: <base-config> must say cleartextTrafficPermitted="false"')
+    anchors = [(c.get("src"), c.get("overridePins")) for t in base.findall("trust-anchors") for c in t]
+    if anchors != [("system", None)]:
+        problems.append(f"{path}: the trust anchors must be the system's certificates alone, found {anchors}")
+    if [c.tag for c in base if c.tag != "trust-anchors"]:
+        problems.append(f"{path}: <base-config> may hold <trust-anchors> only, found {[c.tag for c in base]}")
+    facts.append(f"network security config {path}: no cleartext, system certificate authorities only")
+    return problems
+
+
 def is_launcher(component: ET.Element) -> bool:
     for intent_filter in component.findall("intent-filter"):
         actions = {attr(a, "name") for a in intent_filter.findall("action")}
@@ -145,6 +178,7 @@ def check(manifest_path: str) -> tuple[list[str], list[str]]:
     if attr(application, "usesCleartextTraffic") == "true":
         problems.append('android:usesCleartextTraffic="true": proxy connections must not opt in to cleartext')
 
+    problems += check_network_security_config(application, facts)
     problems += check_vpn_service(application, facts)
 
     for kind in COMPONENTS:
@@ -182,7 +216,7 @@ def main(argv: list[str]) -> int:
     print(f"::stop-commands::{token}")
     print(f"Release manifest {path}")
     print("\n".join(f"  {fact}" for fact in facts))
-    print("\n".join(f"PROBLEM {problem}" for problem in problems) or "OK: permissions, backups, debuggable, cleartext, exports")
+    print("\n".join(f"PROBLEM {problem}" for problem in problems) or "OK: permissions, backups, debuggable, cleartext, trust, exports")
     print(f"::{token}::")
     if problems:
         print(f"::error title=release manifest::{escape(chr(10).join(problems))}")

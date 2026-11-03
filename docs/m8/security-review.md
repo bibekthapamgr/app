@@ -1,0 +1,103 @@
+# M8 — Security review
+
+**Milestone:** M8 · **Decision:** ADR-0013 · **Threat model:** `docs/m1/07-threat-model.md` (updated in M8) · **Failure injection:** `docs/m8/failure-injection.md` · **Checklist:** `docs/m8/mitigation-checklist.md`
+
+This review covers the whole app as it stands after M8 — the UI, the data layer, the VPN layer, the Go engine and the build — against the threat model's assets (A1–A7) and adversaries (T1–T6), with the code, the tests and the device evidence. Its question is the milestone's: can anything let supported traffic out around the proxy, put a secret where it doesn't belong, or exhaust the phone, and is every claim the app makes about it true.
+
+## 1. Method
+
+- **Code review** of every module by area (§3), and two independent reviews of the M8 changes before the acceptance report, their findings fixed (`docs/m8/M8-acceptance-report.md` lists them).
+- **Static checks in CI on every run:** Android Lint with ProxyFlow's own checks — `LogSecret` (no credential, server, destination, payload, profile or exception message in a logcat statement, M7) and `ExceptionSecret` (none in the message of an exception ProxyFlow's code creates, M8); ktlint; gofmt and `go vet`; the release manifest check (`scripts/check_release_manifest.py`, extended in M8 to the network security config); the secrets scan (`scripts/check-secrets.sh`, files and history).
+- **Dependencies:** govulncheck over the engine and gomobile's runtime package before the AAR is built (since M4); OSV over every library of the release runtime classpath at its resolved version (`scripts/osv_scan.py`, M8): HIGH, CRITICAL or unrated advisories fail the build unless allow-listed with a reason and a review date.
+- **Fuzzing in CI** (30 s each run): the SOCKS5 and HTTP CONNECT reply parsers, the credential and request encoders, the DNS responder and, since M8, the packet loop (`FuzzPacketLoop`: any bytes written into the TUN as one packet).
+- **Tests of the bounds** under load and malformed input (§3.6) and of every failure path on emulators: M5 (engine failure, switch, revocation, cycles), M6 (proxy refusing, hanging, certificate changing), M7 (reconnection, network changes, offline), M8 (process death with and without Android's kill switch, a crash with a planted secret: `docs/m8/failure-injection.md`).
+
+Severity follows the usual scale: **critical** — supported traffic or a credential leaves the phone around the proxy or in clear without the user choosing it; **high** — the same in a narrow, reachable case, or a claim the app makes that is false; **medium** — a weakness with a mitigation or an unlikely precondition; **low** — hardening.
+
+## 2. Findings
+
+| ID | Area | Finding | Severity | Status |
+|---|---|---|---|---|
+| F1 | Always-on VPN | An Always-on VPN start checked the proxy before creating the VPN interface (M5), so with "Block connections without VPN" off, apps used the normal network for the length of the check — up to its timeout when the proxy was away — right after Android started the VPN the user wants always on | medium | **Fixed** (ADR-0013 §3): the interface comes first, traffic held, recoverable failures retried as reconnecting |
+| F2 | Always-on VPN | Always-on VPN connects the profile the user chose with "Use this proxy"; a user who only ever pressed Connect on Home had no chosen profile, so Always-on VPN connected nothing — the user was not told | medium | **Fixed**: Connect on Home records the profile it connects as the choice; with none, `ALWAYS_ON_NO_PROFILE` is shown and notified |
+| F3 | Process death | A process that ended while connected left no trace: after it, apps had used the normal network (without Android's kill switch) and nothing said so | medium | **Fixed** (ADR-0013 §4): the next process finds it, logs it with Android's reason and time, and Home explains it until seen |
+| F4 | Proxy failure | A SOCKS5 proxy that answered its sign-in but never a connection request left the session Connected with every connection failing (M7's open item) | low (fails closed; availability only) | **Fixed** (ADR-0013 §6): 3 unanswered in a row to 2 or more sites reconnect |
+| F5 | Crash reports | An exception from a library with a host, an address or a `user:password@` in its message would have reached Android's crash report (dropbox, and Play's crash reports) unchanged | medium | **Fixed** (ADR-0013 §7): the report gets the exception with its messages sanitized; `ExceptionSecret` keeps ProxyFlow's own messages clean. Residual: Android's runtime logs the original to logcat (§4, R7) |
+| F6 | Tapjacking | Disconnect and the destructive confirmations took taps through another app's window (threat model S4 planned `filterTouchesWhenObscured` for M9) | low (Android 12+ already blocks most such touches; consent is Android's own dialog) | **Fixed** (ADR-0013 §8) |
+| F7 | Secure defaults | The trust anchors and the cleartext policy were Android's defaults, not stated: a library's manifest could change them unnoticed | low | **Fixed** (ADR-0013 §9): explicit network security config, checked in the release build |
+| F8 | Dependencies | No advisory check for the Kotlin/Android libraries (Go had govulncheck) | medium | **Fixed** (ADR-0013 §11): OSV in every CI run |
+| F9 | Engine input | The packet loop had no fuzzing (threat model T-3 planned it for M10) | low | **Done**: `FuzzPacketLoop`, and 4,000 malformed packets in a test; no crash, no failure. The test harness showed one artefact: a zero-length datagram on its socketpair reads as end of file and ends the loop as a TUN that went away does (a TUN never delivers an empty packet) |
+| F10 | Copy | The routing page called Android's lockdown "guided in M8" and the README said "will guide users"; nothing in the app did yet | low | **Fixed**: E2, E1/E1b, B2, B6d; the docs say what exists |
+
+No critical or high finding is open. Owner decisions that bear on security stay open and are not findings of this review: D2 (plaintext proxies in the Play build), D6 (the pre-flight check's target), D7 (user-installed CAs for TLS to the proxy).
+
+## 3. Areas
+
+### 3.1 Fail-closed behaviour (A4, A3)
+
+While ProxyFlow's VPN interface exists, nothing goes around the proxy: the engine dials the proxy before it accepts an app's connection, has no other way out, and when it fails, stops, waits for a network or reconnects, the interface stays with no engine reading it, so apps' packets are held and dropped (ADR-0002, ADR-0004, ADR-0010 §5, ADR-0012 §6). M5–M7 verified each case on devices with packet captures, and M8 adds the Always-on VPN start (traffic held before the proxy check). Engine failure never removes the interface: `VpnSession.block` keeps it, `end` is reached only by the user (Disconnect, "Stop and use normal network"), revocation, consent withdrawn, or the service destroyed.
+
+What no app can hold: the interface going away. Android removes the VPN when the user disconnects, when another VPN app takes it (revocation), and when ProxyFlow's process ends. Without Android's kill switch, apps then use the normal network — the M8 failure injection shows it on every API level (scenario A: the shell reaches the witness directly within a second of the kill). With it on, Android blocks them (scenario B: every probe fails with `EACCES`, the witness hears nothing, no capture has a SYN to it). The app says this where it matters (ADR-0013 §1) and never claims more.
+
+### 3.2 Credential encryption and key invalidation (A1)
+
+Each set of credentials is sealed with its own AES-256-GCM key generated in the Android Keystore (ADR-0006): the key never enters the app's memory and can't be exported; the IV comes from the Keystore (randomized encryption required); the associated data binds the ciphertext to its profile and format version, so a copied or changed ciphertext fails rather than decrypting to wrong credentials. Keys don't require the user to unlock the phone (reconnects and Always-on VPN run in the background), so a change of lock screen doesn't invalidate them. When a key is gone or unusable — Keystore cleared, a restore to another phone (backups are off, so credentials never travel), `KeyPermanentlyInvalidatedException`, a failed tag — opening fails as `CREDENTIAL_UNREADABLE`, permanent: the profile asks for the sign-in again (H3), which seals it under a new key; there is no plaintext fallback. A transient Keystore failure is reported as such and tried again. Deleting a profile deletes its key, so any copy of the ciphertext left on flash is unreadable. Credentials reach the engine only as an `EngineSecret` byte array, zeroed when the engine stops (threat model I-12). Reviewed in M8: no change needed.
+
+### 3.3 Log redaction, crash reports and exported diagnostics (A1, A2, A5)
+
+- **Diagnostic log** (ADR-0012): typed entries, details under fixed keys, every value through `LogSanitizer` on write, read and export; profiles by random id. M8's new entries (`session_interrupted`, `system_kill_switch`) carry a reason key, yes/no and durations only.
+- **Logcat:** the VPN lifecycle log names profiles by id and states by fixed words; `LogSecret` fails CI on a statement passing a secret, a destination, bytes, a profile or an exception's message. M8's lines ("system kill switch: on", "the last process ended while connected: killed", "always-on start") are fixed words.
+- **Exceptions:** `ExceptionSecret` (M8) fails CI on ProxyFlow's code that builds an exception's message from a credential, server, destination, bytes, a profile or another exception's message; the crash handler sanitizes whatever reaches the top of a thread (§2 F5). Scenario C plants `user:PF8SECRET…@planted.pf8.invalid` in an exception's message on the emulators: Android's crash report names the exception with "[redacted]" in the secret's place, on every API level.
+- **What Android writes itself:** the runtime's pre-handler logs an uncaught exception, message and all, to logcat before any app code runs (scenario C counts that line). Logcat is readable by ProxyFlow itself and over adb, not by other apps (READ_LOGS is a system permission). Residual risk R7.
+- **`ApplicationExitInfo`:** its description can hold an exception's message, so ProxyFlow never reads it — only the reason and the time.
+- **Export and Copy:** sanitized again, with no search text and no profile names (ADR-0012 §8).
+- **Notifications:** no profile name on the lock screen (I-11); the M8 problem notification for `ALWAYS_ON_NO_PROFILE` names no profile.
+- **Stored in M8:** the `protection` DataStore file holds the kill switch's two booleans and time, the connected marker (profile id, start time, pid, boot count) and an interruption (profile id, times, reason): no name, server or credential; app-private and excluded from backups like every other domain.
+
+### 3.4 Exported components and the manifest (E-1)
+
+The release build's merged manifest, checked on every run: permissions INTERNET, ACCESS_NETWORK_STATE, FOREGROUND_SERVICE, FOREGROUND_SERVICE_SYSTEM_EXEMPTED, POST_NOTIFICATIONS and androidx.core's own receiver permission, nothing else; the launcher activity is the only component exported without a permission (androidx's profile installer receiver is exported behind DUMP); the VPN service is not exported, requires BIND_VPN_SERVICE (only Android binds it) and filters only `android.net.VpnService`; no content provider is exported; backups and device transfers off; not debuggable; no cleartext opt-in; since M8 a network security config with no cleartext and the system's CAs only. `PendingIntent`s are immutable. The test APK's device admin and its command receiver (M8's lab) exist only in the androidTest APK — never in the app — and the receiver requires DUMP, a permission apps are not granted (the shell has it).
+
+### 3.5 Input from the network and the phone (T-2, T-3, T2, T3)
+
+Parsers of proxy replies are bounded and fuzzed (M4); hostnames are validated before they reach a request (T-5); the DNS responder is fuzzed. M8 fuzzes the packet loop itself and writes 4,000 malformed packets of every kind (§3.6); gVisor's netstack drops them, ProxyFlow's handlers see only what parsed, and per-flow panic recovery is in place (none was needed).
+
+### 3.6 Resource bounds (D-1 to D-4)
+
+| Bound | Value | Tested |
+|---|---|---|
+| TCP flows at once, set-ups included (`MaxConns`) | 1,024; the rest refused (`CONNECTION_LIMIT`) | `TestConnectionLimit` (2), `TestManyConnectionsAtOnceStayWithinMaxConns` (120 at once against 24: never more than 24 held, 96 refused, every slot freed, the engine serving after) |
+| Handshakes held while tunnels are set up (`MaxInFlight`) | 512; SYNs over it dropped and counted, apps retry | `TestAHandshakeFloodIsHeldToMaxInFlight` (48 at once against 8, a proxy that never answers: never more than 8 dials, SYNs dropped and counted, each set-up ended at its timeout, the engine serving after) |
+| DNS sockets / DNS-over-TCP connections | 256 / 32 | `TestDNSFlowLimit`, `TestDNSOverTCPHasItsOwnSlots` |
+| Buffers per flow | netstack 64 KiB (at most 128 KiB) per direction, relay 32 KiB | `TestStalledFlowsHoldLittleMemory` (a stalled upload is held to the engine's buffers: the test allows 240 KiB, M4 measured 93 KiB) |
+| Tunnel set-up / idle | 15 s / 5 min | `TestIdleTimeoutCountsBothDirections`, M4's timeouts |
+| Engine events queued | 1,024, dropped and counted past it | `TestSlowEventReceiverNeverStallsTraffic` |
+| Placeholder names | 16,384 (3.9–7.6 MiB) | M4's pool tests |
+| Malformed packets | dropped, the engine goes on | `TestMalformedPacketsAreDroppedAndTheEngineGoesOn`, `FuzzPacketLoop` |
+| Reconnect attempts | 8 over about two minutes, cancellable, one at a time | `ReconnectTest` (M7) |
+| Unanswered SOCKS5 sites remembered | 8 hashes | `TestUnansweredSOCKS5RequestsAreCountedApart` |
+| Diagnostic log | 5,000 entries, 24 h; 1,000 pending writes | `LogRepositoryTest`, `DiagnosticsRecorderTest` (M7) |
+| VPN lifecycle log in memory | 200 lines | — (a ring buffer) |
+
+The session's own event queue is unbounded by design (lifecycle events must not be dropped), but what feeds it is bounded by the engine: proxy-level failures and unanswered requests come at most from the flows being set up (≤ `MaxInFlight`), each after a dial or a handshake deadline; connection failures to sites, which apps can cause at any rate, never enter it — they are counted per code and written once a minute (ADR-0012 §3).
+
+### 3.7 UI integrity (S4)
+
+Taps through another app's window are dropped on the actions that let traffic out or delete data (ADR-0013 §8), tested with touches carrying Android's obscured flags (`ObscuredTouchesTest`). Android's VPN consent dialog is the system's.
+
+### 3.8 Supply chain (E-3, A7)
+
+Pinned versions (`gradle/libs.versions.toml`, `go.sum` rebuilt and compared against the checksum database), the Gradle wrapper validated before any Gradle step, GitHub Actions pinned by commit, govulncheck and OSV, the secrets scan over files and history, Play App Signing planned for M11.
+
+## 4. Residual risks
+
+Unchanged from the threat model's §5 unless noted; the full list is there.
+
+- **R1** (updated): without Android's kill switch, apps use the normal network when the VPN goes away — disconnect, revocation, process death. M8 measures it, tells the user afterwards (an interruption notice) and guides to the kill switch; it can't prevent it.
+- **R4** (updated): a netstack bug triggered by crafted packets — now fuzzed in CI; falls back to R1 behaviour. Android did not restart the always-on VPN after process death on the emulators, so with blocking on apps stay offline until the user opens ProxyFlow.
+- **R7** (new): Android's runtime writes an uncaught exception's message to logcat before any app handler; readable by the app and adb only. ProxyFlow's own messages hold no secrets (Lint).
+- **R8** (new): the kill switch's status shown while disconnected is what Android said when ProxyFlow last ran; the user may have changed it since. Shown with its time.
+
+## 5. Conclusion
+
+No critical or high issue is open. The fail-closed promise holds while ProxyFlow's VPN interface exists, and where Android takes the interface away the app says so honestly, measures it on devices, and points the user to the only setting that keeps traffic blocked. The open owner decisions (D2, D6, D7) are not security defects but choices for the Play release (M11).

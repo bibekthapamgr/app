@@ -294,6 +294,10 @@ scenario_b() {
     done
     case "$out" in REPLY*) ;; *) fail "B: the witness was not reached once the setting was off: $out" ;; esac
     note "B: release: $(admin RELEASE)"
+    # Turning Always-on VPN off this way withdrew ProxyFlow's VPN consent on API 34 (run 41676441908: C then found no
+    # consent); what Android left is noted, and the consent the tests' own setup gives is given back for C.
+    note "B: VPN consent after the release: $(timeout 10 adb shell appops get "$APP_ID" ACTIVATE_VPN 2>&1 | tr -d '\r' | head -1)"
+    timeout 10 adb shell appops set "$APP_ID" ACTIVATE_VPN allow >/dev/null 2>&1 || fail "B: the VPN consent could not be given back"
 }
 
 # B before C: a crash marks an app Android may then be slower to start in the background (as Always-on VPN does).

@@ -155,6 +155,7 @@ class KillSwitchTest {
         val profile = choose(save())
         policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000), jitter = 0.0)
         engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE", detail = "no route to the proxy")
+        host.killSwitch = KillSwitchReading(alwaysOn = true, blocksWithoutVpn = true)
 
         alwaysOnStart()
         val reconnecting = await { it.status == ConnectionStatus.Reconnecting && it.reconnect != null }
@@ -164,6 +165,7 @@ class KillSwitchTest {
         assertEquals("PROXY_UNREACHABLE", retry.lastError?.code)
         assertFalse("the interface stays: apps get nowhere around the proxy", host.tuns.single().closed)
         assertNull("not connected yet", reconnecting.connectedSinceMillis)
+        eventually("with the interface up, what Android says is read before the proxy answers") { stored()?.status == KillSwitchStatus.On }
 
         // The proxy answers again: the next attempt connects on the same interface.
         engine.answer = PreflightAnswer(ok = true)

@@ -16,7 +16,9 @@ out around ProxyFlow), the packet captures of the phone's uplink and the crash r
      secret, and the next start found a crash (Android's own line in the phone's log, written before any app code,
      is reported, not failed: no app can change it).
 
-It fails on any of these that does not hold, on any step the script marked FAILED, or when the steps did not run.
+It fails on any of these that does not hold, on any step the script marked FAILED, or when the steps did not run. It
+also reports, without failing, what left the phone on its normal network for ProxyFlow's own addresses (198.18.0.0/15:
+its placeholders and DNS server) while the VPN was gone — apps that kept what the VPN gave them.
 
 Usage: m8_evidence.py --api N --pf DIR --out DIR [--host-pcap FILE]
 """
@@ -24,7 +26,10 @@ Usage: m8_evidence.py --api N --pf DIR --out DIR [--host-pcap FILE]
 from __future__ import annotations
 
 import argparse
+import collections
+import datetime
 import glob
+import ipaddress
 import os
 import re
 import struct
@@ -32,9 +37,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import m6_evidence  # noqa: E402
 from m5_evidence import annotate, ip_of, network_payload  # noqa: E402
 
 GATEWAY = "10.0.2.2"  # the runner as the emulator sees it
+OWN = ipaddress.ip_network("198.18.0.0/15")  # ProxyFlow's placeholders and its DNS server 198.18.0.2, valid only inside its VPN
 WITNESS_PORT = 8095
 MARGIN_S = 2.0  # the emulator's own capture runs on the runner's clock, which agrees with the phone's to about a second
 
@@ -268,6 +275,50 @@ def check_captures(paths: list[str], window_a: tuple[float, float] | None, windo
     return facts, problems
 
 
+def after_the_vpn(paths: list[str], noted: list[tuple[float, str]]) -> list[str]:
+    """Reported, never failed: what left the phone on its normal network for ProxyFlow's own addresses (its placeholders
+    and its DNS server, 198.18.0.0/15) while its VPN was gone — after A's kill, after Always-on VPN was turned off in B,
+    after C's crash. Only an app that kept what the VPN gave it (a placeholder, the VPN's DNS server) sends there; nothing
+    answers such an address outside the VPN, but a DNS query's name crosses the network in clear (docs/m6 §4)."""
+    windows = []
+    for start, end, label in (
+        (r"^A: killed pid", r"^B: device owner", "after A's kill"),
+        (r"^B: Always-on VPN off", r"^C: connecting", "after Always-on VPN was turned off"),
+        (r"^C: pid \d+ crashed", r"^C: the next start", "after C's crash"),
+    ):
+        a, b = first(noted, start), first(noted, end)
+        if a and b and b[0] > a[0]:
+            windows.append((label, phone_time(a[0]), phone_time(b[0]), b[0] - a[0]))
+    facts = []
+    for path in paths:
+        capture = m6_evidence.read_capture(path)
+        if capture.error:
+            continue
+        for label, lo, hi, seconds in windows:
+            sent = collections.Counter(
+                f"{kind} {dst}:{port}" for (when, _, dst, kind, port, _) in capture.events
+                if when and lo <= when <= hi and own(dst)
+            )
+            names = collections.Counter(n for (when, n, _, _, dst, _) in capture.dns_queries if when and lo <= when <= hi and own(dst))
+            facts.append(
+                f"{os.path.basename(path)} {label} ({seconds:.0f} s): to ProxyFlow's addresses on the normal network "
+                f"{dict(sent.most_common(6)) or 'nothing'}; DNS names in it {dict(names.most_common(8)) or 'none'}"
+            )
+    return facts
+
+
+def phone_time(seconds: float) -> datetime.datetime:
+    """The phone's epoch time as the captures' times are read (UTC, naive)."""
+    return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).replace(tzinfo=None)
+
+
+def own(address: str) -> bool:
+    try:
+        return ipaddress.ip_address(address) in OWN
+    except ValueError:
+        return False
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--api", required=True)
@@ -289,7 +340,7 @@ def main(argv: list[str]) -> int:
     facts_c, problems_c = check_c(noted, args.out)
     paths = sorted(glob.glob(os.path.join(args.out, "guest-*.pcap"))) + ([args.host_pcap] if args.host_pcap else [])
     facts_cap, problems_cap = check_captures(paths, window_a, window_b)
-    facts += facts_a + facts_b + facts_c + facts_cap
+    facts += facts_a + facts_b + facts_c + facts_cap + after_the_vpn(paths, noted)
     problems += problems_a + problems_b + problems_c + problems_cap
     facts.append(f"witness: {len(witness)} lines after the lab's own checks")
 
