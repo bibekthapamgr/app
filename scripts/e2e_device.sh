@@ -122,8 +122,10 @@ uplink_name() {
 choose_uplink() {
     UPLINK=""
     # The API 35 image's mobile data came up late or never, or dropped or appeared during the tests, in five of
-    # its last nine runs, while Wi-Fi alone held: there Wi-Fi is the uplink, in airplane mode.
-    if [ "$API" = 35 ]; then
+    # its last nine runs, and the API 34 image's in five of its last six (M7: it dropped during the tests in four,
+    # failing tests twice, and never came up in one), while Wi-Fi alone held on both: there Wi-Fi is the uplink, in
+    # airplane mode, and tcpdump inside the phone captures it.
+    if [ "$API" = 34 ] || [ "$API" = 35 ]; then
         wifi_in_airplane_mode
         if uplink_within 60; then
             UPLINK="$(uplink_name) (airplane mode, so the radio is off: mobile data is unreliable on this image)"
@@ -139,7 +141,7 @@ choose_uplink() {
             sleep 2
         done
     fi
-    if [ -n "$UPLINK" ] || [ "$API" = 35 ]; then
+    if [ -n "$UPLINK" ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
         : # chosen above
     elif cellular_up; then
         NOTE=""
