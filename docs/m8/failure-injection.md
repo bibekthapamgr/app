@@ -42,20 +42,31 @@ After the device tests and their logcat, `scripts/e2e_device.sh` runs `scripts/m
 
 ## 3. Results
 
-Pending: filled from the verified run (its three attempts are in `docs/m8/M8-acceptance-report.md`). Per API level (first verified attempt):
+From the verified commit's CI run (`docs/m8/M8-acceptance-report.md`, run 41725391921): every check below held on every level in all four of its attempts — attempt 3 failed on API 34 in an M5 test, its M8 evidence passing. Per API level, from attempt 1, and the spread over the four where it varies:
 
 | | API 29 | API 34 | API 35 | API 36 |
 |---|---|---|---|---|
-| A: killed by | | | | |
-| A: witness reached directly after the kill | | | | |
-| A: next start found | | | | |
-| B: Always-on VPN start connected | | | | |
-| B: ProxyFlow read | | | | |
-| B: probes with ProxyFlow gone / answered | | | | |
-| B: Android started ProxyFlow again | | | | |
-| B: next start | | | | |
-| B: witness reached once the setting was off | | | | |
-| C: crash report | | | | |
-| C: Android's own logcat lines with the secret | | | | |
-| C: next start found | | | | |
-| Captures that saw the uplink / SYNs to the witness while blocking | | | | |
+| A: killed by | SIGKILL as root (`run-as … kill` answers "unknown pid" on this image) | SIGKILL as the app's user (`run-as`) | SIGKILL (`run-as`) | SIGKILL (`run-as`) |
+| A: the shell reached the witness directly after the kill (the negative control) | 0.6 s, the first probe (0.5–0.6 s) | 1.0 s, the first probe (0.4–1.0 s) | 0.3 s, the first probe (0.3–0.4 s) | 0.3 s, the first probe (0.3 s) |
+| A: the next start found | the interruption, reason unknown, no end time (Android 10 says neither) | the interruption, killed, with its end time | killed, with its end time | killed, with its end time |
+| B: the Always-on VPN start connected | 2.1 s after the setting (1.6–2.6 s) | 1.6 s (0.5–1.6 s) | 1.1 s | 1.1 s |
+| B: ProxyFlow read from Android | Always-on VPN on, blocking without VPN | the same | the same | the same |
+| B: no VPN network in Android after the kill | 0.1 s | 0.1 s (0.1–0.2 s) | 0.1 s (0.1–0.2 s) | 0.1 s |
+| B: probes of the witness with ProxyFlow gone | 40, all refused with `EACCES` (Android's blocking), none answered | 40, all `EACCES` | 40, all `EACCES` | 40, all `EACCES` |
+| B: Android started ProxyFlow again | no, within the probes' 28 s (27–28 s) | no, 31 s (26–31 s) | no, 28 s | no, 28 s (26–28 s) |
+| B: the next start | kept "on", found the interruption (unknown), the shell's line to the witness refused before connecting (`EACCES`), connected again while Android blocks | the same, the interruption killed | the same, killed | the same, killed |
+| B: once the setting was off | the shell reached the witness directly again | the same | the same | the same |
+| C: Android's crash report | names the exception, none of the planted sign-in (password, user, server) | the same | the same | the same |
+| C: Android's own uncaught-exception line in logcat, with the planted secret (R7) | 1 | 1 | 1 | 1 |
+| C: the next start found | the interruption, reason unknown (Android 10) | a crash | a crash | a crash |
+| The witness | 3 lines after the lab's own checks — the script's line before the scenarios, A's probe, the probe once B's setting was off — none that no step sent on purpose | the same | the same | the same |
+| Captures that saw the uplink through B; their SYNs to the witness while blocking | the emulator's (its clock +0.3 to +0.5 s from the phone's; −0.1 to +0.1 s in attempts 2–4): 0 | the phone's Wi-Fi capture (−0.5 to +0.2 s): 0 | the phone's Wi-Fi capture (−0.1 to +0.2 s): 0 | the phone's capture (−0.0 to +0.2 s) and the emulator's (−1.3 to −0.7 s): 0 in each |
+
+What the captures also show, each looked at right after A's kill (2 to 3 s), after Always-on VPN was turned off (1 s) and after C's crash (1 s): nothing to ProxyFlow's own addresses on the normal network and no DNS name in those moments, on every level. The witness and the captures cover the shell's TCP to one IPv4 address while ProxyFlow is gone; UDP, DNS and IPv6 from apps then are not probed (§2).
+
+What this shows, and what it doesn't:
+
+- **Without Android's kill switch** (A), apps' traffic leaves on the normal network as soon as the process is gone — at the first probe, 0.3 to 1.0 s after the kill. This is Android's behaviour and no app can prevent it; ProxyFlow finds the interruption at its next start on every level and explains it on Home, with Android's reason from Android 11 on.
+- **With it** (B), Android had no VPN network left 0.1 to 0.2 s after the kill and refused every probe of the shell's TCP to the witness until the setting was turned off: 40 of 40 on every level and attempt, the witness heard none of them, and no capture that saw the uplink through B holds a SYN to it. ProxyFlow's next start kept what Android said, found Android still blocking, and connected again while Android blocks everything else.
+- **Android did not start ProxyFlow again** within the probes, 26 to 31 s, on any level, with Always-on VPN set: with blocking on, apps stay offline until the user opens ProxyFlow (R4). Whether it would later is not measured.
+- **A crash** (C) reached Android's crash report with the exception's class and sanitized message and none of the planted sign-in; Android's runtime wrote the original message to logcat before any app code ran (R7: readable by ProxyFlow and adb, not by other apps).
