@@ -20,7 +20,19 @@ data object PrivacyPolicyDestination
 @Serializable
 data class HelpDestination(val topic: String? = null)
 
+/** The open-source licences, from About (full screen). */
+@Serializable
+data object LicencesDestination
+
+/** One licence's full text, by its id in the notices ([OpenSourceLicence.id]). */
+@Serializable
+data class LicenceTextDestination(val id: String)
+
 fun NavController.navigateToAbout(navOptions: NavOptions? = null) = navigate(AboutDestination, navOptions)
+
+fun NavController.navigateToLicences(navOptions: NavOptions? = null) = navigate(LicencesDestination, navOptions)
+
+fun NavController.navigateToLicenceText(id: String, navOptions: NavOptions? = null) = navigate(LicenceTextDestination(id), navOptions)
 
 fun NavController.navigateToPrivacyPolicy(navOptions: NavOptions? = null) = navigate(PrivacyPolicyDestination, navOptions)
 
@@ -32,7 +44,7 @@ fun NavGraphBuilder.aboutScreen(
     onOpenHowItWorks: () -> Unit = {},
     onOpenPrivacyPolicy: () -> Unit = {},
     onOpenHelp: () -> Unit = {},
-    onOpenLicences: (() -> Unit)? = null,
+    onOpenLicences: () -> Unit = {},
 ) {
     composable<AboutDestination> {
         AboutScreen(
@@ -41,7 +53,7 @@ fun NavGraphBuilder.aboutScreen(
             onOpenHowItWorks = dropUnlessResumed(block = onOpenHowItWorks),
             onOpenPrivacyPolicy = dropUnlessResumed(block = onOpenPrivacyPolicy),
             onOpenHelp = dropUnlessResumed(block = onOpenHelp),
-            onOpenLicences = onOpenLicences?.let { dropUnlessResumed(block = it) },
+            onOpenLicences = dropUnlessResumed(block = onOpenLicences),
         )
     }
 }
@@ -59,5 +71,17 @@ fun NavGraphBuilder.helpScreen(onBack: () -> Unit, onOpenKillSwitchGuide: () -> 
             topic = entry.toRoute<HelpDestination>().topic,
             onOpenKillSwitchGuide = dropUnlessResumed(block = onOpenKillSwitchGuide),
         )
+    }
+}
+
+fun NavGraphBuilder.licencesScreen(onBack: () -> Unit, onOpenLicence: (String) -> Unit) {
+    composable<LicencesDestination> {
+        LicencesRoute(onBack = dropUnlessResumed(block = onBack), onOpenLicence = onOpenLicence)
+    }
+}
+
+fun NavGraphBuilder.licenceTextScreen(onBack: () -> Unit) {
+    composable<LicenceTextDestination> { entry ->
+        LicenceTextRoute(id = entry.toRoute<LicenceTextDestination>().id, onBack = dropUnlessResumed(block = onBack))
     }
 }

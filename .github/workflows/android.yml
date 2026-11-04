@@ -213,6 +213,17 @@ jobs:
           ./gradlew -q :app:dependencies --configuration releaseRuntimeClasspath > "$RUNNER_TEMP/release-runtime-classpath.txt"
           python3 scripts/osv_scan.py "$RUNNER_TEMP/release-runtime-classpath.txt"
 
+      # M9: the open-source notices (About, Open-source licences) are what the release build ships: every library on its
+      # runtime classpath with the licence its POM declares, and the Go modules linked into the engine (scripts/licences.py).
+      # A library that changed, or one whose licence the app has no text for, fails here; the regenerated file is
+      # published with the screenshots for review.
+      - name: Open-source notices match the release build's libraries
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: |
+          ./gradlew -q :app:dependencies --configuration releaseRuntimeClasspath > "$RUNNER_TEMP/release-runtime-classpath.txt"
+          python3 scripts/licences.py "$RUNNER_TEMP/release-runtime-classpath.txt" engine/build/pfengine-facts.txt \
+            --check feature/about/src/main/assets/open_source_licences.json
+
       # The checks the device jobs' evidence rests on, against synthetic packet captures and lab logs:
       # each kind of leak they look for must be found, and a clean run must pass.
       - name: The end-to-end evidence scripts' own tests (synthetic captures and logs)
@@ -235,8 +246,8 @@ jobs:
         if: failure()
         run: python3 scripts/ci_error_digest.py "$RUNNER_TEMP"/gradle-*.log
 
-      # Two paths: the artifact keeps them under their common root, the repository root.
-      - name: Upload screenshots and the Room schema (for the screenshots job)
+      # The artifact keeps them under their common root, the repository root.
+      - name: Upload screenshots, the Room schema and the open-source notices (for the screenshots job)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -244,6 +255,7 @@ jobs:
           path: |
             app/screenshots/
             core/data/schemas/
+            feature/about/src/main/assets/open_source_licences.json
           if-no-files-found: error
 
       - name: Upload reports, screenshots and APKs
@@ -260,7 +272,7 @@ jobs:
             core/data/schemas/
           if-no-files-found: warn
 
-  # Publishes the recorded screenshots and the exported Room schema on a side branch
+  # Publishes the recorded screenshots, the exported Room schema and the regenerated open-source notices on a side branch
   # (ci-screenshots/<branch>), so they can be reviewed and committed without
   # downloading artifacts. Also after a failed build: when a screen changed, its new image is
   # what needs reviewing. Runs separately from the build so that only this job,
@@ -283,7 +295,7 @@ jobs:
           name: screenshots
           path: .
 
-      - name: Push the screenshots and schema to ci-screenshots/<branch>
+      - name: Push the screenshots, schema and notices to ci-screenshots/<branch>
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
@@ -291,6 +303,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/screenshots
           if [ -d core/data/schemas ]; then git add core/data/schemas; fi
+          notices=feature/about/src/main/assets/open_source_licences.json
+          if [ -f "$notices" ]; then git add "$notices"; fi
           git commit --allow-empty -m "Screenshots recorded in CI for $(git rev-parse --short HEAD)"
           git push --force origin "HEAD:refs/heads/ci-screenshots/$HEAD_REF"
 

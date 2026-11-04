@@ -122,7 +122,7 @@ class AppContainer(
     val viewModelFactory: ViewModelProvider.Factory = viewModelFactory {
         initializer { HomeViewModel(profileRepository, connectionController, protectionStore) }
         initializer { ProfilesViewModel(profileRepository, connectionController, connectionTester) }
-        initializer { AddEditProxyViewModel(createSavedStateHandle(), profileRepository, connectionTester) }
+        initializer { AddEditProxyViewModel(createSavedStateHandle(), profileRepository, connectionTester, connectionController) }
         initializer { SettingsViewModel(settingsRepository, protectionStore, connectionController, logRepository) }
         initializer { LogsViewModel(logRepository, profileRepository) }
         initializer { OnboardingViewModel(settingsRepository) }

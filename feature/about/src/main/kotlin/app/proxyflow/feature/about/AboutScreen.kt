@@ -39,7 +39,7 @@ fun AboutScreen(
     onOpenHowItWorks: () -> Unit = {},
     onOpenPrivacyPolicy: () -> Unit = {},
     onOpenHelp: () -> Unit = {},
-    onOpenLicences: (() -> Unit)? = null,
+    onOpenLicences: () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier,
@@ -88,13 +88,11 @@ fun AboutScreen(
                 supportingText = stringResource(R.string.about_help_summary),
                 onClick = onOpenHelp,
             )
-            if (onOpenLicences != null) {
-                PfListRow(
-                    title = stringResource(R.string.about_open_source),
-                    supportingText = stringResource(R.string.about_open_source_summary),
-                    onClick = onOpenLicences,
-                )
-            }
+            PfListRow(
+                title = stringResource(R.string.about_open_source),
+                supportingText = stringResource(R.string.about_open_source_summary),
+                onClick = onOpenLicences,
+            )
             Text(
                 stringResource(R.string.about_independent),
                 style = MaterialTheme.typography.bodyMedium,

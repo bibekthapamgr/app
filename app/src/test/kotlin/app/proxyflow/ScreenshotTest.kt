@@ -2,15 +2,20 @@ package app.proxyflow
 
 import android.content.Intent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ConnectStep
@@ -45,6 +50,11 @@ import app.proxyflow.core.model.UnsupportedTraffic
 import app.proxyflow.feature.about.AboutScreen
 import app.proxyflow.feature.about.HelpScreen
 import app.proxyflow.feature.about.HelpTopics
+import app.proxyflow.feature.about.LicenceTextScreen
+import app.proxyflow.feature.about.LicencesScreen
+import app.proxyflow.feature.about.OpenSourceLibrary
+import app.proxyflow.feature.about.OpenSourceLicence
+import app.proxyflow.feature.about.OpenSourceNotices
 import app.proxyflow.feature.about.PrivacyPolicyScreen
 import app.proxyflow.feature.home.HomeActions
 import app.proxyflow.feature.home.HomeDialog
@@ -121,6 +131,7 @@ class ScreenshotTest {
         }
         compose.waitForIdle() // let the sheet draw before the screen is captured
         captureScreenRoboImage("$DIR/B8_profile_picker_light.png")
+        assertAccessible("B8_profile_picker_light")
     }
 
     /** B8 while connected: picking another proxy switches the connection to it (J11), which the sheet says first. */
@@ -135,6 +146,7 @@ class ScreenshotTest {
         }
         compose.waitForIdle()
         captureScreenRoboImage("$DIR/B8_profile_picker_connected_dark.png")
+        assertAccessible("B8_profile_picker_connected_dark")
     }
 
     /** B2 with Android's kill switch on, as Android last said (M8): apps have no internet while ProxyFlow is off. */
@@ -319,6 +331,7 @@ class ScreenshotTest {
         compose.onNodeWithText("Delete").performClick()
         compose.waitForIdle() // let the dialog draw before the screen is captured
         captureScreenRoboImage("$DIR/C3_delete_confirm_light.png")
+        assertAccessible("C3_delete_confirm_light")
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
@@ -333,6 +346,7 @@ class ScreenshotTest {
         compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
         compose.waitForIdle() // let the menu draw before the screen is captured
         captureScreenRoboImage("$DIR/C2_profile_actions_light.png")
+        assertAccessible("C2_profile_actions_light")
     }
 
     @Test
@@ -404,6 +418,16 @@ class ScreenshotTest {
         compose.onNodeWithContentDescription("Back").performClick()
         compose.waitForIdle() // let the dialog draw before the screen is captured
         captureScreenRoboImage("$DIR/D8_unsaved_changes_light.png")
+        assertAccessible("D8_unsaved_changes_light")
+    }
+
+    /** D9 (J11): Save on changes to the profile the connection runs on asks before it reconnects with them. */
+    @Test
+    fun reconnectWithChanges() = captureDialog("D9_reconnect_with_changes") {
+        AddEditProxyScreen(
+            AddEditUiState(isEdit = true, input = tokyoForm.copy(port = "1444"), dirty = true, confirmReconnect = tokyo.name),
+            AddEditActions(),
+        )
     }
 
     @Test
@@ -422,7 +446,7 @@ class ScreenshotTest {
 
     /** D7: the proxy rejected the sign-in, in the words Home uses for it (the error catalogue), with its code. */
     @Test
-    fun testFailed() = captureBothThemes("D7_test_failed", scrollTo = "Code: AUTH_FAILED") {
+    fun testFailed() = captureBothThemes("D7_test_failed", scrollTo = "Code: AUTH_FAILED · proxy rejected the credentials") {
         val rejected = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED", "proxy rejected the credentials"))
         AddEditProxyScreen(
             AddEditUiState(input = officeForm, dirty = true, test = ConnectionTestState.Done(rejected, office)),
@@ -491,6 +515,7 @@ class ScreenshotTest {
         compose.onNodeWithText("Theme").performClick()
         compose.waitForIdle() // let the dialog draw before the screen is captured
         captureScreenRoboImage("$DIR/E1_theme_dialog_light.png")
+        assertAccessible("E1_theme_dialog_light")
     }
 
     @Test
@@ -526,6 +551,7 @@ class ScreenshotTest {
         }
         compose.waitForIdle() // let the sheet draw before the screen is captured
         captureScreenRoboImage("$DIR/F3_log_detail_light.png")
+        assertAccessible("F3_log_detail_light")
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
@@ -536,15 +562,27 @@ class ScreenshotTest {
         }
         compose.waitForIdle() // let the dialog draw before the screen is captured
         captureScreenRoboImage("$DIR/F2_clear_confirm_light.png")
+        assertAccessible("F2_clear_confirm_light")
     }
 
     @Test
-    fun about() = captureBothThemes("G1_about") { AboutScreen(version = "0.2.0 (2)", onBack = {}, onOpenLicences = {}) }
+    fun about() = captureBothThemes("G1_about") { AboutScreen(version = "0.2.0 (2)", onBack = {}) }
+
+    /** The open-source licences (M9), with a sample of what scripts/licences.py lists from the release build. */
+    @Test
+    fun licences() = captureBothThemes("G4_licences") { LicencesScreen(sampleNotices, onBack = {}, onOpenLicence = {}) }
+
+    /** One licence's full text, as the app ships it (Go's). */
+    @Test
+    fun licenceText() = captureBothThemes("G4_licence_text") {
+        val go = sampleNotices.licences.first { it.id == "BSD-3-Clause-Go" }
+        LicenceTextScreen(title = go.title, text = OpenSourceNotices.text(LocalContext.current, go), onBack = {})
+    }
 
     /** About's links (M9): how it works, the privacy policy, help and the licences. */
     @Test
     fun aboutLinks() = captureBothThemes("G1_about_links", scrollTo = "Open-source licences") {
-        AboutScreen(version = "0.2.0 (2)", onBack = {}, onOpenLicences = {})
+        AboutScreen(version = "0.2.0 (2)", onBack = {})
     }
 
     @Test
@@ -574,6 +612,113 @@ class ScreenshotTest {
         OnboardingScreen(showNotificationsPage = true, onAllowNotifications = {}, onFinish = {}, startPage = 2)
     }
 
+    // M9, the brief's task 8: the smallest common phone width (320 dp) at Android's largest font size (200 %). Each
+    // screen keeps its words and its actions reachable, scrolled to where they are; light theme only (both themes are
+    // above at the default size).
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontHomeConnected() = captureLargeFont("B4_home_connected", scrollTo = "Disconnect") {
+        val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
+        HomeScreen(
+            home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic),
+            HomeActions(),
+            nowMillis =
+            SAMPLE_TIME + 767_000,
+        )
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontHomeDisconnected() = captureLargeFont("B2_home_disconnected", scrollTo = "Connect") {
+        HomeScreen(home(ConnectionState.Idle), HomeActions())
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontConnectFailed() = captureLargeFont("B6b_connect_failed", scrollTo = "Try again") {
+        HomeScreen(home(ConnectionState(profileId = "p1", error = ConnectionError("PROXY_UNREACHABLE"))), HomeActions())
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontProfilePicker() {
+        compose.setContent {
+            LargeFont { HomeScreen(home(ConnectionState.Idle).withProfiles(), HomeActions(), nowMillis = SAMPLE_TIME, picking = true) }
+        }
+        compose.waitForIdle()
+        captureScreenRoboImage("$DIR/large_font/B8_profile_picker.png")
+        assertAccessible("B8_profile_picker (200 %)")
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontProfiles() = captureLargeFont("C2_profiles_list") {
+        ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}, nowMillis = SAMPLE_TIME)
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontAddProxy() = captureLargeFont("D1_add_proxy", scrollTo = "Test connection") {
+        AddEditProxyScreen(AddEditUiState(input = tokyoForm, dirty = true), AddEditActions())
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontTestFailed() = captureLargeFont("D7_test_failed", scrollTo = "Code: AUTH_FAILED · proxy rejected the credentials") {
+        val rejected = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED", "proxy rejected the credentials"))
+        AddEditProxyScreen(
+            AddEditUiState(input = officeForm, dirty = true, test = ConnectionTestState.Done(rejected, office)),
+            AddEditActions(),
+        )
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontSettings() = captureLargeFont("E1_settings") {
+        SettingsScreen(SettingsUiState(loading = false, theme = ThemePreference.System), onThemeChange = {
+        }, onOpenAbout = {}, notificationsOn = true)
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontLogs() = captureLargeFont("F2_logs") {
+        LogsScreen(LogsUiState(loading = false, entries = sampleLog, total = sampleLog.size))
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontHowItWorks() = captureLargeFont("A2_onboarding_how_it_works") {
+        OnboardingScreen(showNotificationsPage = true, onAllowNotifications = {}, onFinish = {}, startPage = 1)
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontNotificationsPage() = captureLargeFont("A3_onboarding_notifications") {
+        OnboardingScreen(showNotificationsPage = true, onAllowNotifications = {}, onFinish = {}, startPage = 2)
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun largeFontPrivacyPolicy() = captureLargeFont("G2_privacy_policy") { PrivacyPolicyScreen(version = "0.2.0 (2)", onBack = {}) }
+
+    /** [content] at 200 % font size in the light theme, scrolled to [scrollTo] when given, captured and checked. */
+    private fun captureLargeFont(name: String, scrollTo: String? = null, content: @Composable () -> Unit) {
+        compose.setContent { LargeFont(content) }
+        scrollTo?.let { compose.onNodeWithText(it).performScrollTo().assertIsDisplayed() }
+        val captured = runCatching { compose.onRoot().captureRoboImage("$DIR/large_font/$name.png") }
+        assertAccessible("$name (200 %)")
+        captured.getOrThrow()
+    }
+
+    /** Android's largest font size (Settings, Display size and text, 200 %), the light theme. */
+    @Composable
+    private fun LargeFont(content: @Composable () -> Unit) {
+        val density = LocalDensity.current
+        CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = 2f)) { ProxyFlowTheme { content() } }
+    }
+
     private fun home(
         connection: ConnectionState,
         dialog: HomeDialog? = null,
@@ -601,6 +746,7 @@ class ScreenshotTest {
         compose.setContent { ProxyFlowTheme { content() } }
         compose.waitForIdle() // let the dialog draw before the screen is captured
         captureScreenRoboImage("$DIR/${name}_light.png")
+        assertAccessible(name)
     }
 
     /**
@@ -614,15 +760,25 @@ class ScreenshotTest {
         compose.setContent { ProxyFlowTheme(darkTheme = dark) { content() } }
         scrollTo?.let { compose.onNodeWithText(it).performScrollTo() }
         val light = runCatching { compose.onRoot().captureRoboImage("$DIR/${name}_light.png") }
+        val accessible = runCatching { assertAccessible(name) }
         dark = true
         compose.waitForIdle()
         val darkCapture = runCatching { compose.onRoot().captureRoboImage("$DIR/${name}_dark.png") }
-        val failures = listOfNotNull(light.exceptionOrNull(), darkCapture.exceptionOrNull())
+        val failures = listOfNotNull(light.exceptionOrNull(), accessible.exceptionOrNull(), darkCapture.exceptionOrNull())
         if (failures.isNotEmpty()) throw AssertionError(failures.joinToString("\n") { it.message.orEmpty() }, failures.first())
+    }
+
+    /** Every control on the screen as drawn has a name TalkBack reads and a 48 dp touch target (Accessibility.kt, M9). */
+    private fun assertAccessible(name: String) {
+        val problems = compose.accessibilityProblems(name)
+        if (problems.isNotEmpty()) throw AssertionError("accessibility:\n" + problems.joinToString("\n"))
     }
 
     private companion object {
         const val DIR = "screenshots"
+
+        /** The smallest common phone width, 320 dp (a 4.7-inch phone), for the 200 % font size tests. */
+        const val SMALL_PHONE = "w320dp-h568dp-normal-long-notround-any-xhdpi-keyshidden-nonav"
         const val SAMPLE_TIME = 1_793_000_000_000L
 
         /** Android's kill switch as Android said while ProxyFlow was last connected. */
@@ -733,6 +889,24 @@ class ScreenshotTest {
             ),
         )
         val tokyoForm = ProxyProfileInput.from(tokyo, username = "user").copy(password = "secret")
+
+        /** Part of what scripts/licences.py lists from a release build: the engine's modules and some of the app's libraries. */
+        val sampleNotices = OpenSourceNotices(
+            licences = listOf(
+                OpenSourceLicence("Apache-2.0", "Apache License 2.0", "licences/Apache-2.0.txt"),
+                OpenSourceLicence("BSD-3-Clause-Go", "BSD 3-Clause License (The Go Authors)", "licences/BSD-3-Clause-Go.txt"),
+                OpenSourceLicence("gVisor", "gVisor licence (Apache License 2.0; some files MIT or BSD)", "licences/gVisor.txt"),
+            ),
+            libraries = listOf(
+                OpenSourceLibrary("androidx.activity:activity-compose", "1.13.0", "Apache-2.0"),
+                OpenSourceLibrary("androidx.room:room-runtime", "2.8.4", "Apache-2.0"),
+                OpenSourceLibrary("github.com/google/btree", "v1.1.2", "Apache-2.0"),
+                OpenSourceLibrary("org.jetbrains.kotlinx:kotlinx-coroutines-android", "1.10.2", "Apache-2.0"),
+                OpenSourceLibrary("Go standard library and runtime", "go1.27.3", "BSD-3-Clause-Go"),
+                OpenSourceLibrary("golang.org/x/net", "v0.60.0", "BSD-3-Clause-Go"),
+                OpenSourceLibrary("gvisor.dev/gvisor", "v0.0.0-20261029062900-94fcb330700e", "gVisor"),
+            ),
+        )
         val officeForm = ProxyProfileInput.from(office, username = "office-user").copy(password = "wrong")
     }
 }

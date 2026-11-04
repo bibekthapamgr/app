@@ -94,4 +94,8 @@
     <string name="error_password_too_long">Passwords can be at most 255 bytes for SOCKS5</string>
     <string name="error_password_too_long_http">Passwords can be at most 1,024 bytes</string>
     <string name="error_tls_server_name">Enter a valid server name or leave empty</string>
+    <!-- Board D9 (J11): saving changes to the profile a connection runs on. %1$s: the profile's name. -->
+    <string name="edit_reconnect_title">Reconnect with changes?</string>
+    <string name="edit_reconnect_body">You\'re connected through %1$s. Saving reconnects with the new settings: open connections close and apps wait until ProxyFlow is connected again. If the new settings don\'t work, apps stay offline until you fix them or disconnect. Nothing is sent around your proxy.</string>
+    <string name="edit_reconnect_confirm">Save and reconnect</string>
 </resources>

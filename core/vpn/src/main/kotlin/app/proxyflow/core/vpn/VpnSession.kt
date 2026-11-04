@@ -240,6 +240,13 @@ class VpnSession(
     /** Runs the connect sequence again for the blocked profile (Restart, Try again). */
     fun restart() = send(Event.Restart)
 
+    /**
+     * Runs the connect sequence again for [profileId] while a connection exists for it — with the profile as it is saved
+     * now, after an edit (board D9, J11): as a switch, flows end and the interface holds traffic until the new settings
+     * are checked. Nothing happens without a connection, or for another profile's.
+     */
+    fun reconnect(profileId: String) = send(Event.Reconnect(profileId))
+
     /** Disconnects, cancels a connection being set up or a reconnection, or stops a blocked one. */
     fun disconnect() = send(Event.Disconnect)
 
@@ -315,6 +322,7 @@ class VpnSession(
             when (event) {
                 is Event.Connect -> onConnect(event.profileId)
                 Event.Restart -> onRestart()
+                is Event.Reconnect -> onReconnect(event.profileId)
                 Event.Disconnect -> onDisconnect()
                 Event.ClearError -> if (state.value.status == ConnectionStatus.Disconnected) publish(state.value.copy(error = null))
                 Event.RetryNow -> onRetryNow()
@@ -361,6 +369,11 @@ class VpnSession(
         val current = state.value
         val profileId = current.profileId
         if (current.status == ConnectionStatus.Blocked && profileId != null) beginConnect(profileId)
+    }
+
+    private suspend fun onReconnect(profileId: String) {
+        val current = state.value
+        if (current.active && current.profileId == profileId) beginConnect(profileId)
     }
 
     private fun onDisconnect() {
@@ -1407,6 +1420,8 @@ class VpnSession(
         data class Connect(val profileId: String) : Event
 
         data object Restart : Event
+
+        data class Reconnect(val profileId: String) : Event
 
         data object Disconnect : Event
 

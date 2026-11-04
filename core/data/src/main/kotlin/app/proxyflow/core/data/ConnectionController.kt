@@ -38,6 +38,12 @@ interface ConnectionController {
     /** Runs the connection again after it stopped with traffic blocked (Restart, Try again). */
     fun restart() = Unit
 
+    /**
+     * Runs the connection of [profileId] again with the profile as it is saved now (board D9, "Save and reconnect"):
+     * its flows end and traffic is held until the new settings are checked. Nothing happens without a connection for it.
+     */
+    fun reconnect(profileId: String) = Unit
+
     /** Forgets why the last attempt ended, once the user has seen it; a blocked connection keeps its reason. */
     fun clearError() = Unit
 

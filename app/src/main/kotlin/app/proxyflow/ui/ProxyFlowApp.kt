@@ -19,8 +19,12 @@ import androidx.navigation.compose.rememberNavController
 import app.proxyflow.feature.about.HelpTopics
 import app.proxyflow.feature.about.aboutScreen
 import app.proxyflow.feature.about.helpScreen
+import app.proxyflow.feature.about.licenceTextScreen
+import app.proxyflow.feature.about.licencesScreen
 import app.proxyflow.feature.about.navigateToAbout
 import app.proxyflow.feature.about.navigateToHelp
+import app.proxyflow.feature.about.navigateToLicenceText
+import app.proxyflow.feature.about.navigateToLicences
 import app.proxyflow.feature.about.navigateToPrivacyPolicy
 import app.proxyflow.feature.about.privacyPolicyScreen
 import app.proxyflow.feature.home.HomeDestination
@@ -111,7 +115,10 @@ fun ProxyFlowApp(
                 onOpenHowItWorks = { navController.navigateToHowItWorks() },
                 onOpenPrivacyPolicy = { navController.navigateToPrivacyPolicy() },
                 onOpenHelp = { navController.navigateToHelp() },
+                onOpenLicences = { navController.navigateToLicences() },
             )
+            licencesScreen(onBack = { navController.popBackStack() }, onOpenLicence = { id -> navController.navigateToLicenceText(id) })
+            licenceTextScreen(onBack = { navController.popBackStack() })
             howItWorksScreen(onBack = { navController.popBackStack() })
             privacyPolicyScreen(version = version, onBack = { navController.popBackStack() })
             helpScreen(

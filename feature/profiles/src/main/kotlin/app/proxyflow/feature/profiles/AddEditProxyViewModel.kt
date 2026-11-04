@@ -3,10 +3,12 @@ package app.proxyflow.feature.profiles
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.ConnectionTester
 import app.proxyflow.core.data.InvalidProfileException
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.model.ConnectionError
+import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.CredentialState
 import app.proxyflow.core.model.ProfileError
@@ -61,6 +63,11 @@ data class AddEditUiState(
     /** Save or Test attempts that found errors; each one scrolls the form back to the error summary. */
     val rejectedSaves: Int = 0,
     val test: ConnectionTestState = ConnectionTestState.Idle,
+    /**
+     * Board D9: Save was tapped on changes to how the running connection reaches its proxy; the user confirms reconnecting
+     * with them first. The name of the profile the connection runs on.
+     */
+    val confirmReconnect: String? = null,
 )
 
 /**
@@ -75,6 +82,7 @@ class AddEditProxyViewModel(
     private val savedState: SavedStateHandle,
     private val repository: ProfileRepository,
     private val tester: ConnectionTester,
+    private val connection: ConnectionController,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : ViewModel() {
     /** Navigation argument (AddEditProxyDestination.profileId); null when adding. */
@@ -151,17 +159,39 @@ class AddEditProxyViewModel(
 
     fun onTlsServerNameChange(value: String) = edit { it.copy(tlsServerName = value) }
 
-    fun save() {
+    /**
+     * Saves the form. When a connection runs on this profile and the changes are to how it reaches its proxy — its server,
+     * TLS or sign-in — the user is asked first (board D9): the connection then runs again with them ([saveAndReconnect]).
+     */
+    fun save() = save(reconnect = false)
+
+    /** D9's "Save and reconnect": saves, then the connection runs again with what was saved (J11). */
+    fun saveAndReconnect() {
+        state.update { it.copy(confirmReconnect = null) }
+        save(reconnect = true)
+    }
+
+    /** D9's "Keep editing": nothing is saved. */
+    fun keepEditing() = state.update { it.copy(confirmReconnect = null) }
+
+    private fun save(reconnect: Boolean) {
         val current = state.value
         if (current.loading || current.loadFailed || current.saving || current.saved || !passesValidation()) return
-        state.update { it.copy(saving = true, saveFailed = false) }
         // A profile that no longer exists is saved as a new one, under a new id.
         val id = profileId.takeIf { current.isEdit }
+        val running = connection.state.value.takeIf { id != null && it.active && it.profileId == id }
+        if (!reconnect && running != null && changesTheConnection(running, current.input)) {
+            state.update { it.copy(confirmReconnect = running.profileName ?: current.originalName.orEmpty()) }
+            return
+        }
+        state.update { it.copy(saving = true, saveFailed = false) }
         viewModelScope.launch {
             try {
                 val saved = repository.save(id, current.input)
                 // Before the screen closes, which ends this scope: a test of exactly what was saved is its last test.
                 lastTested?.takeIf { it.input == current.input }?.let { keep(saved, it) }
+                // Flows end and traffic is held until the saved settings are checked, never sent around a proxy.
+                if (reconnect) connection.reconnect(saved.id)
                 state.update { it.copy(saving = false, saved = true, dirty = false) }
             } catch (e: CancellationException) {
                 throw e
@@ -172,6 +202,14 @@ class AddEditProxyViewModel(
                 state.update { it.copy(saving = false, saveFailed = true) }
             }
         }
+    }
+
+    /** Whether saving [input] changes how the connection [running] reaches its proxy: its server, TLS, or sign-in. */
+    private fun changesTheConnection(running: ConnectionState, input: ProxyProfileInput): Boolean {
+        val runs = running.profile ?: return true
+        val edited = input.toProfile(runs.id, createdAtMillis = 0, updatedAtMillis = 0)
+        // A typed password is a new sign-in; a new username needs one too (the form asks for it).
+        return !edited.sameServerAs(runs) || (input.requiresSignIn && input.password.isNotEmpty())
     }
 
     /** Tests the form as it is now. Only the tester's own answer is shown; nothing else ever reports success. */

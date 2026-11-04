@@ -252,6 +252,50 @@ class VpnSessionTest {
         assertTrue(log.indexOf("drain fd=100") in 0 until log.indexOf("start ${second.id} fd=100 mtu=9000"))
     }
 
+    /** Board D9 (M9): "Save and reconnect" runs the connection again with what was saved, on the same interface (J11). */
+    @Test
+    fun reconnectingAfterAnEditRunsTheSavedSettingsOnTheSameInterface() {
+        val profile = save(name = "Tokyo")
+        session.connect(profile.id)
+        awaitStatus(ConnectionStatus.Connected)
+        runBlocking { profiles.repository.save(profile.id, input(name = "Tokyo", server = "edited.example.com")) }
+        engine.gate = CountDownLatch(1)
+
+        session.reconnect(profile.id)
+        val reconnecting = awaitStatus(ConnectionStatus.Reconnecting)
+        assertEquals("edited.example.com", reconnecting.profile?.host)
+        eventually("the new settings are checked") { "probe edited.example.com" in engine.servers }
+        assertFalse("its flows end", engine.running)
+        assertFalse("the interface holds traffic meanwhile", host.tuns.single().closed)
+        engine.gate?.countDown()
+        val connected = awaitStatus(ConnectionStatus.Connected)
+
+        assertEquals("edited.example.com", connected.profile?.host)
+        assertEquals(
+            listOf("probe proxy.example.com", "start proxy.example.com", "probe edited.example.com", "start edited.example.com"),
+            engine.servers.toList(),
+        )
+        assertEquals("no second interface", 1, log.count("establish"))
+    }
+
+    @Test
+    fun reconnectingAProfileWithoutItsConnectionDoesNothing() {
+        val first = save(name = "Tokyo")
+        val second = save(name = "Office")
+        session.reconnect(first.id)
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Disconnected, state.value.status)
+
+        session.connect(first.id)
+        awaitStatus(ConnectionStatus.Connected)
+        session.reconnect(second.id)
+        runBlocking { session.awaitIdle() }
+
+        assertEquals(first.id, state.value.profileId)
+        assertEquals(ConnectionStatus.Connected, state.value.status)
+        assertEquals("another profile's connection is left alone", 1, log.count("probe"))
+    }
+
     @Test
     fun aFailedSwitchKeepsTrafficBlockedUntilRestartOrStop() {
         val first = save(name = "Tokyo")

@@ -76,6 +76,8 @@ internal fun AddEditProxyRoute(viewModel: AddEditProxyViewModel, onDone: () -> U
             onSave = viewModel::save,
             onTest = viewModel::testConnection,
             onCancelTest = viewModel::cancelTest,
+            onSaveAndReconnect = viewModel::saveAndReconnect,
+            onKeepEditing = viewModel::keepEditing,
             onBack = onDone,
         ),
     )
@@ -95,6 +97,9 @@ data class AddEditActions(
     val onSave: () -> Unit = {},
     val onTest: () -> Unit = {},
     val onCancelTest: () -> Unit = {},
+    /** Board D9's buttons. */
+    val onSaveAndReconnect: () -> Unit = {},
+    val onKeepEditing: () -> Unit = {},
     val onBack: () -> Unit = {},
 )
 
@@ -195,6 +200,17 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
             },
             onDismiss = { confirmDiscard = false },
             destructive = true,
+        )
+    }
+    // Board D9: the connection runs on this profile, and saving changes how it reaches its proxy.
+    state.confirmReconnect?.let { name ->
+        PfConfirmDialog(
+            title = stringResource(R.string.edit_reconnect_title),
+            text = stringResource(R.string.edit_reconnect_body, name),
+            confirmLabel = stringResource(R.string.edit_reconnect_confirm),
+            dismissLabel = stringResource(R.string.edit_keep_editing),
+            onConfirm = actions.onSaveAndReconnect,
+            onDismiss = actions.onKeepEditing,
         )
     }
 }

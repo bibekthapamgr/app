@@ -44,6 +44,10 @@ def manifest(application_extra: str = "", components: str = "", application_attr
         android:permission="android.permission.BIND_VPN_SERVICE" android:foregroundServiceType="systemExempted">
       <intent-filter><action android:name="android.net.VpnService" /></intent-filter>
     </service>
+    <service android:name="{check_release_manifest.TILE_SERVICE}" android:exported="true"
+        android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+      <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+    </service>
     {components}
   </application>
 </manifest>"""
@@ -119,6 +123,13 @@ class ReleaseManifestTest(unittest.TestCase):
         self.assertTrue(any("exported without a permission" in p for p in self.problems(manifest(components=exported))))
         guarded = '<receiver android:name="x.Receiver" android:exported="true" android:permission="android.permission.DUMP" />'
         self.assertEqual([], self.problems(manifest(components=guarded)))
+
+    def test_a_tile_any_app_could_bind_fails(self):
+        open_tile = manifest().replace('android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"', "")
+        self.assertTrue(any("BIND_QUICK_SETTINGS_TILE" in p for p in self.problems(open_tile)))
+        self.assertTrue(any("is exported without a permission" in p for p in self.problems(open_tile)))
+        other_action = manifest().replace("android.service.quicksettings.action.QS_TILE", "app.proxyflow.CONNECT")
+        self.assertTrue(any("QS_TILE only" in p for p in self.problems(other_action)))
 
     def test_another_permission_fails(self):
         text = manifest().replace("<application", '<uses-permission android:name="android.permission.READ_CONTACTS" />\n  <application')

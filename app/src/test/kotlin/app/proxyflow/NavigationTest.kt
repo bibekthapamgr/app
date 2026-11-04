@@ -66,6 +66,7 @@ class NavigationTest {
             "How ProxyFlow works" to "Websites and most apps (TCP)",
             "Privacy policy" to "Kept on this phone",
             "Help" to "Getting started",
+            "Open-source licences" to "Apache License 2.0",
         )) {
             compose.onNodeWithText(row).performScrollTo().performClick()
             compose.waitForText(title).assertIsDisplayed()
@@ -73,6 +74,13 @@ class NavigationTest {
             compose.onNodeWithContentDescription("Back").performClick()
             compose.waitForText("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · free, no account")
         }
+        // A licence's full text, from the notices the app ships (M9), and back to the list.
+        compose.onNodeWithText("Open-source licences").performScrollTo().performClick()
+        compose.waitForText("Read the Apache License 2.0").performClick()
+        compose.waitForText("TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.waitForText("Read the Apache License 2.0")
+        compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Theme").performScrollTo().assertIsDisplayed()
 

@@ -34,4 +34,16 @@
     <string name="vpn_action_cancel">Cancel</string>
     <string name="vpn_action_disconnect">Disconnect</string>
     <string name="vpn_action_restart">Restart</string>
+
+    <!-- The Quick Settings tile (board B11, M9). Its name is the app's; the line under it says what ProxyFlow is doing. -->
+    <string name="tile_label">ProxyFlow</string>
+    <string name="tile_connected">Connected</string>
+    <string name="tile_connecting">Connecting…</string>
+    <string name="tile_reconnecting">Reconnecting…</string>
+    <string name="tile_offline">Waiting for a network</string>
+    <string name="tile_blocked">Traffic blocked</string>
+    <string name="tile_off">Off</string>
+    <string name="tile_add_proxy">Add a proxy first</string>
+    <!-- What TalkBack reads for the tile: %1$s is the line under its name. -->
+    <string name="tile_description">ProxyFlow, %1$s</string>
 </resources>

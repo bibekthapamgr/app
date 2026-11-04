@@ -30,7 +30,7 @@ What M4–M7 left: while ProxyFlow's VPN interface exists, nothing goes around t
 - **Read the kill switch's status from `Settings.Secure`** (`always_on_vpn_app`, `always_on_vpn_lockdown`): hidden settings, not readable by apps on current Android, and different per version. Android's public answer is the `VpnService` one, available only while the VPN runs — so the status is shown as "as Android said at".
 - **`filterTouchesWhenObscured` on the whole window**: it drops every obscured tap, also on harmless screens, with no message — the user would see taps do nothing whenever any overlay (a chat head, a screen dimmer) is up. Only the actions that let traffic out or delete data are guarded, and say why.
 - **No crash handler, relying on ProxyFlow never putting secrets in messages**: Lint covers ProxyFlow's own code, not a library's; the handler covers what reaches the top of a thread whatever its source.
-- **`FLAG_SECURE` on the proxy form**: the password is masked unless the user shows it, and `FLAG_SECURE` would also block the user's own screenshots for support and some accessibility tools. Left out for V1.
+- **`FLAG_SECURE` on more screens than the proxy form** (the form has had it since M2: no screenshot, recording or recents thumbnail of a password; docs/m1/04 §1): the other screens show no credentials, and `FLAG_SECURE` there would also block the user's own screenshots for support and some accessibility tools. Left out for V1. (Corrected in M9: this line said the form had none.)
 - **A vulnerability scanner with its own database (OWASP Dependency-Check)**: slower, needs the NVD feed and an API key to be reliable; OSV aggregates GitHub's and the ecosystems' advisories for Maven and answers in seconds.
 
 ## Consequences

@@ -27,6 +27,7 @@ import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.testing.DumpOnFailureRule
 import app.proxyflow.core.testing.FakeConnectionTester
 import app.proxyflow.core.testing.TestProfiles
+import app.proxyflow.core.testing.UnavailableConnectionController
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Rule
@@ -114,7 +115,15 @@ class AddEditProxyScreenTest {
     fun formWindowIsHiddenFromScreenshotsAndRecents() {
         var shown by mutableStateOf(true)
         compose.setContent {
-            val viewModel = remember { AddEditProxyViewModel(SavedStateHandle(), TestProfiles().repository, FakeConnectionTester()) }
+            val viewModel =
+                remember {
+                    AddEditProxyViewModel(
+                        SavedStateHandle(),
+                        TestProfiles().repository,
+                        FakeConnectionTester(),
+                        UnavailableConnectionController(),
+                    )
+                }
             ProxyFlowTheme {
                 if (shown) AddEditProxyRoute(viewModel = viewModel, onDone = {})
             }
@@ -178,6 +187,26 @@ class AddEditProxyScreenTest {
         compose.onNodeWithText("87 ms", substring = true).performScrollTo().assertIsDisplayed()
         // What a pass doesn't change: UDP and ping stay blocked while connected (ADR-0004).
         compose.onNodeWithText("UDP is still blocked", substring = true).performScrollTo().assertIsDisplayed()
+    }
+
+    /** Board D9: what saving changes to the running connection's profile does, before it is done. */
+    @Test
+    fun reconnectingWithChangesIsConfirmedFirst() {
+        val calls = mutableListOf<String>()
+        compose.setContent {
+            ProxyFlowTheme {
+                AddEditProxyScreen(
+                    AddEditUiState(isEdit = true, dirty = true, confirmReconnect = "Office"),
+                    AddEditActions(onSaveAndReconnect = { calls += "reconnect" }, onKeepEditing = { calls += "keep" }),
+                )
+            }
+        }
+        compose.onNodeWithText("Reconnect with changes?").assertIsDisplayed()
+        compose.onNodeWithText("You're connected through Office.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Nothing is sent around your proxy.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Keep editing").performClick()
+        compose.onNodeWithText("Save and reconnect").performClick()
+        assertEquals(listOf("keep", "reconnect"), calls)
     }
 
     @Test

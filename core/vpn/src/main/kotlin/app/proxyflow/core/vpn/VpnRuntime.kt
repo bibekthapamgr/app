@@ -13,6 +13,7 @@ import app.proxyflow.core.data.ProtectionStore
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.Interruption
+import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.TrafficStats
 import javax.net.ssl.X509TrustManager
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -159,6 +161,19 @@ class VpnRuntime(
         }
     }
 
+    /** The profile Home shows and connects while nothing runs: the active one, for the Quick Settings tile (B11, M9). */
+    internal val shownProfile: Flow<ProxyProfile?> =
+        combine(profiles.profiles, profiles.activeProfileId) { list, id -> list.firstOrNull { it.id == id } }
+
+    /**
+     * Connects [profileId] as Home's Connect does (the tile, M9): connecting a profile is the user's choice of it (M8),
+     * which Always-on VPN connects later.
+     */
+    internal suspend fun connectChosen(profileId: String) {
+        session.connect(profileId)
+        if (profiles.chosenProfileId.first() != profileId) profiles.setActive(profileId)
+    }
+
     /** The system's VPN consent screen, or null when the VPN may start (see [ConnectionController.consentIntent]). */
     fun consentIntent(): Intent? = VpnService.prepare(appContext)
 
@@ -196,6 +211,8 @@ internal class VpnConnectionController(private val runtime: VpnRuntime) : Connec
     override fun disconnect() = runtime.session.disconnect()
 
     override fun restart() = runtime.session.restart()
+
+    override fun reconnect(profileId: String) = runtime.session.reconnect(profileId)
 
     override fun clearError() = runtime.session.clearError()
 

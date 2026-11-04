@@ -9,6 +9,8 @@ fails CI unless:
   a new one adds it there with the reason; M5 added the VPN service's);
 - the VPN service is not exported, requires BIND_VPN_SERVICE, is of foreground
   type systemExempted and filters for android.net.VpnService only;
+- the Quick Settings tile (M9) requires BIND_QUICK_SETTINGS_TILE, so only Android's system UI can bind it, and filters
+  for android.service.quicksettings.action.QS_TILE only;
 - backups are off: allowBackup="false", and both dataExtractionRules (Android 12+)
   and fullBackupContent (Android 10 and 11) point at rule files in
   app/src/main/res/xml that exclude every storage domain the app writes to;
@@ -60,8 +62,9 @@ ALLOWED_PERMISSIONS = {
     "android.permission.POST_NOTIFICATIONS": "the connection status and problem notifications on Android 13+; optional",
 }
 
-# The only service, and how it must be declared: Android alone may bind it.
+# The services, and how each must be declared: Android alone may bind them.
 VPN_SERVICE = "app.proxyflow.core.vpn.ProxyFlowVpnService"
+TILE_SERVICE = "app.proxyflow.core.vpn.ProxyFlowTileService"
 
 # Domains the app can write to without direct-boot support (device-protected storage is not used).
 BACKUP_DOMAINS = {"root", "file", "database", "sharedpref", "external"}
@@ -198,6 +201,22 @@ def check_vpn_service(application: ET.Element, facts: list[str]) -> list[str]:
     return problems
 
 
+def check_tile_service(application: ET.Element, facts: list[str]) -> list[str]:
+    services = [s for s in application.findall("service") if attr(s, "name") == TILE_SERVICE]
+    if len(services) != 1:
+        return [f"expected one {TILE_SERVICE}, found {len(services)}"]
+    service = services[0]
+    problems = []
+    if attr(service, "permission") != "android.permission.BIND_QUICK_SETTINGS_TILE":
+        problems.append(f"{TILE_SERVICE} must require android.permission.BIND_QUICK_SETTINGS_TILE")
+    actions = {attr(a, "name") for f in service.findall("intent-filter") for a in f.findall("action")}
+    if actions != {"android.service.quicksettings.action.QS_TILE"}:
+        problems.append(f"{TILE_SERVICE} must filter for android.service.quicksettings.action.QS_TILE only, found {sorted(a or '' for a in actions)}")
+    if not problems:
+        facts.append(f"service {TILE_SERVICE} permission=BIND_QUICK_SETTINGS_TILE")
+    return problems
+
+
 def check(manifest_path: str) -> tuple[list[str], list[str]]:
     root = ET.parse(manifest_path).getroot()
     package = root.get("package") or ""
@@ -224,6 +243,7 @@ def check(manifest_path: str) -> tuple[list[str], list[str]]:
 
     problems += check_network_security_config(application, facts)
     problems += check_vpn_service(application, facts)
+    problems += check_tile_service(application, facts)
 
     for kind in COMPONENTS:
         for component in application.findall(kind):
