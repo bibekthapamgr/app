@@ -668,6 +668,8 @@ class AddEditProxyViewModelTest {
         val other = saved.copy(id = "other", name = "Elsewhere")
         connection.current.value = ConnectionState(ConnectionStatus.Connected, other.id, "Elsewhere", other, connectedSinceMillis = 2)
         assertNull("another profile's connection: nothing to reconnect", vm.uiState.value.confirmReconnect)
+        // A tap that reaches the question in the frame it closed in does nothing.
+        vm.saveAndReconnect()
         assertFalse(vm.uiState.value.saved)
         assertEquals("nothing saved", 1080, repository.get(saved.id)?.port)
 

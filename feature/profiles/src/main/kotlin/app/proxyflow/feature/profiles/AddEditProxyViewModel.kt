@@ -188,8 +188,12 @@ class AddEditProxyViewModel(
      */
     fun save() = save(reconnect = false)
 
-    /** D9's "Save and reconnect": saves, then the connection runs again with what was saved (J11). */
+    /**
+     * D9's "Save and reconnect": saves, then the connection runs again with what was saved (J11). A tap that reaches the
+     * question after it closed (the connection ended in the same frame) does nothing: it was closed, not applied.
+     */
     fun saveAndReconnect() {
+        if (state.value.confirmReconnect == null) return
         state.update { it.copy(confirmReconnect = null) }
         save(reconnect = true)
     }

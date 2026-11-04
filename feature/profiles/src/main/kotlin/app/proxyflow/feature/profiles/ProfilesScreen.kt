@@ -100,9 +100,9 @@ fun ProfilesScreen(
     // "Use this proxy" while a connection runs on another saved profile switches it (J11): asked first, as Home's picker
     // says it before the tap, in the words for the connection's state — once connected, traffic is held until the new
     // proxy is checked; during a first connect, the other proxy is checked instead. A connection whose profile was
-    // deleted has none to name: the session blocks it as soon as it sees the deletion (VpnRuntime's watch), and the
-    // switch is its way out, at once. The question closes, not applied, if the connection or either profile goes away
-    // meanwhile.
+    // deleted has none to name: the session stops it as soon as it sees the deletion (VpnRuntime's watch) — once
+    // connected, blocked, and the switch is that block's way out, at once. The question closes, not applied, if the
+    // connection or either profile goes away meanwhile.
     var pendingUseId by rememberSaveable { mutableStateOf<String?>(null) }
     val switchingFrom = state.profiles.firstOrNull { it.id == state.connectedProfileId }
     val snackbar = remember { SnackbarHostState() }

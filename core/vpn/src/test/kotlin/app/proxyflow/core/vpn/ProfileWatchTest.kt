@@ -4,6 +4,7 @@ import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -78,27 +82,54 @@ class ProfileWatchTest {
         state.value = connectedOn(office)
 
         val failed = "profiles can't be read (IllegalStateException); trying again"
-        eventually("both watches logged it and tried again") { calls.count(failed) >= 4 }
+        eventually("logged, and tried again") { calls.count(failed) >= 4 }
         assertEquals(0, calls.count("deleted") + calls.count("renamed"))
         assertTrue("nothing escaped to the app's scope", job.isActive)
     }
 
-    /** A read that fails once is tried again, so a deletion after Room recovers still ends the connection. */
+    /** Each watch's first read fails: both are tried again, so a rename and a deletion after Room recovers still count. */
     @Test
-    fun aDeletionAfterAFailedReadStillEndsTheConnection() {
+    fun bothWatchesGoOnAfterAFailedRead() {
         val reads = AtomicInteger()
         watch(
             flow {
-                if (reads.getAndIncrement() == 0) throw IllegalStateException("disk")
+                if (reads.getAndIncrement() < 2) throw IllegalStateException("disk")
                 emitAll(profiles)
             },
         )
         state.value = connectedOn(office)
         eventually("read again") { "renamed office Office" in calls.all }
+        profiles.value = listOf(office.copy(name = "Office 2"), home)
+        eventually("the rename watch went on") { "renamed office Office 2" in calls.all }
         profiles.value = listOf(home)
 
-        eventually("the connection's profile deleted") { "deleted office" in calls.all }
-        assertEquals(1, calls.count("profiles can't be read"))
+        eventually("the deletion watch went on") { "deleted office" in calls.all }
+        assertEquals("one failure each", 2, calls.count("profiles can't be read"))
+    }
+
+    /** The wait doubles with the failures in a row, and starts over after a good read. */
+    @Test
+    fun aFailedReadIsTriedAgainAndItsWaitStartsOverAfterAGoodRead() = runBlocking {
+        val waits = CopyOnWriteArrayList<Long>()
+        var reads = 0
+        val source = flow {
+            when (reads++) {
+                0, 1 -> throw IllegalStateException("disk")
+                2 -> {
+                    emit(listOf(office))
+                    throw IllegalStateException("disk")
+                }
+                else -> emit(listOf(home))
+            }
+        }
+        val read = source.retryReading(calls::add) { inARow ->
+            waits += inARow
+            1
+        }.take(2).toList()
+
+        assertEquals(listOf(listOf(office), listOf(home)), read)
+        assertEquals("two in a row, then one after a good read", listOf(0L, 1L, 0L), waits)
+        assertEquals(3, calls.count("profiles can't be read (IllegalStateException); trying again"))
     }
 
     @Test

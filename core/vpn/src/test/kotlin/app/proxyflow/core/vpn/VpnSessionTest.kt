@@ -300,9 +300,13 @@ class VpnSessionTest {
         assertTrue(state.history.none { it.status == ConnectionStatus.Reconnecting || it.status == ConnectionStatus.Blocked })
     }
 
-    /** The same while Android routes apps into the first interface: it is closed, not kept holding traffic. */
+    /**
+     * The same while Android routes apps into the first interface: it is closed, not kept holding traffic. Android's
+     * routing wait outlasts the test, so only the reconnect can end the attempt — with the new settings' failure.
+     */
     @Test
     fun aReconnectWhileAndroidRoutesTheFirstInterfaceReleasesIt() {
+        session = newSession(timing = TIMING.copy(routingTimeoutMillis = 60_000))
         val profile = save(name = "Tokyo")
         host.routes = false
         session.connect(profile.id)
@@ -314,6 +318,8 @@ class VpnSessionTest {
 
         val ended = awaitError()
         assertEquals(ConnectionStatus.Disconnected, ended.status)
+        assertEquals("the new settings' failure", "PROXY_UNREACHABLE", ended.error?.code)
+        assertTrue("the new settings were checked", "probe edited.example.com" in engine.servers)
         assertTrue("the first interface is closed, not kept holding traffic", host.tuns.single().closed)
         assertTrue(state.history.none { it.status == ConnectionStatus.Reconnecting || it.status == ConnectionStatus.Blocked })
     }

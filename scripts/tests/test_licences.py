@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import licences  # noqa: E402
@@ -137,7 +138,9 @@ class NoticesTest(unittest.TestCase):
         self.assertEqual(2, len(problems), "neither the toolchain nor the modules can be read")
 
     def test_the_engines_own_module_is_not_a_notice(self) -> None:
-        # What gomobile's bind links: the engine as a dependency of its generated main package, built from the checkout.
+        # What gomobile's bind links: the engine as a dependency of its generated main package, built from the checkout —
+        # here the runner's, where CI builds the engine and checks the notices.
+        self.enterContext(mock.patch.object(licences, "CHECKOUT_ENGINE", "/home/runner/work/app/app/engine"))
         own = ["  github.com/bibekthapamgr/app/engine v0.0.0-00010101000000-000000000000", "  => /home/runner/work/app/app/engine (devel)"]
         # Facts written before build-aar.sh marked replacements put the directory on a line of its own.
         unmarked = [own[0], "  /home/runner/work/app/app/engine (devel)"]
@@ -154,6 +157,7 @@ class NoticesTest(unittest.TestCase):
         self.assertEqual(["the engine links example.com/fork/engine v1.0.0, which docs/m4/dependency-review.md hasn't reviewed"], problems)
 
     def test_the_engines_module_from_another_directory_is_not_skipped(self) -> None:
+        self.enterContext(mock.patch.object(licences, "CHECKOUT_ENGINE", "/home/runner/work/app/app/engine"))
         facts = FACTS + ["  github.com/bibekthapamgr/app/engine v0.0.0-00010101000000-000000000000", "  => /home/runner/work/fork (devel)"]
         _, problems = licences.notices(TREE, facts, fetch(POMS))
         self.assertEqual(
@@ -163,10 +167,15 @@ class NoticesTest(unittest.TestCase):
             ],
             problems,
         )
-        for checkout in ("/home/runner/work/app/app/engine", "../engine", "./engine/"):
+        for checkout in ("/home/runner/work/app/app/engine", "/home/runner/work/app/app/engine/", "/home/runner/work/app/app/x/../engine"):
             self.assertTrue(licences.is_checkout_engine(checkout), checkout)
-        for other in ("/home/runner/work/fork", "/tmp/engine-fork", "engine", "example.com/engine"):
+        for other in ("/tmp/fork/engine", "/home/runner/work/fork", "../engine", "engine", "example.com/engine"):
             self.assertFalse(licences.is_checkout_engine(other), other)
+
+    def test_the_checkout_engine_is_this_checkouts(self) -> None:
+        here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+        self.assertEqual(os.path.join(here, "engine"), licences.CHECKOUT_ENGINE)
+        self.assertTrue(os.path.isfile(os.path.join(licences.CHECKOUT_ENGINE, "go.mod")))
 
     def test_another_module_built_from_a_local_directory_fails(self) -> None:
         facts = FACTS + ["  golang.org/x/sys v0.48.0", "  => /home/runner/work/sys (devel)"]

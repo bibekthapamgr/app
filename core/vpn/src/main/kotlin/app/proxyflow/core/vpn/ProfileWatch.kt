@@ -8,9 +8,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.launch
 
@@ -21,8 +24,8 @@ import kotlinx.coroutines.launch
  *   connection reaches its proxy, so nothing reconnects.
  *
  * The profiles ([profiles], Room) are read only while a connection exists. A failure reading them is logged ([log]) and
- * the read tried again after [retryDelayMillis] — never left to end the process the VPN runs in, and never the end of
- * the watch: a deletion after Room recovers still stops the connection.
+ * the read tried again ([retryReading]) — never left to end the process the VPN runs in, and never the end of the watch:
+ * a deletion after Room recovers still stops the connection.
  */
 internal fun CoroutineScope.watchConnectionProfile(
     state: Flow<ConnectionState>,
@@ -30,14 +33,10 @@ internal fun CoroutineScope.watchConnectionProfile(
     deleted: (profileId: String) -> Unit,
     renamed: (profileId: String, name: String) -> Unit,
     log: (String) -> Unit,
-    retryDelayMillis: (attempt: Long) -> Long = ::profileReadRetryDelay,
+    retryDelayMillis: (failuresInARow: Long) -> Long = ::profileReadRetryDelay,
 ): Job {
     val connection = state.map { s -> s.profileId?.takeIf { s.active } }.distinctUntilChanged()
-    val readable = profiles.retryWhen { e, attempt ->
-        log("profiles can't be read (${e.javaClass.simpleName}); trying again")
-        delay(retryDelayMillis(attempt))
-        true
-    }
+    val readable = profiles.retryReading(log, retryDelayMillis)
     return launch {
         launch {
             connection.collectLatest { id ->
@@ -57,5 +56,23 @@ internal fun CoroutineScope.watchConnectionProfile(
     }
 }
 
-/** 1 s after the first failure, doubling up to 30 s between tries: a store that stays broken fills no log. */
-internal fun profileReadRetryDelay(attempt: Long): Long = minOf(1_000L shl attempt.coerceAtMost(5).toInt(), 30_000L)
+/**
+ * The profiles, read again after each failure: logged ([log]), then tried again after [delayMillis] of the failures in a
+ * row so far (0 for the first). A good read starts the count over. Cancellation and failures downstream are not retried.
+ */
+internal fun Flow<List<ProxyProfile>>.retryReading(
+    log: (String) -> Unit,
+    delayMillis: (failuresInARow: Long) -> Long,
+): Flow<List<ProxyProfile>> = flow {
+    var inARow = 0L
+    emitAll(
+        onEach { inARow = 0 }.retryWhen { e, _ ->
+            log("profiles can't be read (${e.javaClass.simpleName}); trying again")
+            delay(delayMillis(inARow++))
+            true
+        },
+    )
+}
+
+/** 1 s after the first failure in a row, doubling up to 30 s between tries: a store that stays broken fills no log. */
+internal fun profileReadRetryDelay(failuresInARow: Long): Long = minOf(1_000L shl failuresInARow.coerceAtMost(5).toInt(), 30_000L)

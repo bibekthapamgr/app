@@ -42,8 +42,13 @@ fun PfProfileTestLine(profile: ProxyProfile, lastTest: ProfileTest?, testing: Bo
     val announced = if (testing || justEnded) modifier.semantics { liveRegion = LiveRegionMode.Polite } else modifier
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     val style = MaterialTheme.typography.bodySmall
-    // The icon stays beside the first line when a large font wraps the words over several.
-    val line = if (style.lineHeight.isSp) with(LocalDensity.current) { style.lineHeight.toDp() } else ICON_SIZE
+    // The icon stays beside the first line when a large font wraps the words over several. A line is as tall as Compose
+    // draws it: the line height in proportion to the font size as Android scales it (non-linearly, from Android 14).
+    val line = if (style.lineHeight.isSp && style.fontSize.isSp) {
+        with(LocalDensity.current) { style.fontSize.toDp() } * (style.lineHeight.value / style.fontSize.value)
+    } else {
+        ICON_SIZE
+    }
     val icon = Modifier.padding(top = ((line - ICON_SIZE) / 2).coerceAtLeast(0.dp)).size(ICON_SIZE)
     val words = Modifier.padding(top = ((ICON_SIZE - line) / 2).coerceAtLeast(0.dp))
     when {

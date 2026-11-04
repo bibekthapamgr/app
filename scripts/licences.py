@@ -88,11 +88,15 @@ OVERRIDES: dict[str, tuple[str, str, str]] = {
 # The engine's own module: gomobile links it into libgojni.so as a dependency of the main package it generates, replaced
 # by the local directory ("=> /…/engine (devel)"). ProxyFlow's own code, not a third-party notice.
 OWN_GO_MODULE = "github.com/bibekthapamgr/app/engine"
+# This checkout's engine directory: CI builds the engine and checks its notices in the same place (the runner's
+# workspace), so gomobile's replacement names exactly this directory.
+CHECKOUT_ENGINE = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "engine")
 
 
 def is_checkout_engine(directory: str) -> bool:
-    """The checkout's engine directory, as gomobile's bind replaces the engine's module with it ("/…/engine")."""
-    return directory.startswith(("/", ".")) and directory.rstrip("/").rsplit("/", 1)[-1] == "engine"
+    """Whether [directory] is this checkout's engine directory, as gomobile's bind replaces the engine's module with it."""
+    return os.path.isabs(directory) and os.path.realpath(directory) == os.path.realpath(CHECKOUT_ENGINE)
+
 
 Fetch = Callable[[str], "bytes | None"]
 
