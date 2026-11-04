@@ -9,7 +9,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.proxyflow.core.data.crypto.AesGcmCredentialCipher
 import app.proxyflow.core.data.crypto.CredentialCodec
 import app.proxyflow.core.data.db.MIGRATION_1_2
+import app.proxyflow.core.data.db.MIGRATION_2_3
 import app.proxyflow.core.data.db.ProxyFlowDatabase
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.testing.InMemoryActiveProfileStore
 import app.proxyflow.core.testing.SoftwareSecretKeyStore
@@ -19,6 +21,8 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Rule
@@ -51,7 +55,7 @@ class DatabaseMigrationTest {
     private fun appDatabase() = ProxyFlowDatabase.create(context, name).also { opened += it }
 
     @Test
-    fun version1ProfilesAndTheirCredentialsSurviveTheMigrationTo2() = runTest {
+    fun version1ProfilesAndTheirCredentialsSurviveTheMigrations() = runTest {
         // Version 1 sealed each profile's credentials under one key named after the profile.
         val keys = SoftwareSecretKeyStore()
         val sealed = AesGcmCredentialCipher(keys, newKeyId = { "p1" })
@@ -70,7 +74,7 @@ class DatabaseMigrationTest {
         }
 
         // Room checks the migrated tables against the current schema.
-        helper.runMigrationsAndValidate(name, 2, true, MIGRATION_1_2).close()
+        helper.runMigrationsAndValidate(name, CURRENT_VERSION, true, MIGRATION_1_2, MIGRATION_2_3).close()
 
         val repository = DefaultProfileRepository(
             RoomProfileStore(appDatabase().profileDao()),
@@ -88,6 +92,31 @@ class DatabaseMigrationTest {
         repository.save("p1", ProxyProfileInput.from(repository.get("p1")!!, "office-user").copy(password = "new-pass"))
         assertEquals("new-pass", String((repository.readCredentials("p1") as CredentialsRead.Available).password))
         assertTrue(AesGcmCredentialCipher.aliasFor("p1") !in keys.aliases())
+    }
+
+    /** Version 3 (M9) keeps each profile's last connection test; profiles from before have none, and nothing else changes. */
+    @Test
+    fun version2ProfilesKeepEverythingAndHaveNoTestYet() = runTest {
+        helper.createDatabase(name, 2).apply {
+            execSQL(
+                "INSERT INTO profiles (id, name, protocol, host, port, tls_mode, requires_sign_in, created_at, updated_at) " +
+                    "VALUES ('p1', 'Office', 'HTTP', '203.0.113.10', 3128, 'None', 0, 10, 20)",
+            )
+            close()
+        }
+        helper.runMigrationsAndValidate(name, CURRENT_VERSION, true, MIGRATION_2_3).close()
+
+        val store = RoomProfileStore(appDatabase().profileDao())
+        val record = store.get("p1")!!
+        assertEquals("Office", record.name)
+        assertEquals(20L, record.updatedAtMillis)
+        assertNull("never tested", record.lastTest)
+
+        // The test is written without touching the profile itself (its save time is how a result is matched to it).
+        assertTrue(store.recordTest("p1", ProfileTest(30L, code = "AUTH_FAILED", latencyMillis = null)))
+        assertEquals(ProfileTest(30L, code = "AUTH_FAILED", latencyMillis = null), store.get("p1")!!.lastTest)
+        assertEquals(20L, store.get("p1")!!.updatedAtMillis)
+        assertFalse("no such profile", store.recordTest("p404", ProfileTest(30L, code = null, latencyMillis = 5)))
     }
 
     @Test
@@ -127,6 +156,6 @@ class DatabaseMigrationTest {
     }
 
     private companion object {
-        const val CURRENT_VERSION = 2
+        const val CURRENT_VERSION = 3
     }
 }

@@ -22,6 +22,17 @@ udp-sink ADDRESS PORT LOG
     UDP that must never arrive (ProxyFlow rejects UDP on the phone): every datagram
     that does is logged with its peer and length, and answered.
 
+bulk ADDRESS PORT LOG
+    The traffic counters' controlled transfers (M7). Each connection sends one line:
+        UP N      then N bytes; the server reads them and answers "GOT <bytes read>"
+        DOWN N    the server sends N bytes (a fixed pattern)
+    and the server then waits for the client to close (at most LINGER_MAX_S), so the connection
+    stays open while the test reads the engine's own count for it.
+        HOLD S    the server sends nothing and keeps the connection open until the
+                  client ends it or S seconds pass (the network-change test ends it)
+    Every request is logged with its peer and what happened: "up N got=G",
+    "down N sent=S", "hold S ended after X s (closed|reset|data|timeout)".
+
 gate ADDRESS PORT CONTROL_PORT UPSTREAM LOG
     A proxy the tests can break while connected. Each connection it accepts is relayed
     to UPSTREAM (host:port, a real proxy) or not, depending on its mode, which the
@@ -144,6 +155,75 @@ async def udp_sink(address: str, port: int, log_path: str) -> None:
     loop = asyncio.get_running_loop()
     await loop.create_datagram_endpoint(Sink, local_addr=(address, port), family=family)
     await asyncio.Event().wait()
+
+
+BULK_MAX = 64 * 1024 * 1024
+HOLD_MAX_S = 600
+LINGER_MAX_S = 60
+
+
+async def bulk(address: str, port: int, log_path: str) -> None:
+    log = open(log_path, "a", buffering=1, encoding="utf-8")
+    pattern = bytes(range(256)) * 256  # 64 KiB
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        peer = peer_of(writer)
+        try:
+            line = await asyncio.wait_for(reader.readline(), timeout=10)
+        except (asyncio.TimeoutError, ConnectionError):
+            line = b""
+        words = line.decode("ascii", "replace").split()
+        request = words[0] if words else "-"
+        try:
+            if len(words) == 2 and request in ("UP", "DOWN") and words[1].isdigit() and int(words[1]) <= BULK_MAX:
+                n = int(words[1])
+                if request == "UP":
+                    got = 0
+                    try:
+                        while got < n:
+                            chunk = await asyncio.wait_for(reader.read(min(65536, n - got)), timeout=30)
+                            if not chunk:
+                                break
+                            got += len(chunk)
+                    except (asyncio.TimeoutError, ConnectionError):
+                        pass
+                    log.write(f"{stamp()} {peer} up {n} got={got}\n")
+                    writer.write(f"GOT {got}\n".encode("ascii"))
+                    await writer.drain()
+                else:
+                    sent = 0
+                    while sent < n:
+                        chunk = pattern[: min(len(pattern), n - sent)]
+                        writer.write(chunk)
+                        await writer.drain()
+                        sent += len(chunk)
+                    log.write(f"{stamp()} {peer} down {n} sent={sent}\n")
+                try:  # the client closes once the test has read the engine's count
+                    while await asyncio.wait_for(reader.read(65536), timeout=LINGER_MAX_S):
+                        pass
+                except (asyncio.TimeoutError, ConnectionError):
+                    pass
+            elif len(words) == 2 and request == "HOLD" and words[1].isdigit() and int(words[1]) <= HOLD_MAX_S:
+                seconds = int(words[1])
+                start = time.monotonic()
+                try:
+                    data = await asyncio.wait_for(reader.read(1), timeout=seconds)
+                    how = "data" if data else "closed"
+                except asyncio.TimeoutError:
+                    how = "timeout"
+                except ConnectionError:
+                    how = "reset"
+                log.write(f"{stamp()} {peer} hold {seconds} ended after {time.monotonic() - start:.1f} s ({how})\n")
+            else:
+                log.write(f"{stamp()} {peer} bad request {line[:40]!r}\n")
+        except ConnectionError:
+            log.write(f"{stamp()} {peer} {request.lower()} reset\n")
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handle, address, port)
+    async with server:
+        await server.serve_forever()
 
 
 class Gate:
@@ -269,6 +349,8 @@ def main(argv: list[str]) -> int:
         asyncio.run(tls_destination(argv[2], int(argv[3]), argv[4], argv[5]))
     elif len(argv) == 5 and argv[1] == "udp-sink":
         asyncio.run(udp_sink(argv[2], int(argv[3]), argv[4]))
+    elif len(argv) == 5 and argv[1] == "bulk":
+        asyncio.run(bulk(argv[2], int(argv[3]), argv[4]))
     elif len(argv) == 7 and argv[1] == "gate":
         asyncio.run(gate(argv[2], int(argv[3]), int(argv[4]), argv[5], argv[6]))
     else:

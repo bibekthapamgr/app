@@ -37,6 +37,12 @@
 #   HTTPS                10.99.0.1:8443   secure.proxyflow.test, the test CA's certificate
 #   UDP sink             10.99.0.1:9999 and [fd99::1]:9999: UDP must never arrive
 #
+# The witness (M8) is the other way round: 127.0.0.1:8095, which the phone reaches directly as 10.0.2.2:8095 but a
+# proxy never can (Dante would connect to 10.0.2.2:8095, where nothing listens; Squid refuses the port, not one of its
+# tunnel_ports). Every line it logs got out around
+# ProxyFlow: scripts/m8_failure_injection.sh sends lines to it after ProxyFlow's process is killed, where only Android's
+# "Block connections without VPN" can stop them.
+#
 # The passwords are random for each run and masked in the log; the tests read them from a file
 # pushed to the emulator (scripts/e2e_device.sh), never from a command line. After the checks at
 # the end, log-baseline.properties records how long each log was, so the evidence counts only
@@ -86,7 +92,7 @@ CA_SHA256="$(cat "$PF/pki/destination.sha256")"
 
 # Every log, readable by the evidence scripts whoever writes them.
 LOGS="danted.log squid-access.log squid-cache.log destination.log sink.log destination-address.log destination6.log
-      destination-lan.log tls-destination.log udp-sink.log gate.log stunnel.log dns-proxies.log dns-uplink.log"
+      destination-lan.log tls-destination.log udp-sink.log gate.log stunnel.log dns-proxies.log dns-uplink.log bulk.log witness.log"
 for log in $LOGS; do
     touch "$PF/$log"
     chmod 0666 "$PF/$log"
@@ -175,7 +181,7 @@ auth_param basic program /usr/lib/squid/basic_ncsa_auth $PF/squid-passwd
 auth_param basic realm ProxyFlow test proxy
 auth_param basic children 2
 acl authed proxy_auth REQUIRED
-acl tunnel_ports port 443 8080 8082 8443
+acl tunnel_ports port 443 8080 8082 8090 8443
 acl CONNECT method CONNECT
 http_access deny CONNECT !tunnel_ports
 http_access allow authed
@@ -230,6 +236,8 @@ server udp-sink udp-sink 10.99.0.1 9999 "$PF/udp-sink.log"
 server udp-sink6 udp-sink fd99::1 9999 "$PF/udp-sink.log"
 server silent silent 127.0.0.1 1081
 server gate gate 127.0.0.1 1090 1091 127.0.0.1:1080 "$PF/gate.log"
+server bulk bulk 10.99.0.1 8090 "$PF/bulk.log"
+server witness destination 127.0.0.1 8095 "$PF/witness.log"
 
 # What the tests read on the emulator. The CA certificate goes there too (proxyflow-ca.pem).
 cat > "$PF/e2e.properties" <<EOF
@@ -266,6 +274,8 @@ https.name=secure.proxyflow.test
 https.port=8443
 https.sha256=$CA_SHA256
 udp.port=9999
+bulk.port=8090
+witness.port=8095
 ca.path=/data/local/tmp/proxyflow-ca.pem
 EOF
 chmod 0644 "$PF/e2e.properties"
@@ -290,4 +300,4 @@ for log in $LOGS; do
     echo "$log=$(sudo wc -l < "$PF/$log")" >> "$PF/log-baseline.properties"
 done
 chmod 0644 "$PF/log-baseline.properties"
-echo "::notice title=E2E lab::Dante $(danted -v 2>&1 | head -1) on :1080 (SOCKS5, sign-in, IPv4 and IPv6, out through $EXTERNAL_IF and lo); $(squid -v | head -1) on :3128; stunnel TLS fronts :3129 :1443 (valid) :3130 (wrong name) :3131 (expired) :3132 (untrusted CA); gate :1090; silent :1081; closed :1082; DNS 10.99.0.53 for the proxies and 10.99.0.54 for the phone's uplink, both logging (upstream $UPSTREAM_DNS); destinations proxyflow.test = 10.99.0.1:8080, 10.99.0.2:8080, [fd99::1]:8080 (also proxyflow6.test), LAN 10.0.2.2:8082, HTTPS secure.proxyflow.test:8443, sink :8081, UDP sinks :9999. Every check from the runner passed."
+echo "::notice title=E2E lab::Dante $(danted -v 2>&1 | head -1) on :1080 (SOCKS5, sign-in, IPv4 and IPv6, out through $EXTERNAL_IF and lo); $(squid -v | head -1) on :3128; stunnel TLS fronts :3129 :1443 (valid) :3130 (wrong name) :3131 (expired) :3132 (untrusted CA); gate :1090; silent :1081; closed :1082; DNS 10.99.0.53 for the proxies and 10.99.0.54 for the phone's uplink, both logging (upstream $UPSTREAM_DNS); destinations proxyflow.test = 10.99.0.1:8080, 10.99.0.2:8080, [fd99::1]:8080 (also proxyflow6.test), LAN 10.0.2.2:8082, HTTPS secure.proxyflow.test:8443, sink :8081, UDP sinks :9999, bulk transfers proxyflow.test:8090. Every check from the runner passed."

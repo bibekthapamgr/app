@@ -126,6 +126,11 @@ func (s *Server) serveSOCKS5(c net.Conn) {
 		s.socksReply(c, 0x07, nil)
 		return
 	}
+	if s.cfg.StallConnect {
+		decide("stalled")
+		_, _ = io.Copy(io.Discard, br) // until the client gives up
+		return
+	}
 	if s.cfg.SOCKSReply != 0 {
 		decide("scripted")
 		s.socksReply(c, s.cfg.SOCKSReply, nil)

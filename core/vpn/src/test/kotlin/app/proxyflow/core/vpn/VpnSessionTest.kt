@@ -69,7 +69,7 @@ class VpnSessionTest {
         engine = engine,
         services = {
             serviceStarts.incrementAndGet()
-            if (serviceStartAllowed && serviceAttaches) session.attach(host, alwaysOn = false)
+            if (serviceStartAllowed && serviceAttaches) session.attach(host, alwaysOn = false, startId = host.started())
             serviceStartAllowed
         },
         state = state,
@@ -117,8 +117,8 @@ class VpnSessionTest {
         assertEquals(0, host.aborts.get())
         assertEquals(TunConfig("198.18.0.1", "fd00:66::1", "198.18.0.2", mtu = 9000), host.lastConfig)
         assertEquals(
-            "status before Connected: checking, then starting protection",
-            listOf(ConnectStep.CheckingProxy, ConnectStep.StartingProtection),
+            "status before Connected: the brief's stages, in order (ADR-0012)",
+            listOf(ConnectStep.Starting, ConnectStep.VpnPermission, ConnectStep.ProxyHandshake, ConnectStep.Authenticated),
             state.history.filter { it.status == ConnectionStatus.Connecting }.map { it.step }.distinct(),
         )
         assertEquals(ConnectionStatus.Connected, host.statuses.last().status)
@@ -250,6 +250,177 @@ class VpnSessionTest {
         // What was held is dropped before the next engine runs, never delivered through the next proxy later.
         assertEquals(0, host.tuns.single().queued)
         assertTrue(log.indexOf("drain fd=100") in 0 until log.indexOf("start ${second.id} fd=100 mtu=9000"))
+    }
+
+    /** Board D9 (M9): "Save and reconnect" runs the connection again with what was saved, on the same interface (J11). */
+    @Test
+    fun reconnectingAfterAnEditRunsTheSavedSettingsOnTheSameInterface() {
+        val profile = save(name = "Tokyo")
+        session.connect(profile.id)
+        awaitStatus(ConnectionStatus.Connected)
+        runBlocking { profiles.repository.save(profile.id, input(name = "Tokyo", server = "edited.example.com")) }
+        engine.gate = CountDownLatch(1)
+
+        session.reconnect(profile.id)
+        val reconnecting = awaitStatus(ConnectionStatus.Reconnecting)
+        assertEquals("edited.example.com", reconnecting.profile?.host)
+        eventually("the new settings are checked") { "probe edited.example.com" in engine.servers }
+        assertFalse("its flows end", engine.running)
+        assertFalse("the interface holds traffic meanwhile", host.tuns.single().closed)
+        engine.gate?.countDown()
+        val connected = awaitStatus(ConnectionStatus.Connected)
+
+        assertEquals("edited.example.com", connected.profile?.host)
+        assertEquals(
+            listOf("probe proxy.example.com", "start proxy.example.com", "probe edited.example.com", "start edited.example.com"),
+            engine.servers.toList(),
+        )
+        assertEquals("no second interface", 1, log.count("establish"))
+    }
+
+    /**
+     * D9 during a first connect says the new settings are checked instead and the phone's network stays as it is: the
+     * reconnect holds nothing, and a failure of the new settings ends the attempt — never Reconnecting or Blocked.
+     */
+    @Test
+    fun aReconnectDuringTheFirstCheckHoldsNothing() {
+        val profile = save(name = "Tokyo")
+        engine.gate = CountDownLatch(1)
+        session.connect(profile.id)
+        awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}")
+        runBlocking { profiles.repository.save(profile.id, input(name = "Tokyo", server = "edited.example.com")) }
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        session.reconnect(profile.id)
+        eventually("the new settings are checked") { "probe edited.example.com" in engine.servers }
+        engine.gate?.countDown()
+
+        val ended = awaitError()
+        assertEquals(ConnectionStatus.Disconnected, ended.status)
+        assertTrue("nothing established: ${log.all}", host.tuns.isEmpty())
+        assertTrue(state.history.none { it.status == ConnectionStatus.Reconnecting || it.status == ConnectionStatus.Blocked })
+    }
+
+    /**
+     * The same while Android routes apps into the first interface: it is closed, not kept holding traffic. Android's
+     * routing wait outlasts the test, so only the reconnect can end the attempt — with the new settings' failure.
+     */
+    @Test
+    fun aReconnectWhileAndroidRoutesTheFirstInterfaceReleasesIt() {
+        session = newSession(timing = TIMING.copy(routingTimeoutMillis = 60_000))
+        val profile = save(name = "Tokyo")
+        host.routes = false
+        session.connect(profile.id)
+        awaitLog("start ${profile.id} fd=100 mtu=9000")
+        assertEquals(ConnectionStatus.Connecting, state.value.status)
+        runBlocking { profiles.repository.save(profile.id, input(name = "Tokyo", server = "edited.example.com")) }
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        session.reconnect(profile.id)
+
+        val ended = awaitError()
+        assertEquals(ConnectionStatus.Disconnected, ended.status)
+        assertEquals("the new settings' failure", "PROXY_UNREACHABLE", ended.error?.code)
+        assertTrue("the new settings were checked", "probe edited.example.com" in engine.servers)
+        assertTrue("the first interface is closed, not kept holding traffic", host.tuns.single().closed)
+        assertTrue(state.history.none { it.status == ConnectionStatus.Reconnecting || it.status == ConnectionStatus.Blocked })
+    }
+
+    @Test
+    fun reconnectingAProfileWithoutItsConnectionDoesNothing() {
+        val first = save(name = "Tokyo")
+        val second = save(name = "Office")
+        session.reconnect(first.id)
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Disconnected, state.value.status)
+
+        session.connect(first.id)
+        awaitStatus(ConnectionStatus.Connected)
+        session.reconnect(second.id)
+        runBlocking { session.awaitIdle() }
+
+        assertEquals(first.id, state.value.profileId)
+        assertEquals(ConnectionStatus.Connected, state.value.status)
+        assertEquals("another profile's connection is left alone", 1, log.count("probe"))
+    }
+
+    /**
+     * Board B8 and Profiles' "Use this proxy" (M9): picking another profile switches only a connection that exists when the
+     * session gets to it, and a Stop asked before the pick is never undone by it.
+     */
+    @Test
+    fun pickingAnotherProfileSwitchesOnlyAConnectionThatExists() {
+        val first = save(name = "Tokyo")
+        val second = save(name = "Office")
+        session.switchIfActive(second.id)
+        runBlocking { session.awaitIdle() }
+        assertEquals("nothing runs: picking connects nothing", ConnectionStatus.Disconnected, state.value.status)
+        assertEquals(0, log.count("probe"))
+
+        session.connect(first.id)
+        awaitStatus(ConnectionStatus.Connected)
+        session.switchIfActive(first.id)
+        runBlocking { session.awaitIdle() }
+        assertEquals("its own connection: nothing to switch", 1, log.count("probe"))
+
+        session.switchIfActive(second.id)
+        eventually("switched") { state.value.profileId == second.id && state.value.status == ConnectionStatus.Connected }
+        assertEquals("one interface for the whole connection", 1, log.count("establish"))
+
+        session.disconnect()
+        session.switchIfActive(first.id)
+        awaitStatus(ConnectionStatus.Disconnected)
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Disconnected, state.value.status)
+        assertEquals("the pick after the Stop started nothing", 2, log.count("probe"))
+    }
+
+    /** A rename while connected shows at once — the state the notification, the tile and Home read — and changes nothing else. */
+    @Test
+    fun aRenameOfTheConnectionsProfileShowsAtOnce() {
+        val profile = save(name = "Tokyo")
+        val other = save(name = "Office")
+        session.connect(profile.id)
+        awaitStatus(ConnectionStatus.Connected)
+        val shown = host.statuses.size
+
+        session.profileRenamed(profile.id, "Tokyo (home)")
+        eventually("renamed") { state.value.profileName == "Tokyo (home)" }
+        assertEquals("Tokyo (home)", state.value.profile?.name)
+        assertEquals(ConnectionStatus.Connected, state.value.status)
+        assertTrue("the notification was drawn again", host.statuses.size > shown)
+        assertEquals("Tokyo (home)", host.statuses.last().profileName)
+        assertEquals("nothing reconnected", 1, log.count("probe"))
+
+        session.profileRenamed(other.id, "Elsewhere")
+        runBlocking { session.awaitIdle() }
+        assertEquals("another profile's rename changes nothing here", "Tokyo (home)", state.value.profileName)
+        session.profileRenamed(profile.id, "")
+        eventually("named by its server") { state.value.profileName == "proxy.example.com" }
+        runBlocking { session.awaitIdle() }
+        assertEquals(profile.id, state.value.profileId)
+    }
+
+    /**
+     * The Quick Settings tile (M9): its tap disconnects only a connection still Connected when the session gets to it;
+     * held or blocked traffic is left to Home's Stop, which asks first.
+     */
+    @Test
+    fun theTilesDisconnectEndsOnlyAConnectedConnection() {
+        val profile = save()
+        session.connect(profile.id)
+        awaitStatus(ConnectionStatus.Connected)
+        engine.failure!!(ConnectionError(ConnectionError.ENGINE_STOPPED, "reading the TUN interface failed"))
+        awaitStatus(ConnectionStatus.Blocked)
+
+        session.disconnectIfConnected()
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Blocked, state.value.status)
+        assertFalse("traffic stays held", host.tuns.single().closed)
+
+        session.restart()
+        awaitStatus(ConnectionStatus.Connected)
+        session.disconnectIfConnected()
+        awaitStatus(ConnectionStatus.Disconnected)
+        assertTrue(host.tuns.single().closed)
     }
 
     @Test
@@ -476,9 +647,36 @@ class VpnSessionTest {
         runBlocking { session.awaitIdle() }
         assertEquals(0, log.count("probe"))
 
-        session.attach(host, alwaysOn = false)
+        session.attach(host, alwaysOn = false, startId = host.started())
         awaitStatus(ConnectionStatus.Connected)
         assertEquals(1, serviceStarts.get())
+    }
+
+    /**
+     * Connecting and disconnecting quickly queues several starts of the service: one that reached it
+     * before the session let it go is over (the stop that followed ends the service), so the next
+     * connection waits for a newer start instead of beginning on a service that is going away.
+     */
+    @Test
+    fun aServiceStartFromBeforeItsStopIsNotUsedForTheNextConnection() {
+        val profile = save()
+        serviceAttaches = false
+        session.connect(profile.id)
+        session.attach(host, alwaysOn = false, startId = host.started())
+        awaitStatus(ConnectionStatus.Connected)
+        val queued = host.started() // reached the service; the session has not handled it yet
+
+        session.disconnect()
+        awaitStatus(ConnectionStatus.Disconnected)
+        session.connect(profile.id)
+        session.attach(host, alwaysOn = false, startId = queued)
+        runBlocking { session.awaitIdle() }
+
+        assertEquals("still waiting for the service", ConnectionStatus.Connecting, state.value.status)
+        assertEquals("no check on a service that is going away", 1, log.count("probe ${profile.id}"))
+        session.attach(host, alwaysOn = false, startId = host.started())
+        awaitStatus(ConnectionStatus.Connected)
+        assertEquals(2, log.count("probe ${profile.id}"))
     }
 
     @Test
@@ -517,14 +715,14 @@ class VpnSessionTest {
     @Test
     fun alwaysOnConnectsOnlyTheProfileTheUserChose() {
         save(name = "Fallback")
-        session.attach(host, alwaysOn = true)
+        session.attach(host, alwaysOn = true, startId = host.started())
         runBlocking { session.awaitIdle() }
         assertEquals("no explicit choice: the service stops", 1, log.count("host stop"))
         assertEquals(0, log.count("probe"))
 
         val chosen = save(name = "Chosen")
         runBlocking { profiles.repository.setActive(chosen.id) }
-        session.attach(host, alwaysOn = true)
+        session.attach(host, alwaysOn = true, startId = host.started())
 
         assertEquals(chosen.id, awaitStatus(ConnectionStatus.Connected).profileId)
     }
@@ -738,7 +936,7 @@ class VpnSessionTest {
         awaitLog("start ${profile.id} fd=100 mtu=9000")
         Thread.sleep(200)
         assertEquals("the engine runs, but apps still use the normal network", ConnectionStatus.Connecting, state.value.status)
-        assertEquals(ConnectStep.StartingProtection, state.value.step)
+        assertEquals(ConnectStep.Authenticated, state.value.step)
 
         host.routes = true
         val connected = awaitStatus(ConnectionStatus.Connected)

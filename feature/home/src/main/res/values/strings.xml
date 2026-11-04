@@ -13,7 +13,7 @@
     <string name="home_status_offline">Waiting for network</string>
 
     <!-- B2 -->
-    <string name="home_normal_network">Apps are using your normal network</string>
+    <string name="home_normal_network">Apps use your normal network unless Android\'s system kill switch is on</string>
     <string name="home_proxy_label">Proxy</string>
     <!-- TLS between this phone and the proxy, never HTTPS to sites (ADR-0005, ADR-0011). -->
     <string name="home_tls">TLS to proxy</string>
@@ -22,18 +22,27 @@
     <string name="home_connect">Connect</string>
     <string name="home_connect_unavailable">Connecting isn\'t available in this build. It saves your proxies but doesn\'t connect.</string>
 
-    <!-- B3 -->
+    <!-- B3: one row per stage of the attempt (ADR-0012) -->
     <string name="home_connecting_to">Connecting to %1$s</string>
-    <string name="home_step_permission">VPN permission granted</string>
+    <string name="home_step_getting_ready">Getting ready</string>
+    <string name="home_step_permission">VPN permission</string>
     <string name="home_step_checking">Checking proxy — TLS and sign-in</string>
-    <string name="home_step_starting">Starting the VPN</string>
+    <string name="home_step_starting">Proxy accepted — starting the VPN</string>
     <string name="home_step_done">Done</string>
     <string name="home_step_current">In progress</string>
     <string name="home_step_pending">Not started</string>
     <string name="home_connecting_note">Your phone\'s network is unchanged until the VPN starts. If the proxy check fails, nothing is switched over.</string>
+    <!-- M8: Android started ProxyFlow as Always-on VPN, whose interface comes up before the proxy is checked. -->
+    <string name="home_connecting_held_note">Android started ProxyFlow as your Always-on VPN: apps\' traffic is held until ProxyFlow reaches your proxy, never sent around it.</string>
     <string name="home_cancel">Cancel</string>
 
-    <!-- B4: what goes through the proxy and the diagnostics (ADR-0011). Counts only, never destinations. -->
+    <!-- B4: the session's traffic (ADR-0012), what goes through the proxy and the diagnostics (ADR-0011). Counts only, never destinations. -->
+    <string name="home_traffic_sent">Sent</string>
+    <string name="home_traffic_received">Received</string>
+    <string name="home_traffic_active">Active connections</string>
+    <!-- Shown until the first reading. -->
+    <string name="home_traffic_unknown">–</string>
+    <string name="home_traffic_note">Approximate: what apps sent and received through your proxy since you connected.</string>
     <string name="home_connected_note">Apps\' TCP connections go through your proxy</string>
     <string name="home_protocol_with_tls">%1$s · TLS to proxy</string>
     <string name="home_route_title">Through your proxy</string>
@@ -116,8 +125,23 @@
     <string name="home_reconnecting_to">Reconnecting to %1$s</string>
     <string name="home_reconnecting_note">Apps\' traffic is paused until the proxy answers. ProxyFlow sends nothing around it.</string>
 
+    <!-- B5: reconnecting on its own, and B7: no network (ADR-0012). Traffic is held meanwhile. -->
+    <string name="home_traffic_paused">Traffic paused — ProxyFlow sends nothing around your proxy</string>
+    <string name="home_reconnect_proxy_message">ProxyFlow is trying your proxy again. Apps stay paused until it answers.</string>
+    <string name="home_reconnect_back_online_title">Back online</string>
+    <string name="home_reconnect_back_online_message">Your phone has a network again. ProxyFlow is reconnecting to your proxy.</string>
+    <string name="home_reconnect_network_changed_title">Network changed</string>
+    <string name="home_reconnect_network_changed_message">Your phone moved to another network. ProxyFlow is reconnecting to your proxy.</string>
+    <string name="home_reconnect_attempt">Attempt %1$d of %2$d</string>
+    <string name="home_reconnect_next_try">next try in %1$d s</string>
+    <string name="home_reconnect_trying">trying now…</string>
+    <string name="home_retry_now">Retry now</string>
+    <string name="home_view_logs">View logs</string>
+    <string name="home_error_offline_title">You\'re offline</string>
+    <string name="home_error_offline_message">ProxyFlow will connect when a network is available. Traffic stays blocked meanwhile.</string>
+
     <!-- B6b (pre-flight failures) and the blocked layout -->
-    <string name="home_not_connected_note">You\'re not connected — apps are still using your normal network.</string>
+    <string name="home_not_connected_note">You\'re not connected: apps use your normal network unless Android\'s system kill switch is on.</string>
     <string name="home_blocked_note">Apps can\'t go online until this is fixed — ProxyFlow sends nothing around your proxy.</string>
     <string name="home_code">Code: %1$s</string>
     <string name="home_try_again">Try again</string>
@@ -131,7 +155,7 @@
     <!-- B6d -->
     <string name="home_error_vpn_revoked_title">Disconnected by Android</string>
     <string name="home_error_vpn_revoked_message">Another VPN app was turned on, or ProxyFlow\'s VPN permission was removed.</string>
-    <string name="home_revoked_note">Your apps are now using your normal network.</string>
+    <string name="home_revoked_note">Your apps no longer go through your proxy.</string>
     <string name="home_reconnect">Reconnect</string>
 
     <!-- B9 -->
@@ -147,42 +171,71 @@
     <string name="home_error_vpn_permission_message">ProxyFlow can\'t send your apps\' traffic to your proxy without Android\'s VPN permission. Nothing was changed on your phone.</string>
     <string name="home_not_now">Not now</string>
 
-    <!-- Error catalogue (docs/m1/04-ux-screens-and-error-states.md §4) -->
-    <string name="home_error_unreachable_title">Can\'t reach your proxy</string>
-    <string name="home_error_unreachable_message">ProxyFlow couldn\'t connect to %1$s. Check the address and port, and that the proxy is online.</string>
-    <string name="home_error_dns_title">Proxy address not found</string>
-    <string name="home_error_dns_message">%1$s couldn\'t be found. Check the spelling or use the proxy\'s IP address.</string>
-    <string name="home_error_auth_required_title">Sign-in required</string>
-    <string name="home_error_auth_required_message">This proxy needs a username and password.</string>
-    <string name="home_error_auth_failed_title">Username or password rejected</string>
-    <string name="home_error_auth_failed_message">The proxy didn\'t accept your credentials. Check them with your proxy provider.</string>
-    <string name="home_error_tls_untrusted_title">Certificate not trusted</string>
-    <string name="home_error_tls_untrusted_message">The proxy\'s certificate isn\'t from an authority this phone trusts. ProxyFlow only connects to proxies with a valid certificate, and can\'t be told to skip the check.</string>
-    <string name="home_error_tls_hostname_title">Certificate doesn\'t match</string>
-    <string name="home_error_tls_hostname_message">The certificate isn\'t valid for %1$s. Check the server name in the profile.</string>
-    <string name="home_error_tls_expired_title">Certificate expired</string>
-    <string name="home_error_tls_expired_message">The proxy\'s certificate is expired or not yet valid. Check your phone\'s date and time, or contact your provider.</string>
-    <string name="home_error_tls_handshake_title">TLS to proxy failed</string>
-    <string name="home_error_tls_handshake_message">The proxy didn\'t answer with TLS. It may not support TLS on this port. ProxyFlow never falls back to an unencrypted connection.</string>
-    <string name="home_error_protocol_title">This doesn\'t look like a %1$s proxy</string>
-    <string name="home_error_protocol_message">The server answered in an unexpected way. Check the protocol and port.</string>
-    <string name="home_error_timeout_title">Proxy isn\'t responding</string>
-    <string name="home_error_timeout_message">The proxy accepted the connection but didn\'t respond in time.</string>
-    <string name="home_error_credentials_title">Re-enter your password</string>
-    <string name="home_error_credentials_message">The saved password can\'t be read on this phone any more, so it isn\'t used. Enter it again.</string>
+    <!-- Error catalogue (docs/m1/04-ux-screens-and-error-states.md §4); the proxy's own errors are worded in
+         core/designsystem (ProxyErrors.kt), shared with the profile tests. -->
+    <!-- TLS_EXPIRED: the phone's date is often what is wrong. -->
+    <string name="home_date_settings">Date &amp; time settings</string>
+    <!-- M9: Help's topic on certificates (TLS_UNTRUSTED, TLS_HOSTNAME). -->
+    <string name="home_learn_more">Learn more about certificates</string>
     <string name="home_error_engine_stopped_title">ProxyFlow stopped unexpectedly</string>
     <string name="home_error_engine_stopped_message">The packet engine stopped while connected. Traffic stays blocked until you restart it or disconnect.</string>
-    <!-- The pre-flight check's destination-level failures (ADR-0010 §4): the proxy works, but refused or failed the test connection. -->
-    <string name="home_error_refused_title">Your proxy refused the connection</string>
-    <string name="home_error_refused_message">%1$s refused to open a test connection. Providers answer this way when a plan has ended or your network\'s address isn\'t allowed. Check your account with your proxy provider.</string>
-    <string name="home_error_proxy_failure_title">Proxy error</string>
-    <string name="home_error_proxy_failure_message">%1$s answered the test connection with an error. Check your account with your proxy provider.</string>
-    <string name="home_error_unreachable_target_title">Your proxy can\'t reach the internet</string>
-    <string name="home_error_unreachable_target_message">%1$s accepted the connection but couldn\'t open a test connection to connectivitycheck.gstatic.com. The proxy may have no internet access right now, or it blocks that address. Check with your proxy provider.</string>
-    <string name="home_error_unsupported_title">Not supported by your proxy</string>
-    <string name="home_error_unsupported_message">The proxy doesn\'t support the connections ProxyFlow needs: tunnels to a site by its name.</string>
     <string name="home_error_profile_deleted_title">Profile deleted</string>
     <string name="home_error_profile_deleted_message">The profile this connection used was deleted, so its proxy isn\'t used any more. Traffic stays blocked until you stop the connection.</string>
-    <string name="home_error_internal_title">Couldn\'t connect</string>
-    <string name="home_error_internal_message">Something on this phone stopped the connection from starting. Try again.</string>
+
+    <!-- M8: Android's system kill switch (boards B2, B6d; the guide is E2 in feature/settings). As Android last said:
+         it tells ProxyFlow only while ProxyFlow's VPN runs. -->
+    <string name="home_no_network_kill_switch">Android\'s system kill switch was on when last checked: if it still is, apps have no internet</string>
+    <string name="home_kill_switch_off">Android said at %1$s that its system kill switch is off: while it is, apps use your normal network if ProxyFlow stops while connected.</string>
+    <string name="home_kill_switch_always_on_only">Android said at %1$s that Always-on VPN is on without blocking: while it is, apps use your normal network if ProxyFlow stops while connected, until it connects again.</string>
+    <string name="home_kill_switch_unknown">If ProxyFlow stops while connected, only Android\'s system kill switch keeps apps off your normal network.</string>
+    <string name="home_kill_switch_on">Android said at %1$s that its system kill switch is on: while it is, apps have no internet when ProxyFlow isn\'t connected. To use your normal network, turn it off in Android\'s VPN settings.</string>
+    <string name="home_kill_switch_set_up">Set up system kill switch</string>
+    <string name="home_kill_switch_details">About the system kill switch</string>
+    <string name="home_prevent_title">Prevent this next time</string>
+    <string name="home_prevent_message">Turn on Always-on VPN with \u201cBlock connections without VPN\u201d so Android blocks traffic when ProxyFlow isn\'t running.</string>
+    <string name="home_not_connected_note_always_on">Apps have no internet if \u201cBlock connections without VPN\u201d is on in Android\'s VPN settings; otherwise they use your normal network.</string>
+    <string name="home_not_connected_note_kill_switch">You\'re not connected. Android\'s system kill switch was on when ProxyFlow last checked: if it still is, apps have no internet.</string>
+    <string name="home_stop_message_kill_switch">Android\'s system kill switch was on when ProxyFlow last checked: if it still is, apps will have no internet until you connect again.</string>
+
+    <!-- M8: the last process ended while connected, without the connection being stopped. -->
+    <string name="home_interrupted_title">ProxyFlow was stopped while connected</string>
+    <string name="home_interrupted_at">%1$s at %2$s.</string>
+    <string name="home_interrupted_unknown_time">%1$s some time after it connected at %2$s.</string>
+    <string name="home_interrupted_leak">Android removed the VPN with it: from then on apps used your normal network, unless Android\'s system kill switch was on.</string>
+    <string name="home_interrupted_restart_leak">After a restart ProxyFlow connects by itself only as your Always-on VPN: until then, apps use your normal network unless Android\'s system kill switch is on.</string>
+    <string name="home_interrupted_blocked">Android\'s system kill switch was on when ProxyFlow last checked before that: if it still was, apps had no internet until ProxyFlow connected again.</string>
+    <string name="home_interrupted_connected_again">ProxyFlow is connected again.</string>
+    <string name="home_interrupted_dismiss">OK</string>
+    <string name="home_exit_low_memory">Android closed ProxyFlow to free memory</string>
+    <string name="home_exit_crash">ProxyFlow stopped because of an error</string>
+    <string name="home_exit_native_crash">ProxyFlow\'s packet engine stopped because of an error</string>
+    <string name="home_exit_not_responding">Android closed ProxyFlow because it stopped responding</string>
+    <string name="home_exit_killed">ProxyFlow\'s process was ended</string>
+    <string name="home_exit_force_stopped">ProxyFlow was force-stopped</string>
+    <string name="home_exit_updated">ProxyFlow was updated</string>
+    <string name="home_exit_permission_changed">Android closed ProxyFlow after one of its permissions changed</string>
+    <string name="home_exit_phone_restarted">Your phone restarted</string>
+    <string name="home_exit_other">Android closed ProxyFlow</string>
+    <string name="home_exit_unknown">ProxyFlow stopped</string>
+
+    <!-- M8: H1 also covers H2 (another app is Always-on VPN): Android's consent screen then closes without asking. -->
+    <string name="home_error_vpn_permission_always_on">If Android didn\'t ask, another app may be set as Always-on VPN: turn that off in VPN settings, then try again.</string>
+    <string name="home_open_vpn_settings">Open VPN settings</string>
+
+    <!-- M8: reconnecting on its own, two more reasons (board B5). -->
+    <string name="home_reconnect_unanswered_title">Your proxy isn\'t answering</string>
+    <string name="home_reconnect_always_on_title">Starting as Always-on VPN</string>
+    <string name="home_reconnect_unanswered_message">Your proxy stopped answering connection requests to several sites. ProxyFlow is reconnecting; apps stay paused until it answers.</string>
+    <string name="home_reconnect_always_on_message">Android started ProxyFlow as your Always-on VPN. Apps stay paused until ProxyFlow reaches your proxy.</string>
+
+    <!-- M8: Android started ProxyFlow as Always-on VPN, but no proxy is chosen. -->
+    <string name="home_error_always_on_no_profile_title">Choose a proxy for Always-on VPN</string>
+    <string name="home_error_always_on_no_profile_message">Android started ProxyFlow as your Always-on VPN, but no proxy was chosen, so ProxyFlow didn\'t connect. Connect once with the proxy Always-on VPN should use.</string>
+    <!-- Board B8, the profile picker; picking one while a connection runs (one that started while the picker was open:
+         Always-on VPN, the Quick Settings tile) switches the connection to it (J11, ADR-0010 §5). -->
+    <string name="home_picker_title">Choose proxy</string>
+    <string name="home_picker_switch_note">ProxyFlow is using a proxy now. Choosing another one reconnects through it: any open connections end, and apps can\'t go online until it\'s connected. If that fails, apps stay offline until ProxyFlow reconnects, you try again or you stop. Nothing is sent around a proxy meanwhile.</string>
+    <!-- A first connect: apps use the normal network until it is connected, and picking only checks another proxy. -->
+    <string name="home_picker_checking_note">ProxyFlow is still checking a proxy. Choosing another one checks that one instead, and your phone\'s network stays as it is until it\'s connected.</string>
+    <string name="home_picker_manage">Manage profiles</string>
 </resources>

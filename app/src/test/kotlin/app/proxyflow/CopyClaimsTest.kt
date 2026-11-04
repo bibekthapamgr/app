@@ -60,7 +60,10 @@ class CopyClaimsTest {
     @Test
     fun everyModuleWithStringsIsRead() {
         val modules = strings.keys.map { it.substringBefore("/src/") }.toSet()
-        assertTrue("found $modules", modules.containsAll(listOf("app", "feature/home", "feature/profiles", "feature/about", "core/vpn")))
+        assertTrue(
+            "found $modules",
+            modules.containsAll(listOf("app", "feature/home", "feature/profiles", "feature/about", "feature/onboarding", "core/vpn")),
+        )
     }
 
     @Test
@@ -105,6 +108,31 @@ class CopyClaimsTest {
             "edit_plaintext_body" to listOf("HTTPS pages stay encrypted end to end"),
             "edit_tls_hint" to listOf("HTTPS sites stay encrypted end to end"),
             "vpn_notification_connected_text" to listOf("TCP", "UDP and ping blocked"),
+            // M8 (ADR-0013 §1): Android's kill switch is the user's to turn on, and ProxyFlow knows it only while connected.
+            "guide_only_you" to listOf("can't turn this on for you", "only while ProxyFlow is connected"),
+            "guide_not_restarted" to listOf("may not start it again", "stay offline"),
+            "guide_system_traffic" to listOf("outside any VPN"),
+            "settings_kill_switch_never" to listOf("only while it's connected"),
+            // M9: the first-launch pages say the limits before anything can connect (docs/m1/03 J1), and the privacy
+            // policy what is kept, what is sent where, and that nothing goes to the developer.
+            "how_udp" to listOf("UDP", "ping"),
+            "how_never_around" to listOf("never sent around your proxy", "Ping isn't answered"),
+            "how_provider" to listOf("can see which sites"),
+            "how_vpn_body" to listOf("no VPN server", "key icon", "only one VPN app"),
+            "onboarding_no_proxies" to listOf("doesn't sell or provide proxies"),
+            "privacy_stored_log" to listOf("never includes passwords, server or site names"),
+            "privacy_stored_backup" to listOf("backups"),
+            "privacy_sent_check" to listOf("connectivitycheck.gstatic.com", "Each time ProxyFlow connects or reconnects"),
+            "privacy_sent_nothing" to listOf("ProxyFlow itself sends nothing to its developer"),
+            // Google Play shows developers the crash reports phones share with Google: never "nothing reaches the developer".
+            "privacy_android_crash" to listOf("Google may show them to ProxyFlow's developer"),
+            "help_feedback_body" to listOf("collects nothing itself"),
+            "help_carry_outside" to listOf("don't use the VPN", "work profile", "Private space", "another user", "tethered"),
+            "privacy_android_outside" to listOf("doesn't use the VPN"),
+            // M9 (ADR-0014): what a connection test sends and where, what a pass leaves blocked, and what switching does.
+            "edit_test_running_note" to listOf("connectivitycheck.gstatic.com", "without sending anything", "go only to this proxy"),
+            "edit_test_passed_body" to listOf("UDP is still blocked", "ping isn't answered"),
+            "home_picker_switch_note" to listOf("open connections end", "Nothing is sent around a proxy"),
         )
         val missing = required.flatMap { (name, needles) -> needles.filterNot { it in text(name) }.map { "$name lacks \"$it\"" } }
         assertEquals(missing.joinToString("\n"), emptyList<String>(), missing)
@@ -143,6 +171,7 @@ class CopyClaimsTest {
             "No\u2011logs",
             "A system\u2011wide VPN",
             "Covers all\u2003traffic",
+            "Guarantees nothing leaks",
         )
         val missed = claims.filter { claim -> FORBIDDEN.none { (_, pattern) -> pattern.containsMatchIn(normalized(claim)) } }
         assertEquals("not recognised: $missed", emptyList<String>(), missed)
@@ -157,8 +186,9 @@ class CopyClaimsTest {
             .replace(Regex("[\\u2010-\\u2013\\u2212]"), "-")
             .replace('\u2019', '\'')
 
-        /** Claims ProxyFlow must never make (traffic matrix §5 "Must not say"). */
+        /** Claims ProxyFlow must never make (traffic matrix §5 "Must not say"; M8: no guarantee of blocking). */
         val FORBIDDEN: List<Pair<String, Regex>> = listOf(
+            "guarantee" to Regex("(?i)\\bguarantee"),
             "all traffic" to
                 Regex(
                     "(?i)\\ball\\s+(of\\s+)?(your\\s+|the\\s+|this\\s+)?" +

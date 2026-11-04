@@ -15,6 +15,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import app.proxyflow.ProxyFlowApplication
 import app.proxyflow.core.data.ConnectionController
+import app.proxyflow.core.data.LogRepository
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.engine.ProxyEngine
 import app.proxyflow.core.model.ConnectionError
@@ -249,6 +250,18 @@ class StateHistory(controller: ConnectionController) : AutoCloseable {
 
     fun neverConnected(): Boolean = seen.none { it.status == ConnectionStatus.Connected }
 
+    /** The states seen, one per line and short, for a failure message: status, reconnection and error. */
+    fun describe(): String = seen.joinToString("\n", prefix = "states:\n") { state ->
+        listOfNotNull(
+            state.status.name,
+            state.step?.name,
+            state.reconnect?.let {
+                "${it.reason} attempt ${it.attempt}/${it.maxAttempts} due ${it.nextAttemptAtMillis?.minus(System.currentTimeMillis())} ms"
+            },
+            state.error?.code,
+        ).joinToString(" ")
+    }
+
     override fun close() = scope.cancel()
 }
 
@@ -259,6 +272,9 @@ class App {
     val profiles: ProfileRepository = container.profileRepository
     val controller: ConnectionController = container.connectionController
     val runtime = container.vpnRuntime
+
+    /** The diagnostic log the Logs screen shows (ADR-0012). */
+    val logs: LogRepository = container.logRepository
     val packageName: String = context.packageName
 
     fun save(name: String, protocol: ProxyProtocol, host: String, port: Int, user: String = "", password: String = ""): ProxyProfile =
@@ -408,6 +424,11 @@ class App {
     fun disconnectAndSettle(timeoutMillis: Long = 10_000) {
         controller.disconnect()
         awaitStatus(ConnectionStatus.Disconnected)
+        settleDisconnected(timeoutMillis)
+    }
+
+    /** After Disconnected: the VPN interface, the service and Android's VPN network all go. */
+    fun settleDisconnected(timeoutMillis: Long = 10_000) {
         val diagnose = { Diagnostics.report(this) }
         eventually("the VPN interface closes", timeoutMillis, diagnose) { Descriptors.tun().isEmpty() }
         eventually("the VPN service stops", timeoutMillis, diagnose) { ProxyFlowVpnService.liveInstances.get() == 0 }

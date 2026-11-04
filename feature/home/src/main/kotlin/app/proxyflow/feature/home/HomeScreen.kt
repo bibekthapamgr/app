@@ -1,11 +1,9 @@
 package app.proxyflow.feature.home
 
-import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.PluralsRes
@@ -13,6 +11,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,27 +20,41 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.proxyflow.core.designsystem.component.BannerTone
 import app.proxyflow.core.designsystem.component.PfBanner
@@ -49,25 +63,45 @@ import app.proxyflow.core.designsystem.component.PfConfirmDialog
 import app.proxyflow.core.designsystem.component.PfEmptyState
 import app.proxyflow.core.designsystem.component.PfLoadingIndicator
 import app.proxyflow.core.designsystem.component.PfPrimaryButton
+import app.proxyflow.core.designsystem.component.PfProfileTestLine
 import app.proxyflow.core.designsystem.component.PfSecondaryButton
+import app.proxyflow.core.designsystem.component.PfSheetDragHandle
 import app.proxyflow.core.designsystem.component.PfStatusPill
 import app.proxyflow.core.designsystem.component.PfTextButton
 import app.proxyflow.core.designsystem.component.StatusTone
+import app.proxyflow.core.designsystem.component.openVpnSettings
+import app.proxyflow.core.designsystem.component.proxyCheckErrorMessage
+import app.proxyflow.core.designsystem.component.proxyCheckErrorTitle
+import app.proxyflow.core.designsystem.component.refusingObscuredTouches
+import app.proxyflow.core.designsystem.component.shortWhen
 import app.proxyflow.core.designsystem.icon.PfIcons
 import app.proxyflow.core.designsystem.theme.MonoSmall
 import app.proxyflow.core.designsystem.theme.Spacing
 import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.ExitReason
+import app.proxyflow.core.model.Formats
+import app.proxyflow.core.model.Interruption
+import app.proxyflow.core.model.KillSwitchStatus
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
+import app.proxyflow.core.model.ReconnectInfo
+import app.proxyflow.core.model.ReconnectReason
 import app.proxyflow.core.model.RoutingDiagnostics
-import java.util.Locale
+import app.proxyflow.core.model.TrafficStats
 import kotlinx.coroutines.delay
 
 /** What Home's buttons and dialogs do; the defaults do nothing (previews, screenshots, tests). */
 data class HomeActions(
     val onAddProxy: () -> Unit = {},
+    /** Change, Use another proxy: opens the profile picker (B8). */
     val onChangeProfile: () -> Unit = {},
+    /** A profile picked in B8: it becomes Home's, and a running connection switches to it (J11). */
+    val onChooseProfile: (String) -> Unit = {},
+    /** B8's Manage profiles: the Profiles tab. */
+    val onManageProfiles: () -> Unit = {},
+    val onDismissPicker: () -> Unit = {},
     val onEditProfile: (String) -> Unit = {},
     /** Connect, Try again, Reconnect, Restart. */
     val onConnect: () -> Unit = {},
@@ -79,31 +113,55 @@ data class HomeActions(
     /** B9's Continue: opens Android's consent screen. */
     val onExplainerContinue: (Intent) -> Unit = {},
     val onDismissDialog: () -> Unit = {},
+    /** "Retry now" while ProxyFlow reconnects on its own (B5). */
+    val onRetryNow: () -> Unit = {},
+    /** "View logs": the Logs tab (J10). */
+    val onOpenLogs: () -> Unit = {},
+    /** Android's date and time settings, for a certificate that reads as expired (catalogue: TLS_EXPIRED). */
+    val onOpenDateSettings: () -> Unit = {},
+    /** The system kill switch guide (board E2, M8). */
+    val onOpenKillSwitchGuide: () -> Unit = {},
+    /** Android's VPN settings (H1: another app may be Always-on VPN). */
+    val onOpenVpnSettings: () -> Unit = {},
+    /** The notice that ProxyFlow was stopped while connected, acknowledged (M8). */
+    val onDismissInterruption: () -> Unit = {},
+    /** "Learn more" for a certificate the phone doesn't trust (catalogue: TLS_UNTRUSTED): Help's topic on certificates (M9). */
+    val onLearnAboutCertificates: () -> Unit = {},
 )
 
 @Composable
-internal fun HomeRoute(viewModel: HomeViewModel, onAddProxy: () -> Unit, onChangeProfile: () -> Unit, onEditProfile: (String) -> Unit) {
+internal fun HomeRoute(
+    viewModel: HomeViewModel,
+    onAddProxy: () -> Unit,
+    onManageProfiles: () -> Unit,
+    onEditProfile: (String) -> Unit,
+    onOpenLogs: () -> Unit,
+    onOpenKillSwitchGuide: () -> Unit = {},
+    onLearnAboutCertificates: () -> Unit = {},
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    // Each time Home shows: Android is asked about its kill switch again while ProxyFlow is connected (M8).
+    LifecycleResumeEffect(viewModel) {
+        viewModel.checkKillSwitch()
+        onPauseOrDispose {}
+    }
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         viewModel.onConsentResult(result.resultCode == Activity.RESULT_OK)
     }
-    // Asked once per app run at Connect on Android 13+; the VPN works without it (ADR-0010 §10).
-    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { viewModel.connect() }
-    val connect = {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-            viewModel.takeNotificationRequest()
-        ) {
-            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            viewModel.connect()
-        }
-    }
-    val connected = (state as? HomeUiState.Ready)?.status == ConnectionStatus.Connected
-    // The connected timer ticks on whole seconds, only while connected.
-    val now by produceState(System.currentTimeMillis(), connected) {
-        while (connected) {
+    // The notification permission is asked once, at first launch (A3), and Settings turns it on later (M9, ADR-0014):
+    // Connect never asks again. The VPN works without it (ADR-0010 §10).
+    val connect = viewModel::connect
+    val connection = (state as? HomeUiState.Ready)?.connection
+    var picking by rememberSaveable { mutableStateOf(false) }
+    // The picker is Ready's: with the last profile gone it closes, and doesn't come back when one is added.
+    val ready = state is HomeUiState.Ready
+    LaunchedEffect(ready) { if (!ready) picking = false }
+    // The connected timer, the wait before the next attempt (B5) and the picker's "tested 2 min ago" (B8) tick on whole
+    // seconds, only while shown.
+    val ticking = connection?.status == ConnectionStatus.Connected || connection?.reconnect?.nextAttemptAtMillis != null || picking
+    val now by produceState(System.currentTimeMillis(), ticking) {
+        while (ticking) {
             value = System.currentTimeMillis()
             delay(MILLIS_PER_SECOND - value % MILLIS_PER_SECOND)
         }
@@ -111,12 +169,24 @@ internal fun HomeRoute(viewModel: HomeViewModel, onAddProxy: () -> Unit, onChang
     HomeScreen(
         state = state,
         nowMillis = now,
+        picking = picking,
         actions = HomeActions(
-            onAddProxy = onAddProxy,
-            onChangeProfile = {
-                viewModel.dismissError()
-                onChangeProfile()
+            onAddProxy = {
+                picking = false
+                onAddProxy()
             },
+            onChangeProfile = { picking = true },
+            onChooseProfile = { id ->
+                picking = false
+                viewModel.dismissError()
+                viewModel.chooseProfile(id)
+            },
+            onManageProfiles = {
+                picking = false
+                viewModel.dismissError()
+                onManageProfiles()
+            },
+            onDismissPicker = { picking = false },
             onEditProfile = { id ->
                 viewModel.dismissError()
                 onEditProfile(id)
@@ -134,12 +204,28 @@ internal fun HomeRoute(viewModel: HomeViewModel, onAddProxy: () -> Unit, onChang
                 }
             },
             onDismissDialog = viewModel::dismissDialog,
+            onRetryNow = viewModel::retryNow,
+            onOpenLogs = onOpenLogs,
+            onOpenDateSettings = {
+                try {
+                    context.startActivity(Intent(Settings.ACTION_DATE_SETTINGS))
+                } catch (e: ActivityNotFoundException) {
+                    // No such settings screen on this phone: the message already says what to check.
+                }
+            },
+            onOpenKillSwitchGuide = onOpenKillSwitchGuide,
+            onOpenVpnSettings = {
+                viewModel.dismissDialog()
+                openVpnSettings(context)
+            },
+            onDismissInterruption = viewModel::dismissInterruption,
+            onLearnAboutCertificates = onLearnAboutCertificates,
         ),
     )
 }
 
 @Composable
-fun HomeScreen(state: HomeUiState, actions: HomeActions, modifier: Modifier = Modifier, nowMillis: Long = 0L) {
+fun HomeScreen(state: HomeUiState, actions: HomeActions, modifier: Modifier = Modifier, nowMillis: Long = 0L, picking: Boolean = false) {
     // Default insets: status bar on top; the app's bottom bar has already consumed the bottom.
     Scaffold(modifier = modifier) { padding ->
         Column(
@@ -164,6 +250,7 @@ fun HomeScreen(state: HomeUiState, actions: HomeActions, modifier: Modifier = Mo
                 is HomeUiState.Ready -> {
                     ReadyContent(state, actions, nowMillis)
                     HomeDialogs(state, actions)
+                    if (picking) ProfilePicker(state, actions, nowMillis)
                 }
             }
         }
@@ -185,11 +272,18 @@ private fun AppHeader() {
 @Composable
 private fun ReadyContent(state: HomeUiState.Ready, actions: HomeActions, nowMillis: Long) {
     val error = state.error
+    val reconnect = state.connection.reconnect
+    state.interruption?.let { InterruptionNotice(it, state, actions) }
     when (state.status) {
         ConnectionStatus.Connecting -> ConnectingContent(state, actions)
-        ConnectionStatus.Reconnecting -> ReconnectingContent(state, actions)
+        ConnectionStatus.Reconnecting -> if (reconnect != null) {
+            AutoReconnectContent(state, reconnect, actions, nowMillis)
+        } else {
+            ReconnectingContent(state, actions)
+        }
         ConnectionStatus.Connected -> ConnectedContent(state, actions, nowMillis)
-        ConnectionStatus.Blocked, ConnectionStatus.Offline -> BlockedContent(state, actions)
+        ConnectionStatus.Offline -> OfflineContent(actions)
+        ConnectionStatus.Blocked -> BlockedContent(state, actions)
         ConnectionStatus.Disconnected -> when {
             error == null -> DisconnectedContent(state, actions)
             // H1 is a dialog over the plain disconnected screen.
@@ -200,10 +294,15 @@ private fun ReadyContent(state: HomeUiState.Ready, actions: HomeActions, nowMill
     }
 }
 
-/** Board B2. */
+/** Board B2: with what Android's kill switch does while ProxyFlow isn't connected, as Android last said (M8). */
 @Composable
 private fun DisconnectedContent(state: HomeUiState.Ready, actions: HomeActions) {
-    StatusHeader(stringResource(R.string.home_status_disconnected), StatusTone.Off, stringResource(R.string.home_normal_network))
+    val blocking = state.killSwitch?.status == KillSwitchStatus.On
+    StatusHeader(
+        stringResource(R.string.home_status_disconnected),
+        StatusTone.Off,
+        stringResource(if (blocking) R.string.home_no_network_kill_switch else R.string.home_normal_network),
+    )
     ProfileCard(state.profile, actions.onChangeProfile)
     PfPrimaryButton(
         text = stringResource(R.string.home_connect),
@@ -219,33 +318,129 @@ private fun DisconnectedContent(state: HomeUiState.Ready, actions: HomeActions) 
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+    KillSwitchNote(state, actions)
 }
+
+/**
+ * What happens if ProxyFlow stops (board B2's line, M8): Android's kill switch as Android last told ProxyFlow, and the
+ * way to set it up. Not a switch: only the user can turn it on, in Android's VPN settings.
+ */
+@Composable
+private fun KillSwitchNote(state: HomeUiState.Ready, actions: HomeActions) {
+    val killSwitch = state.killSwitch
+    val on = killSwitch?.status == KillSwitchStatus.On
+    // What Android said, dated: it answers only while ProxyFlow's VPN runs, and may say otherwise now (ADR-0013 §2).
+    val text = killSwitch?.let {
+        stringResource(
+            when (it.status) {
+                KillSwitchStatus.On -> R.string.home_kill_switch_on
+                KillSwitchStatus.AlwaysOnOnly -> R.string.home_kill_switch_always_on_only
+                KillSwitchStatus.Off -> R.string.home_kill_switch_off
+            },
+            shortWhen(it.checkedAtMillis),
+        )
+    } ?: stringResource(R.string.home_kill_switch_unknown)
+    PfBanner(text = text, tone = if (on) BannerTone.Info else BannerTone.Warning)
+    PfTextButton(
+        text = stringResource(if (on) R.string.home_kill_switch_details else R.string.home_kill_switch_set_up),
+        onClick = actions.onOpenKillSwitchGuide,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * The last process ended while connected, without the connection being stopped (M8): when and why, as far as Android
+ * says, and what that meant for apps — the normal network, or none with Android's kill switch on as last seen.
+ */
+@Composable
+private fun InterruptionNotice(interruption: Interruption, state: HomeUiState.Ready, actions: HomeActions) {
+    val reason = exitReason(interruption.reason)
+    val ended = interruption.endedAtMillis
+    val what = if (ended != null) {
+        stringResource(R.string.home_interrupted_at, reason, shortWhen(ended))
+    } else {
+        stringResource(R.string.home_interrupted_unknown_time, reason, shortWhen(interruption.connectedSinceMillis))
+    }
+    // What applied to apps then: Android's kill switch as ProxyFlow last read it before that process ended.
+    val meant = stringResource(
+        when {
+            interruption.killSwitch == KillSwitchStatus.On -> R.string.home_interrupted_blocked
+            interruption.reason == ExitReason.PhoneRestarted -> R.string.home_interrupted_restart_leak
+            else -> R.string.home_interrupted_leak
+        },
+    )
+    val again = if (state.status == ConnectionStatus.Connected) stringResource(R.string.home_interrupted_connected_again) else null
+    PfBanner(
+        title = stringResource(R.string.home_interrupted_title),
+        text = listOfNotNull(what, meant, again).joinToString(" "),
+        tone = BannerTone.Warning,
+    )
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        // B2 and B6d below already offer it.
+        if (state.killSwitch?.status != KillSwitchStatus.On && !state.showsKillSwitchSetUp()) {
+            PfTextButton(text = stringResource(R.string.home_kill_switch_set_up), onClick = actions.onOpenKillSwitchGuide)
+        }
+        PfTextButton(text = stringResource(R.string.home_interrupted_dismiss), onClick = actions.onDismissInterruption)
+    }
+}
+
+/** The screen's own content links to the kill switch guide: B2 (always) and B6d (until the kill switch is on). */
+private fun HomeUiState.Ready.showsKillSwitchSetUp(): Boolean {
+    if (status != ConnectionStatus.Disconnected) return false
+    val code = error?.code
+    return code == null || code == ConnectionError.VPN_PERMISSION_DENIED || code == ConnectionError.VPN_REVOKED
+}
+
+@Composable
+private fun exitReason(reason: ExitReason): String = stringResource(
+    when (reason) {
+        ExitReason.LowMemory -> R.string.home_exit_low_memory
+        ExitReason.Crash -> R.string.home_exit_crash
+        ExitReason.NativeCrash -> R.string.home_exit_native_crash
+        ExitReason.NotResponding -> R.string.home_exit_not_responding
+        ExitReason.Killed -> R.string.home_exit_killed
+        ExitReason.ForceStopped -> R.string.home_exit_force_stopped
+        ExitReason.Updated -> R.string.home_exit_updated
+        ExitReason.PermissionChanged -> R.string.home_exit_permission_changed
+        ExitReason.PhoneRestarted -> R.string.home_exit_phone_restarted
+        ExitReason.Other -> R.string.home_exit_other
+        ExitReason.Unknown -> R.string.home_exit_unknown
+    },
+)
 
 /** Board B6b: the pre-flight check failed, and nothing was changed on the phone. */
 @Composable
 private fun ConnectFailedContent(state: HomeUiState.Ready, error: ConnectionError, actions: HomeActions) {
     StatusHeader(stringResource(R.string.home_status_disconnected), StatusTone.Off, null)
     PfBanner(title = errorTitle(error, state.profile), text = errorMessage(error, state.profile), tone = BannerTone.Error)
-    Note(stringResource(R.string.home_not_connected_note))
+    val blocking = state.killSwitch?.status == KillSwitchStatus.On
+    val note = when {
+        // Android started ProxyFlow as Always-on VPN: whether it blocks apps now, Android says only to a running VPN.
+        error.code == ConnectionError.ALWAYS_ON_NO_PROFILE -> R.string.home_not_connected_note_always_on
+        blocking -> R.string.home_not_connected_note_kill_switch
+        else -> R.string.home_not_connected_note
+    }
+    Note(stringResource(note))
     ErrorCode(error)
     ProfileCard(state.profile, actions.onChangeProfile)
-    PfPrimaryButton(
-        text = stringResource(R.string.home_try_again),
-        onClick = actions.onConnect,
-        icon = PfIcons.Refresh,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    PfSecondaryButton(
-        text = stringResource(R.string.home_edit_profile),
-        onClick = { actions.onEditProfile(state.profile.id) },
-        icon = PfIcons.Edit,
-        modifier = Modifier.fillMaxWidth(),
-    )
+    if (error.code == ConnectionError.ALWAYS_ON_NO_PROFILE) {
+        // What fixes it is connecting once with the proxy Always-on VPN should use: that makes it the chosen one.
+        PfPrimaryButton(
+            text = stringResource(R.string.home_connect),
+            onClick = actions.onConnect,
+            enabled = state.canConnect,
+            icon = PfIcons.Power,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    } else {
+        FixActions(error, state.profile, actions)
+    }
     PfTextButton(
         text = stringResource(R.string.home_use_another_proxy),
         onClick = actions.onChangeProfile,
         modifier = Modifier.fillMaxWidth(),
     )
+    ViewLogs(actions)
 }
 
 /** Board B6d: Android removed the VPN; apps use the normal network. */
@@ -266,6 +461,18 @@ private fun RevokedContent(state: HomeUiState.Ready, actions: HomeActions) {
         icon = PfIcons.Power,
         modifier = Modifier.fillMaxWidth(),
     )
+    // Board B6d: only Android's own kill switch keeps traffic blocked when the VPN goes away (M8).
+    if (state.killSwitch?.status != KillSwitchStatus.On) {
+        PfCard(modifier = Modifier.fillMaxWidth(), onClick = actions.onOpenKillSwitchGuide) {
+            Text(stringResource(R.string.home_prevent_title), style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.home_prevent_message),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            PfTextButton(text = stringResource(R.string.home_kill_switch_set_up), onClick = actions.onOpenKillSwitchGuide)
+        }
+    }
 }
 
 /** Board B3: the check runs before anything changes on the phone. */
@@ -276,18 +483,31 @@ private fun ConnectingContent(state: HomeUiState.Ready, actions: HomeActions) {
         StatusTone.Transition,
         stringResource(R.string.home_connecting_to, state.profile.displayName),
     )
+    // One row per stage of the attempt (ADR-0012): done, in progress, or not started yet.
     PfCard(modifier = Modifier.fillMaxWidth()) {
-        val checking = state.connection.step != ConnectStep.StartingProtection
-        Step(stringResource(R.string.home_step_permission), StepState.Done)
-        Step(stringResource(R.string.home_step_checking), if (checking) StepState.Current else StepState.Done)
-        Step(stringResource(R.string.home_step_starting), if (checking) StepState.Pending else StepState.Current)
+        val current = (state.connection.step ?: ConnectStep.Starting).ordinal
+        for ((step, label) in CONNECT_STEPS) {
+            val progress = when {
+                step.ordinal < current -> StepState.Done
+                step.ordinal == current -> StepState.Current
+                else -> StepState.Pending
+            }
+            Step(stringResource(label), progress)
+        }
     }
-    Note(stringResource(R.string.home_connecting_note))
-    PfSecondaryButton(
-        text = stringResource(R.string.home_cancel),
-        onClick = actions.onDisconnect,
-        modifier = Modifier.fillMaxWidth(),
-    )
+    if (state.connection.held) {
+        // Android started ProxyFlow as Always-on VPN: the interface is up and holds apps' traffic (M8), so stopping
+        // sends them to the normal network — asked first, as on B5 and B6.
+        Note(stringResource(R.string.home_connecting_held_note))
+        StopButton(actions)
+    } else {
+        Note(stringResource(R.string.home_connecting_note))
+        PfSecondaryButton(
+            text = stringResource(R.string.home_cancel),
+            onClick = actions.onDisconnect,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 /** Switching profiles or restarting: the VPN interface stays, so traffic is held meanwhile. */
@@ -308,8 +528,8 @@ private fun ReconnectingContent(state: HomeUiState.Ready, actions: HomeActions) 
 }
 
 /**
- * Board B4: what goes through the proxy, and the diagnostics since connecting (ADR-0011).
- * Traffic counters and active connections arrive with statistics in M7.
+ * Board B4: the session's time and traffic (ADR-0012), what goes through the proxy, and the
+ * diagnostics since connecting (ADR-0011).
  */
 @Composable
 private fun ConnectedContent(state: HomeUiState.Ready, actions: HomeActions, nowMillis: Long) {
@@ -317,11 +537,12 @@ private fun ConnectedContent(state: HomeUiState.Ready, actions: HomeActions, now
     val since = state.connection.connectedSinceMillis
     if (since != null) {
         Text(
-            elapsed(nowMillis - since),
+            Formats.clock(nowMillis - since),
             style = MaterialTheme.typography.displaySmall,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
+        TrafficRow(state.traffic)
     }
     Text(
         stringResource(R.string.home_connected_note),
@@ -339,51 +560,160 @@ private fun ConnectedContent(state: HomeUiState.Ready, actions: HomeActions, now
     RoutingCard(state.diagnostics)
     DiagnosticsCard(state.profile, state.diagnostics)
     Note(stringResource(R.string.home_https_note))
+    // Disconnecting sends apps to the normal network: a tap through another app's window doesn't count (S4, M8).
     PfSecondaryButton(
         text = stringResource(R.string.home_disconnect),
         onClick = actions.onDisconnect,
         icon = PfIcons.Power,
+        modifier = Modifier
+            .fillMaxWidth()
+            .refusingObscuredTouches(),
+    )
+}
+
+/**
+ * Board B5 while ProxyFlow reconnects on its own (ADR-0012): traffic stays held, the attempt and the
+ * wait before the next one are shown, and the user can retry now, fix the profile or stop.
+ */
+@Composable
+private fun AutoReconnectContent(state: HomeUiState.Ready, reconnect: ReconnectInfo, actions: HomeActions, nowMillis: Long) {
+    StatusHeader(stringResource(R.string.home_status_reconnecting), StatusTone.Transition, stringResource(R.string.home_traffic_paused))
+    val lastError = reconnect.lastError
+    PfBanner(
+        // Unanswered requests are the proxy's failure, whatever site the last one was for (M8).
+        title = when {
+            reconnect.reason == ReconnectReason.ProxyUnanswered -> stringResource(R.string.home_reconnect_unanswered_title)
+            lastError != null -> errorTitle(lastError, state.profile)
+            reconnect.reason == ReconnectReason.NetworkBack -> stringResource(R.string.home_reconnect_back_online_title)
+            reconnect.reason == ReconnectReason.AlwaysOnStart -> stringResource(R.string.home_reconnect_always_on_title)
+            else -> stringResource(R.string.home_reconnect_network_changed_title)
+        },
+        text = stringResource(
+            when (reconnect.reason) {
+                ReconnectReason.ProxyFailures -> R.string.home_reconnect_proxy_message
+                ReconnectReason.NetworkBack -> R.string.home_reconnect_back_online_message
+                ReconnectReason.NetworkChanged -> R.string.home_reconnect_network_changed_message
+                ReconnectReason.ProxyUnanswered -> R.string.home_reconnect_unanswered_message
+                ReconnectReason.AlwaysOnStart -> R.string.home_reconnect_always_on_message
+            },
+        ),
+        tone = BannerTone.Warning,
+    )
+    val next = reconnect.nextAttemptAtMillis
+    Text(
+        listOf(
+            stringResource(R.string.home_reconnect_attempt, reconnect.attempt, reconnect.maxAttempts),
+            if (next == null || next <= nowMillis) {
+                stringResource(R.string.home_reconnect_trying)
+            } else {
+                stringResource(R.string.home_reconnect_next_try, ((next - nowMillis + MILLIS_PER_SECOND - 1) / MILLIS_PER_SECOND).toInt())
+            },
+        ).joinToString(" · "),
+        style = MaterialTheme.typography.titleMedium,
+        textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth(),
     )
+    lastError?.let { ErrorCode(it) }
+    PfPrimaryButton(
+        text = stringResource(R.string.home_retry_now),
+        onClick = actions.onRetryNow,
+        enabled = next != null, // an attempt that runs can't be run sooner
+        icon = PfIcons.Refresh,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    PfSecondaryButton(
+        text = stringResource(R.string.home_edit_profile),
+        onClick = { actions.onEditProfile(state.profile.id) },
+        icon = PfIcons.Edit,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    StopButton(actions)
+    ViewLogs(actions)
+}
+
+/** Board B7: no network, so traffic waits at the VPN interface; ProxyFlow reconnects when one is back. */
+@Composable
+private fun OfflineContent(actions: HomeActions) {
+    StatusHeader(stringResource(R.string.home_status_offline), StatusTone.Transition, stringResource(R.string.home_traffic_paused))
+    PfBanner(
+        title = stringResource(R.string.home_error_offline_title),
+        text = stringResource(R.string.home_error_offline_message),
+        tone = BannerTone.Warning,
+    )
+    Code(ConnectionError.OFFLINE)
+    StopButton(actions)
+    ViewLogs(actions)
 }
 
 /** The blocked layout (board B6a's): the interface stays up with nothing going around the proxy. */
 @Composable
 private fun BlockedContent(state: HomeUiState.Ready, actions: HomeActions) {
     val error = state.error ?: ConnectionError(ConnectionError.INTERNAL)
-    val status = if (state.status == ConnectionStatus.Offline) R.string.home_status_offline else R.string.home_status_blocked
-    StatusHeader(stringResource(status), StatusTone.Error, null)
+    StatusHeader(stringResource(R.string.home_status_blocked), StatusTone.Error, null)
     PfBanner(title = errorTitle(error, state.profile), text = errorMessage(error, state.profile), tone = BannerTone.Error)
     Note(stringResource(R.string.home_blocked_note))
     ErrorCode(error)
-    if (error.code == ConnectionError.PROFILE_DELETED) {
+    when (error.code) {
         // Nothing to restart or edit: stopping is the way out, and it is still confirmed.
-        PfPrimaryButton(
+        ConnectionError.PROFILE_DELETED -> PfPrimaryButton(
             text = stringResource(R.string.home_stop_normal_network),
             onClick = actions.onStop,
             modifier = Modifier.fillMaxWidth(),
         )
-    } else {
-        PfPrimaryButton(
-            text = stringResource(if (error.code == ConnectionError.ENGINE_STOPPED) R.string.home_restart else R.string.home_try_again),
-            onClick = actions.onConnect,
-            icon = PfIcons.Refresh,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (error.code != ConnectionError.ENGINE_STOPPED) {
-            PfSecondaryButton(
-                text = stringResource(R.string.home_edit_profile),
-                onClick = { actions.onEditProfile(state.profile.id) },
-                icon = PfIcons.Edit,
+        ConnectionError.ENGINE_STOPPED -> {
+            PfPrimaryButton(
+                text = stringResource(R.string.home_restart),
+                onClick = actions.onConnect,
+                icon = PfIcons.Refresh,
                 modifier = Modifier.fillMaxWidth(),
             )
+            StopButton(actions)
         }
-        PfTextButton(
-            text = stringResource(R.string.home_stop_normal_network),
-            onClick = actions.onStop,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        else -> {
+            FixActions(error, state.profile, actions)
+            StopButton(actions)
+        }
     }
+    ViewLogs(actions)
+}
+
+/**
+ * The way out of [error] first (docs/m1/04 §4): the profile for a refused sign-in, a certificate,
+ * the protocol or the proxy's name, otherwise trying again; a certificate that reads as expired also
+ * offers the phone's date and time, which is often what is wrong, and one the phone doesn't trust or that
+ * names another server, Help's topic on certificates (M9).
+ */
+@Composable
+private fun FixActions(error: ConnectionError, profile: ProxyProfile, actions: HomeActions) {
+    val editFirst = error.code in FIX_PROFILE_FIRST
+    val retry = stringResource(R.string.home_try_again)
+    val edit = stringResource(R.string.home_edit_profile)
+    val onEdit = { actions.onEditProfile(profile.id) }
+    val wide = Modifier.fillMaxWidth()
+    if (editFirst) {
+        PfPrimaryButton(text = edit, onClick = onEdit, icon = PfIcons.Edit, modifier = wide)
+        PfSecondaryButton(text = retry, onClick = actions.onConnect, icon = PfIcons.Refresh, modifier = wide)
+    } else {
+        PfPrimaryButton(text = retry, onClick = actions.onConnect, icon = PfIcons.Refresh, modifier = wide)
+        PfSecondaryButton(text = edit, onClick = onEdit, icon = PfIcons.Edit, modifier = wide)
+    }
+    if (error.code == "TLS_EXPIRED") {
+        PfTextButton(text = stringResource(R.string.home_date_settings), onClick = actions.onOpenDateSettings, modifier = wide)
+    }
+    if (error.code == "TLS_UNTRUSTED" || error.code == "TLS_HOSTNAME") {
+        PfTextButton(text = stringResource(R.string.home_learn_more), onClick = actions.onLearnAboutCertificates, modifier = wide)
+    }
+}
+
+@Composable
+private fun StopButton(actions: HomeActions) {
+    PfTextButton(text = stringResource(R.string.home_stop_normal_network), onClick = actions.onStop, modifier = Modifier.fillMaxWidth())
+}
+
+/** "Details" from an error (J10): the Logs tab, where each attempt's stage and code are listed. */
+@Composable
+private fun ViewLogs(actions: HomeActions) {
+    PfTextButton(text = stringResource(R.string.home_view_logs), onClick = actions.onOpenLogs, modifier = Modifier.fillMaxWidth())
 }
 
 @Composable
@@ -405,7 +735,9 @@ private fun HomeDialogs(state: HomeUiState.Ready, actions: HomeActions) {
         )
         dialog == HomeDialog.ConfirmStop -> PfConfirmDialog(
             title = stringResource(R.string.home_stop_title),
-            text = stringResource(R.string.home_stop_message),
+            text = stringResource(
+                if (state.killSwitch?.status == KillSwitchStatus.On) R.string.home_stop_message_kill_switch else R.string.home_stop_message,
+            ),
             confirmLabel = stringResource(R.string.home_stop_normal_network),
             dismissLabel = stringResource(R.string.home_cancel),
             onConfirm = actions.onConfirmStop,
@@ -414,14 +746,19 @@ private fun HomeDialogs(state: HomeUiState.Ready, actions: HomeActions) {
         )
         dialog == HomeDialog.VpnPermissionDenied ||
             (state.status == ConnectionStatus.Disconnected && state.error?.code == ConnectionError.VPN_PERMISSION_DENIED) ->
+            // H1, and H2's way out: Android doesn't tell an app that another one is Always-on VPN (its consent screen
+            // then closes without asking), so H1 says so and opens the VPN settings (M8).
             PfConfirmDialog(
                 title = stringResource(R.string.home_error_vpn_permission_title),
                 text = stringResource(R.string.home_error_vpn_permission_message) + "\n\n" +
+                    stringResource(R.string.home_error_vpn_permission_always_on) + "\n\n" +
                     stringResource(R.string.home_code, ConnectionError.VPN_PERMISSION_DENIED),
                 confirmLabel = stringResource(R.string.home_try_again),
                 dismissLabel = stringResource(R.string.home_not_now),
                 onConfirm = actions.onConnect,
                 onDismiss = actions.onDismissDialog,
+                neutralLabel = stringResource(R.string.home_open_vpn_settings),
+                onNeutral = actions.onOpenVpnSettings,
             )
     }
 }
@@ -492,6 +829,43 @@ private fun Step(text: String, step: StepState) {
             style = MaterialTheme.typography.bodyLarge,
             color = if (step == StepState.Pending) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
         )
+    }
+}
+
+/**
+ * Board B4's counters (ADR-0012): what the session sent and received through the proxy so far — on
+ * through reconnections — and the connections open now. Each reads as one item for screen readers.
+ */
+@Composable
+private fun TrafficRow(traffic: TrafficStats?) {
+    val unknown = stringResource(R.string.home_traffic_unknown)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            TrafficStat("↑", traffic?.let { Formats.bytes(it.bytesUp) } ?: unknown, stringResource(R.string.home_traffic_sent))
+            TrafficStat("↓", traffic?.let { Formats.bytes(it.bytesDown) } ?: unknown, stringResource(R.string.home_traffic_received))
+            TrafficStat(null, traffic?.activeConnections?.toString() ?: unknown, stringResource(R.string.home_traffic_active))
+        }
+        Text(
+            stringResource(R.string.home_traffic_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun TrafficStat(arrow: String?, value: String, label: String) {
+    Column(
+        modifier = Modifier.clearAndSetSemantics { contentDescription = "$label $value" },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(listOfNotNull(arrow, value).joinToString(" "), style = MaterialTheme.typography.titleLarge)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -618,6 +992,92 @@ private fun count(@PluralsRes plural: Int, value: Long): String {
 @Composable
 private fun countOrNull(@PluralsRes plural: Int, value: Long): String? = if (value > 0) count(plural, value) else null
 
+/**
+ * Board B8: the saved profiles, the one Home shows marked, each with its last test (board C2's line). Picking one makes it
+ * Home's. Home offers it while disconnected; when a connection starts with the sheet open (Always-on VPN, the Quick
+ * Settings tile), picking switches the connection to it (J11), which the sheet then says before anything is picked.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun ProfilePicker(state: HomeUiState.Ready, actions: HomeActions, nowMillis: Long) {
+    ModalBottomSheet(
+        onDismissRequest = actions.onDismissPicker,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        dragHandle = { PfSheetDragHandle() },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.screenGutter)
+                .padding(bottom = Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Text(
+                stringResource(R.string.home_picker_title),
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() },
+            )
+            if (state.connection.active) {
+                val note = if (state.connection.holdsTrafficOnSwitch) {
+                    R.string.home_picker_switch_note
+                } else {
+                    R.string.home_picker_checking_note
+                }
+                Text(
+                    stringResource(note),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Column(Modifier.selectableGroup()) {
+                state.profiles.ifEmpty { listOf(state.profile) }.forEach { profile ->
+                    PickerRow(
+                        profile = profile,
+                        selected = profile.id == state.profile.id,
+                        lastTest = state.lastTests[profile.id],
+                        nowMillis = nowMillis,
+                        onClick = { actions.onChooseProfile(profile.id) },
+                    )
+                }
+            }
+            // Wraps at large font sizes on a narrow phone rather than squeezing either button.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                PfTextButton(text = stringResource(R.string.home_add_proxy), onClick = actions.onAddProxy)
+                PfTextButton(text = stringResource(R.string.home_picker_manage), onClick = actions.onManageProfiles)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PickerRow(profile: ProxyProfile, selected: Boolean, lastTest: ProfileTest?, nowMillis: Long, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .selectable(selected = selected, onClick = onClick, role = Role.RadioButton)
+            .padding(vertical = Spacing.sm),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Text(profile.displayName, style = MaterialTheme.typography.titleMedium)
+            Text(
+                listOf(
+                    profile.protocol.name,
+                    stringResource(if (profile.useTls) R.string.home_tls else R.string.home_not_encrypted),
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(profile.endpoint, style = MonoSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            PfProfileTestLine(profile, lastTest, testing = false, nowMillis = nowMillis)
+        }
+    }
+}
+
 @Composable
 private fun ProfileCard(profile: ProxyProfile, onChangeProfile: () -> Unit) {
     PfCard(modifier = Modifier.fillMaxWidth()) {
@@ -648,55 +1108,44 @@ private fun ProfileCard(profile: ProxyProfile, onChangeProfile: () -> Unit) {
 private fun protocolLabel(profile: ProxyProfile): String =
     if (profile.useTls) stringResource(R.string.home_protocol_with_tls, profile.protocol.name) else profile.protocol.name
 
-/** The catalogue title for [error] (docs/m1/04 §4). */
+/** The catalogue title for [error] (docs/m1/04 §4): a proxy check's as the proxy form words it, and Home's own. */
 @Composable
 private fun errorTitle(error: ConnectionError, profile: ProxyProfile): String = when (error.code) {
-    "PROXY_UNREACHABLE" -> stringResource(R.string.home_error_unreachable_title)
-    "PROXY_DNS_FAILED" -> stringResource(R.string.home_error_dns_title)
-    "AUTH_REQUIRED" -> stringResource(R.string.home_error_auth_required_title)
-    "AUTH_FAILED" -> stringResource(R.string.home_error_auth_failed_title)
-    "TLS_UNTRUSTED" -> stringResource(R.string.home_error_tls_untrusted_title)
-    "TLS_HOSTNAME" -> stringResource(R.string.home_error_tls_hostname_title)
-    "TLS_EXPIRED" -> stringResource(R.string.home_error_tls_expired_title)
-    "TLS_HANDSHAKE" -> stringResource(R.string.home_error_tls_handshake_title)
-    "PROTOCOL_ERROR" -> stringResource(R.string.home_error_protocol_title, profile.protocol.name)
-    "HANDSHAKE_TIMEOUT" -> stringResource(R.string.home_error_timeout_title)
-    "TARGET_NOT_ALLOWED" -> stringResource(R.string.home_error_refused_title)
-    "TARGET_UNREACHABLE", "TARGET_REFUSED" -> stringResource(R.string.home_error_unreachable_target_title)
-    "PROXY_GENERAL_FAILURE" -> stringResource(R.string.home_error_proxy_failure_title)
-    "TARGET_UNSUPPORTED" -> stringResource(R.string.home_error_unsupported_title)
-    ConnectionError.CREDENTIAL_UNREADABLE -> stringResource(R.string.home_error_credentials_title)
     ConnectionError.ENGINE_STOPPED -> stringResource(R.string.home_error_engine_stopped_title)
     ConnectionError.PROFILE_DELETED -> stringResource(R.string.home_error_profile_deleted_title)
-    else -> stringResource(R.string.home_error_internal_title)
+    ConnectionError.OFFLINE -> stringResource(R.string.home_error_offline_title)
+    ConnectionError.ALWAYS_ON_NO_PROFILE -> stringResource(R.string.home_error_always_on_no_profile_title)
+    else -> proxyCheckErrorTitle(error, profile)
 }
 
 /** The catalogue message for [error], filled in with the profile's server. */
 @Composable
 private fun errorMessage(error: ConnectionError, profile: ProxyProfile): String = when (error.code) {
-    "PROXY_UNREACHABLE" -> stringResource(R.string.home_error_unreachable_message, profile.endpoint)
-    "PROXY_DNS_FAILED" -> stringResource(R.string.home_error_dns_message, profile.host)
-    "AUTH_REQUIRED" -> stringResource(R.string.home_error_auth_required_message)
-    "AUTH_FAILED" -> stringResource(R.string.home_error_auth_failed_message)
-    "TLS_UNTRUSTED" -> stringResource(R.string.home_error_tls_untrusted_message)
-    "TLS_HOSTNAME" -> stringResource(R.string.home_error_tls_hostname_message, profile.tlsServerName ?: profile.host)
-    "TLS_EXPIRED" -> stringResource(R.string.home_error_tls_expired_message)
-    "TLS_HANDSHAKE" -> stringResource(R.string.home_error_tls_handshake_message)
-    "PROTOCOL_ERROR" -> stringResource(R.string.home_error_protocol_message)
-    "HANDSHAKE_TIMEOUT" -> stringResource(R.string.home_error_timeout_message)
-    "TARGET_NOT_ALLOWED" -> stringResource(R.string.home_error_refused_message, profile.endpoint)
-    "TARGET_UNREACHABLE", "TARGET_REFUSED" -> stringResource(R.string.home_error_unreachable_target_message, profile.endpoint)
-    "PROXY_GENERAL_FAILURE" -> stringResource(R.string.home_error_proxy_failure_message, profile.endpoint)
-    "TARGET_UNSUPPORTED" -> stringResource(R.string.home_error_unsupported_message)
-    ConnectionError.CREDENTIAL_UNREADABLE -> stringResource(R.string.home_error_credentials_message)
     ConnectionError.ENGINE_STOPPED -> stringResource(R.string.home_error_engine_stopped_message)
     ConnectionError.PROFILE_DELETED -> stringResource(R.string.home_error_profile_deleted_message)
-    else -> stringResource(R.string.home_error_internal_message)
+    ConnectionError.OFFLINE -> stringResource(R.string.home_error_offline_message)
+    ConnectionError.ALWAYS_ON_NO_PROFILE -> stringResource(R.string.home_error_always_on_no_profile_message)
+    else -> proxyCheckErrorMessage(error, profile)
 }
 
-private fun elapsed(millis: Long): String {
-    val seconds = (millis / MILLIS_PER_SECOND).coerceAtLeast(0)
-    return String.format(Locale.ROOT, "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
-}
+/** B3's rows: one per stage of an attempt, in order. */
+private val CONNECT_STEPS = listOf(
+    ConnectStep.Starting to R.string.home_step_getting_ready,
+    ConnectStep.VpnPermission to R.string.home_step_permission,
+    ConnectStep.ProxyHandshake to R.string.home_step_checking,
+    ConnectStep.Authenticated to R.string.home_step_starting,
+)
+
+/** Codes fixed in the profile, so Edit profile comes first (docs/m1/04 §4); otherwise trying again does. */
+private val FIX_PROFILE_FIRST = setOf(
+    "AUTH_REQUIRED",
+    "AUTH_FAILED",
+    "TLS_UNTRUSTED",
+    "TLS_HOSTNAME",
+    "TLS_HANDSHAKE",
+    "PROTOCOL_ERROR",
+    "PROXY_DNS_FAILED",
+    ConnectionError.CREDENTIAL_UNREADABLE,
+)
 
 private const val MILLIS_PER_SECOND = 1_000L

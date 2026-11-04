@@ -113,7 +113,8 @@ facts=build/pfengine-facts.txt
   done
   echo "CLASSES $(unzip -l "$unpacked/classes.jar" | awk '/\.class$/ {print $4}' | grep -c .) in classes.jar ($(unzip -l "$unpacked/classes.jar" | awk '/pfengine\/[A-Za-z]+\.class$/ {print $4}' | sed 's#.*/##' | tr '\n' ' '))"
   echo "MODULES linked into libgojni.so (go version -m):"
-  go version -m "$unpacked/jni/arm64-v8a/libgojni.so" | awk '$1 == "dep" || $1 == "=>" {print "  " $2 " " $3}'
+  # A replacement ("=>") follows the module it replaces and stands for it: what is linked (scripts/licences.py).
+  go version -m "$unpacked/jni/arm64-v8a/libgojni.so" | awk '$1 == "dep" {print "  " $2 " " $3} $1 == "=>" {print "  => " $2 " " $3}'
 } | tee "$facts"
 
 # Fail on a missing ABI or a 64-bit library aligned below 16 KB (0x4000).

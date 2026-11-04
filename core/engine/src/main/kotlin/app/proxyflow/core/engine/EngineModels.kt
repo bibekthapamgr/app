@@ -62,6 +62,9 @@ data class EngineStatus(
     @SerialName("last_error") val lastError: EngineError? = null,
     @SerialName("last_proxy_error") val lastProxyError: EngineError? = null,
     @SerialName("consecutive_proxy_failures") val consecutiveProxyFailures: Long = 0,
+    /** A SOCKS5 proxy's connection requests left unanswered in a row (M8), and to how many different sites. */
+    @SerialName("unanswered_requests") val unansweredRequests: Long = 0,
+    @SerialName("unanswered_sites") val unansweredSites: Int = 0,
     val flows: Int = 0,
     @SerialName("tcp_active") val tcpActive: Long = 0,
 ) {
@@ -83,6 +86,8 @@ data class EngineStats(
     @SerialName("tcp_opened") val tcpOpened: Long = 0,
     @SerialName("tcp_failed") val tcpFailed: Long = 0,
     val canceled: Long = 0,
+    /** ResetFlows calls (the phone moved to another network, M7). */
+    val resets: Long = 0,
     @SerialName("bytes_up") val bytesUp: Long = 0,
     @SerialName("bytes_down") val bytesDown: Long = 0,
     @SerialName("udp_rejected") val udpRejected: Long = 0,
@@ -149,6 +154,8 @@ data class EngineEvent(
     @SerialName("bytes_down") val bytesDown: Long = 0,
     @SerialName("duration_ms") val durationMillis: Long = 0,
     val count: Int = 0,
+    /** On a failed connection: a SOCKS5 proxy answered the sign-in but not the connection request in time (M8). */
+    val unanswered: Boolean = false,
 )
 
 /** One tunnel through the proxy, opened and closed (pfengine.Probe). */

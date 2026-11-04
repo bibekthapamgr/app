@@ -1,12 +1,17 @@
 package app.proxyflow.feature.profiles
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
 import org.junit.Assert.assertEquals
@@ -68,6 +73,47 @@ class ProfilesScreenTest {
         assertEquals(listOf("p2"), deleted)
     }
 
+    /** Board C2: each card says how its last test went and when, in the catalogue's words; Test runs one from the menu. */
+    @Test
+    fun eachCardShowsItsLastTestAndTestRunsOne() {
+        val tested = mutableListOf<String>()
+        val now = 1_793_000_000_000L
+        val state = ProfilesUiState(
+            loading = false,
+            profiles = listOf(office, backup),
+            activeProfileId = "p1",
+            lastTests = mapOf("p1" to ProfileTest(now - 20 * 3_600_000L, code = "AUTH_FAILED", latencyMillis = null)),
+        )
+        var shown by mutableStateOf(state)
+        compose.setContent {
+            ProxyFlowTheme {
+                ProfilesScreen(
+                    shown,
+                    onAddProxy = {},
+                    onEditProxy = {},
+                    onUseProxy = {},
+                    onDeleteProxy = {},
+                    onTestProxy = { tested += it },
+                    nowMillis = now,
+                )
+            }
+        }
+        compose.onNodeWithText("Username or password rejected · tested 20 hours ago").assertIsDisplayed()
+        compose.onNodeWithText("Not tested yet").assertIsDisplayed()
+
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Test").performClick()
+        assertEquals(listOf("p2"), tested)
+
+        shown = state.copy(testing = setOf("p2"))
+        compose.onNodeWithText("Testing…").assertIsDisplayed()
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Test").assertIsNotEnabled()
+
+        shown = state.copy(lastTests = state.lastTests + ("p2" to ProfileTest(now - 2 * 60_000L, code = null, latencyMillis = 182)))
+        compose.onNodeWithText("Works · 182 ms · tested 2 min ago").assertIsDisplayed()
+    }
+
     /** J11: the profile a connection uses can only be deleted together with ending the connection, and the dialog says so. */
     @Test
     fun deletingTheProfileInUseSaysItDisconnects() {
@@ -87,7 +133,8 @@ class ProfilesScreenTest {
         compose.onNodeWithText("Delete").performClick()
         compose.onNodeWithText("Disconnect and delete \"Office HTTP\"?").assertIsDisplayed()
         compose.onNodeWithText(
-            "ProxyFlow is using this proxy. Deleting it ends the connection first, and your apps go back to your normal network.",
+            "ProxyFlow is using this proxy. Deleting it ends the connection first: apps then use your normal network unless " +
+                "Android's system kill switch is on.",
             substring = true,
         ).assertIsDisplayed()
         compose.onNodeWithText("Disconnect and delete").performClick()
@@ -115,6 +162,76 @@ class ProfilesScreenTest {
         compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
         compose.onNodeWithText("Use this proxy").performClick()
         assertEquals(listOf("p2"), used)
+    }
+
+    /**
+     * J11: "Use this proxy" while a connection runs on another profile switches it, so the screen asks first, in the words
+     * for the connection's state: traffic held until the new proxy is checked, or, during a first connect, the other proxy
+     * checked instead.
+     */
+    @Test
+    fun usingAnotherProxyWhileConnectedAsksFirst() {
+        val used = mutableListOf<String>()
+        val connected = ProfilesUiState(
+            loading = false,
+            profiles = listOf(office, backup),
+            activeProfileId = "p1",
+            connectedProfileId = "p1",
+            connectionHoldsTraffic = true,
+        )
+        var state by mutableStateOf(connected)
+        compose.setContent {
+            ProxyFlowTheme {
+                ProfilesScreen(state, onAddProxy = {}, onEditProxy = {}, onUseProxy = { used += it }, onDeleteProxy = {})
+            }
+        }
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertIsDisplayed()
+        compose.onNodeWithText(
+            "ProxyFlow is using Office HTTP. Switching ends any open connections through it, and apps can't go online until " +
+                "ProxyFlow is connected through Backup SOCKS.",
+            substring = true,
+        ).assertIsDisplayed()
+        compose.onNodeWithText("If that fails, apps stay offline until ProxyFlow reconnects, you try again or you stop.", substring = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("Cancel").performClick()
+        assertEquals("cancelled: nothing switches", emptyList<String>(), used)
+
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        compose.onNodeWithText("Switch").performClick()
+        assertEquals(listOf("p2"), used)
+
+        // The connection ends while the question is open: it closes, and nothing is switched.
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        state = state.copy(connectedProfileId = null, connectionHoldsTraffic = false)
+        compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertDoesNotExist()
+        assertEquals(listOf("p2"), used)
+
+        // A first connect holds nothing yet: the switch only checks the other proxy instead, and the question says so.
+        state = connected.copy(connectionHoldsTraffic = false)
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        compose.onNodeWithText("ProxyFlow is still checking Office HTTP. Switching checks Backup SOCKS instead", substring = true)
+            .assertIsDisplayed()
+        // The first connect finishes while the question is open: it says what switching does now.
+        state = connected
+        compose.onNodeWithText("ProxyFlow is using Office HTTP. Switching ends any open connections through it", substring = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow is still checking", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Switch").performClick()
+        assertEquals(listOf("p2", "p2"), used)
+
+        // Blocked on a profile deleted since: traffic is blocked already, so the switch is its way out, at once — and no
+        // question is left behind to appear later.
+        state = connected.copy(connectedProfileId = "deleted")
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        assertEquals(listOf("p2", "p2", "p2"), used)
+        state = connected
+        compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertDoesNotExist()
     }
 
     @Test

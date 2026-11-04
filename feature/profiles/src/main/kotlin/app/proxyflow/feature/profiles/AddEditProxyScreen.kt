@@ -31,7 +31,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.proxyflow.core.designsystem.component.BannerTone
 import app.proxyflow.core.designsystem.component.PfBanner
@@ -47,6 +51,9 @@ import app.proxyflow.core.designsystem.component.PfSwitchRow
 import app.proxyflow.core.designsystem.component.PfTextButton
 import app.proxyflow.core.designsystem.component.PfTextField
 import app.proxyflow.core.designsystem.component.PfTopAppBar
+import app.proxyflow.core.designsystem.component.proxyCheckErrorMessage
+import app.proxyflow.core.designsystem.component.proxyCheckErrorTitle
+import app.proxyflow.core.designsystem.theme.MonoSmall
 import app.proxyflow.core.designsystem.theme.Spacing
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
@@ -72,6 +79,9 @@ internal fun AddEditProxyRoute(viewModel: AddEditProxyViewModel, onDone: () -> U
             onTlsServerNameChange = viewModel::onTlsServerNameChange,
             onSave = viewModel::save,
             onTest = viewModel::testConnection,
+            onCancelTest = viewModel::cancelTest,
+            onSaveAndReconnect = viewModel::saveAndReconnect,
+            onKeepEditing = viewModel::keepEditing,
             onBack = onDone,
         ),
     )
@@ -90,20 +100,25 @@ data class AddEditActions(
     val onTlsServerNameChange: (String) -> Unit = {},
     val onSave: () -> Unit = {},
     val onTest: () -> Unit = {},
+    val onCancelTest: () -> Unit = {},
+    /** Board D9's buttons. */
+    val onSaveAndReconnect: () -> Unit = {},
+    val onKeepEditing: () -> Unit = {},
     val onBack: () -> Unit = {},
 )
 
 @Composable
 fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier: Modifier = Modifier) {
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    // While saving, Back waits: what is being saved, and a reconnect it was confirmed with (D9), goes through whole.
     val back: () -> Unit = {
-        if (state.dirty) {
-            confirmDiscard = true
-        } else {
-            actions.onBack()
+        when {
+            state.saving -> Unit
+            state.dirty -> confirmDiscard = true
+            else -> actions.onBack()
         }
     }
-    BackHandler(enabled = state.dirty, onBack = { confirmDiscard = true })
+    BackHandler(enabled = state.dirty || state.saving, onBack = { if (!state.saving) confirmDiscard = true })
 
     val title = stringResource(if (state.isEdit) R.string.edit_title_edit else R.string.edit_title_add)
     val scrollState = rememberScrollState()
@@ -166,7 +181,7 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
             }
             FormFields(state, actions)
             Spacer(Modifier.height(Spacing.sm))
-            TestConnection(state.test, onTest = actions.onTest)
+            TestConnection(state.test, onTest = actions.onTest, onCancel = actions.onCancelTest)
             Spacer(Modifier.height(Spacing.sm))
             PfPrimaryButton(
                 text = stringResource(R.string.edit_save),
@@ -190,6 +205,18 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
             },
             onDismiss = { confirmDiscard = false },
             destructive = true,
+        )
+    }
+    // Board D9: the connection runs on this profile, and saving changes how it reaches its proxy.
+    state.confirmReconnect?.let { name ->
+        val body = if (state.confirmReconnectHolds) R.string.edit_reconnect_body else R.string.edit_reconnect_checking_body
+        PfConfirmDialog(
+            title = stringResource(R.string.edit_reconnect_title),
+            text = stringResource(body, name),
+            confirmLabel = stringResource(R.string.edit_reconnect_confirm),
+            dismissLabel = stringResource(R.string.edit_keep_editing),
+            onConfirm = actions.onSaveAndReconnect,
+            onDismiss = actions.onKeepEditing,
         )
     }
 }
@@ -309,48 +336,87 @@ private fun errorText(error: ProfileError, protocol: ProxyProtocol): String = st
 )
 
 /**
- * "Test connection" and what it found (boards D5–D7). The text only ever reports
- * the tester's own answer; with no engine in this build that answer is
- * [ConnectionTestResult.Unavailable], never a pass.
+ * "Test connection" and what it found (boards D5–D7): only ever the tester's own answer, a real test through the
+ * connection engine (ADR-0014), and a failure in the words connecting uses for it (the error catalogue, docs/m1/04 §4).
  */
 @Composable
-private fun TestConnection(test: ConnectionTestState, onTest: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+private fun TestConnection(test: ConnectionTestState, onTest: () -> Unit, onCancel: () -> Unit) {
+    Column {
         PfSecondaryButton(
             text = stringResource(R.string.edit_test),
             onClick = onTest,
             enabled = test != ConnectionTestState.Testing,
             modifier = Modifier.fillMaxWidth(),
         )
-        when (test) {
-            ConnectionTestState.Idle -> Unit
-            ConnectionTestState.Testing -> Row(
+        // What the test found is announced (TalkBack) when it ends: it can take 15 s, and the user waits for it. The region
+        // holds "Testing…" while the test runs, so the result replacing it is a change TalkBack reads; empty, it takes no
+        // room (and isn't in what TalkBack reaches).
+        Column(
+            Modifier
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .padding(top = if (test == ConnectionTestState.Idle) 0.dp else Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            TestOutcome(test, onCancel)
+        }
+    }
+}
+
+@Composable
+private fun TestOutcome(test: ConnectionTestState, onCancel: () -> Unit) {
+    when (test) {
+        ConnectionTestState.Idle -> Unit
+        ConnectionTestState.Testing -> {
+            Row(
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 PfLoadingIndicator(Modifier.size(Spacing.lg))
-                Text(stringResource(R.string.edit_test_running), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    stringResource(R.string.edit_test_running),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                PfTextButton(text = stringResource(R.string.edit_test_cancel), onClick = onCancel)
             }
-            is ConnectionTestState.Done -> when (val result = test.result) {
-                ConnectionTestResult.Unavailable -> PfBanner(
-                    title = stringResource(R.string.edit_test_unavailable_title),
-                    text = stringResource(R.string.edit_test_unavailable_body),
-                    tone = BannerTone.Info,
+            Text(
+                stringResource(R.string.edit_test_running_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        is ConnectionTestState.Done -> when (val result = test.result) {
+            is ConnectionTestResult.Passed -> PfBanner(
+                title = stringResource(R.string.edit_test_passed_title),
+                text = stringResource(R.string.edit_test_passed_body, result.latencyMillis),
+                tone = BannerTone.Success,
+            )
+            is ConnectionTestResult.Failed -> if (!result.fromEngine && result.code == AUTH_REQUIRED) {
+                // Found before any proxy was asked (ADR-0014 §2): nothing was sent, so not worded as the proxy's answer.
+                // The form's own checks ask for the password first, so this is a profile changed or deleted meanwhile.
+                PfBanner(
+                    title = stringResource(R.string.edit_test_needs_password_title),
+                    text = stringResource(R.string.edit_test_needs_password_body),
+                    tone = BannerTone.Warning,
                 )
-                is ConnectionTestResult.Passed -> PfBanner(
-                    title = stringResource(R.string.edit_test_passed_title),
-                    text = stringResource(R.string.edit_test_passed_body, result.latencyMillis),
-                    tone = BannerTone.Success,
-                )
-                is ConnectionTestResult.Failed -> PfBanner(
-                    title = stringResource(R.string.edit_test_failed_title),
-                    text = stringResource(R.string.edit_test_failed_body, result.code),
+            } else {
+                PfBanner(
+                    title = stringResource(R.string.edit_test_failed_title, proxyCheckErrorTitle(result.error, test.tested)),
+                    text = proxyCheckErrorMessage(result.error, test.tested),
                     tone = BannerTone.Error,
+                )
+                Text(
+                    stringResource(R.string.edit_test_code, listOfNotNull(result.code, result.error.detail).joinToString(" · ")),
+                    style = MonoSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
     }
 }
+
+/** The catalogue's code for a sign-in the proxy needs; also what the tester says when it has no password to send. */
+private const val AUTH_REQUIRED = "AUTH_REQUIRED"
 
 /**
  * Keeps credentials out of screenshots, screen recordings and the recents

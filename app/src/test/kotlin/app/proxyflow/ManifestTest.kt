@@ -7,8 +7,10 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.VpnService
+import android.service.quicksettings.TileService
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.proxyflow.core.vpn.ProxyFlowTileService
 import app.proxyflow.core.vpn.ProxyFlowVpnService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -55,6 +57,23 @@ class ManifestTest {
         // Android finds it for Always-on VPN through this action.
         val found = context.packageManager.queryIntentServices(Intent(VpnService.SERVICE_INTERFACE).setPackage(context.packageName), 0)
         assertEquals(listOf(component.className), found.map { it.serviceInfo.name })
+    }
+
+    /** Board B11 (M9): only Android's system UI can bind the tile, and its long press opens Home. */
+    @Test
+    fun onlyTheSystemUiCanBindTheTileAndALongPressOpensHome() {
+        val component = ComponentName(context, ProxyFlowTileService::class.java)
+        val service = context.packageManager.getServiceInfo(component, 0)
+        assertEquals(android.Manifest.permission.BIND_QUICK_SETTINGS_TILE, service.permission)
+        val tiles = context.packageManager.queryIntentServices(Intent(TileService.ACTION_QS_TILE).setPackage(context.packageName), 0)
+        assertEquals(listOf(component.className), tiles.map { it.serviceInfo.name })
+        val longPress = Intent(TileService.ACTION_QS_TILE_PREFERENCES).setPackage(context.packageName)
+        assertEquals(
+            listOf(MainActivity::class.java.name),
+            context.packageManager.queryIntentActivities(longPress, 0).map {
+                it.activityInfo.name
+            },
+        )
     }
 
     @Test

@@ -2,6 +2,7 @@ package app.proxyflow.feature.profiles
 
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -10,6 +11,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -17,13 +19,17 @@ import androidx.compose.ui.test.printToString
 import androidx.lifecycle.SavedStateHandle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
+import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
+import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.testing.DumpOnFailureRule
 import app.proxyflow.core.testing.FakeConnectionTester
 import app.proxyflow.core.testing.TestProfiles
+import app.proxyflow.core.testing.UnavailableConnectionController
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Rule
@@ -111,7 +117,15 @@ class AddEditProxyScreenTest {
     fun formWindowIsHiddenFromScreenshotsAndRecents() {
         var shown by mutableStateOf(true)
         compose.setContent {
-            val viewModel = remember { AddEditProxyViewModel(SavedStateHandle(), TestProfiles().repository, FakeConnectionTester()) }
+            val viewModel =
+                remember {
+                    AddEditProxyViewModel(
+                        SavedStateHandle(),
+                        TestProfiles().repository,
+                        FakeConnectionTester(),
+                        UnavailableConnectionController(),
+                    )
+                }
             ProxyFlowTheme {
                 if (shown) AddEditProxyRoute(viewModel = viewModel, onDone = {})
             }
@@ -137,10 +151,13 @@ class AddEditProxyScreenTest {
     }
 
     @Test
-    fun testConnectionNeverShowsAPassItWasNotGiven() {
+    fun testConnectionShowsOnlyTheTestersAnswerInTheCataloguesWords() {
         var tests = 0
+        var cancels = 0
         var state by mutableStateOf(AddEditUiState())
-        compose.setContent { ProxyFlowTheme { AddEditProxyScreen(state, AddEditActions(onTest = { tests++ })) } }
+        compose.setContent {
+            ProxyFlowTheme { AddEditProxyScreen(state, AddEditActions(onTest = { tests++ }, onCancelTest = { cancels++ })) }
+        }
 
         compose.onNodeWithText("Test connection").performScrollTo().performClick()
         assertEquals(1, tests)
@@ -148,20 +165,107 @@ class AddEditProxyScreenTest {
         state = state.copy(test = ConnectionTestState.Testing)
         compose.onNodeWithText("Testing the connection…").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Test connection").assertIsNotEnabled()
+        // What the test sends, and where, before it ends (D5; the privacy policy names the same address).
+        compose.onNodeWithText("connectivitycheck.gstatic.com", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("your username and password go only to this proxy", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Cancel").performScrollTo().performClick()
+        assertEquals(1, cancels)
 
-        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Unavailable))
-        compose.onNodeWithText("Testing isn't available yet").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Nothing was sent to your proxy", substring = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Test passed").assertDoesNotExist()
+        val office = ProxyProfile(id = "p1", name = "Office", protocol = ProxyProtocol.HTTP, host = "203.0.113.10", port = 3128)
+        val unreachable = ConnectionTestResult.Failed(ConnectionError("PROXY_UNREACHABLE"), fromEngine = true)
+        state = state.copy(test = ConnectionTestState.Done(unreachable, office))
+        compose.onNodeWithText("Test failed: Can't reach your proxy").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow couldn't connect to 203.0.113.10:3128", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Code: PROXY_UNREACHABLE").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Proxy works").assertDoesNotExist()
 
-        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Failed("AUTH_FAILED")))
-        compose.onNodeWithText("Test failed").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("AUTH_FAILED", substring = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Test passed").assertDoesNotExist()
+        val unsupported = ConnectionError("AUTH_FAILED", ConnectionError.DETAIL_UNSUPPORTED_SIGN_IN + "Digest")
+        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Failed(unsupported, fromEngine = true), office))
+        compose.onNodeWithText("Test failed: Username or password rejected").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow signs in to HTTP proxies with Basic sign-in", substring = true).performScrollTo()
+            .assertIsDisplayed()
 
-        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Passed(latencyMillis = 87)))
-        compose.onNodeWithText("Test passed").performScrollTo().assertIsDisplayed()
+        // No password to send, found before any proxy was asked: not worded as the proxy's answer, and no proxy code.
+        val unsent = ConnectionTestResult.Failed(ConnectionError("AUTH_REQUIRED"), fromEngine = false)
+        state = state.copy(test = ConnectionTestState.Done(unsent, office))
+        compose.onNodeWithText("Enter the password to test").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Nothing was sent.", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Test failed", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Code: AUTH_REQUIRED").assertDoesNotExist()
+
+        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Passed(latencyMillis = 87), office))
+        compose.onNodeWithText("Proxy works").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("87 ms", substring = true).performScrollTo().assertIsDisplayed()
+        // What a pass doesn't change: UDP and ping stay blocked while connected (ADR-0004).
+        compose.onNodeWithText("UDP is still blocked", substring = true).performScrollTo().assertIsDisplayed()
+    }
+
+    /** Board D9: what saving changes to the running connection's profile does, before it is done. */
+    @Test
+    fun reconnectingWithChangesIsConfirmedFirst() {
+        val calls = mutableListOf<String>()
+        compose.setContent {
+            ProxyFlowTheme {
+                AddEditProxyScreen(
+                    AddEditUiState(isEdit = true, dirty = true, confirmReconnect = "Office"),
+                    AddEditActions(onSaveAndReconnect = { calls += "reconnect" }, onKeepEditing = { calls += "keep" }),
+                )
+            }
+        }
+        compose.onNodeWithText("Reconnect with changes?").assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow is using Office.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Nothing is sent around your proxy.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Keep editing").performClick()
+        compose.onNodeWithText("Save and reconnect").performClick()
+        assertEquals(listOf("keep", "reconnect"), calls)
+    }
+
+    /**
+     * While saving, Back waits — the top bar's and Android's — so what is saved, and the reconnect after it, goes through;
+     * also for a form saved without changes, which no discard question would hold.
+     */
+    @Test
+    fun backWaitsWhileSaving() {
+        var backs = 0
+        // What Android's Back reaches when the form lets it go (the screen behind it, the activity): recorded instead.
+        var passedOn = 0
+        compose.runOnUiThread {
+            compose.activity.onBackPressedDispatcher.addCallback(
+                object : OnBackPressedCallback(true) {
+                    override fun handleOnBackPressed() {
+                        passedOn++
+                    }
+                },
+            )
+        }
+        var state by mutableStateOf(AddEditUiState(isEdit = true, dirty = true, saving = true))
+        compose.setContent { ProxyFlowTheme { AddEditProxyScreen(state, AddEditActions(onBack = { backs++ })) } }
+        for (saving in listOf(state, state.copy(dirty = false))) {
+            state = saving
+            compose.onNodeWithContentDescription("Back").performClick()
+            compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+            compose.waitForIdle()
+            assertEquals(0, backs)
+            assertEquals("Android's Back went past the form", 0, passedOn)
+            compose.onNodeWithText("Discard changes?").assertDoesNotExist()
+        }
+    }
+
+    /** D9 during a first connect: the reconnect only checks the new settings, and says so. */
+    @Test
+    fun aReconnectDuringAFirstConnectSaysItOnlyChecks() {
+        compose.setContent {
+            ProxyFlowTheme {
+                AddEditProxyScreen(
+                    AddEditUiState(isEdit = true, dirty = true, confirmReconnect = "Office", confirmReconnectHolds = false),
+                    AddEditActions(),
+                )
+            }
+        }
+        compose.onNodeWithText("Reconnect with changes?").assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow is still checking Office. Saving checks the new settings instead", substring = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("apps can't go online", substring = true).assertDoesNotExist()
     }
 
     @Test

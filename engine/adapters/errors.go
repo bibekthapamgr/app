@@ -63,6 +63,16 @@ func (c Code) IsProxyLevel() bool {
 	return false
 }
 
+// IsTargetAnswer reports whether the code is a proxy's answer about one destination (it refused it, could not reach
+// it, or failed for it), as opposed to the proxy itself failing or the engine refusing on its own.
+func (c Code) IsTargetAnswer() bool {
+	switch c {
+	case CodeTargetNotAllowed, CodeTargetUnreachable, CodeTargetRefused, CodeTargetUnsupported, CodeProxyGeneralFailed:
+		return true
+	}
+	return false
+}
+
 // Error is a categorised adapter error. Detail never contains credentials or
 // payload bytes and is safe to log. Err is the underlying cause, kept for
 // errors.Is/As; it never contains secrets either (handshake buffers are not
@@ -73,6 +83,8 @@ type Error struct {
 	Err    error
 	// timeout marks a PROXY_UNREACHABLE that is a timeout (see IsTimeout).
 	timeout bool
+	// unanswered marks a TARGET_UNREACHABLE that is a SOCKS5 proxy's silence (see IsUnanswered).
+	unanswered bool
 }
 
 func (e *Error) Error() string {
@@ -104,6 +116,20 @@ func IsTimeout(err error) bool {
 		return false
 	}
 	return e.Code == CodeTimeout || e.timeout
+}
+
+// newUnansweredErr is a TARGET_UNREACHABLE that IsUnanswered recognises.
+func newUnansweredErr(detail string, cause error) *Error {
+	return &Error{Code: CodeTargetUnreachable, Detail: detail, Err: cause, unanswered: true}
+}
+
+// IsUnanswered reports whether err is a SOCKS5 proxy that answered the method selection (and the sign-in) but not the
+// connection request within the handshake's own deadline: the site's failure for this one connection, since the proxy
+// may still be trying to reach it, but several in a row to different sites mean the proxy's own way out is broken (the
+// tunnel counts them, M8).
+func IsUnanswered(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.unanswered
 }
 
 // CodeOf extracts the Code from an error chain, or CodeInternal.

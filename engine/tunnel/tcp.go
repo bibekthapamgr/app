@@ -125,15 +125,16 @@ func (e *Engine) handleTCP(r *tcp.ForwarderRequest) {
 	if err != nil {
 		completed = true
 		code := adapters.CodeOf(err)
-		e.stats.proxyResult(code)
+		unanswered := adapters.IsUnanswered(err)
+		e.stats.proxyResult(code, unanswered, siteKey(target))
 		if adapters.IsTimeout(err) {
 			e.stats.proxyTimeouts.Add(1)
 		}
-		e.refuse(r, f, code, adapters.DetailOf(err))
+		e.refuseWith(r, f, code, adapters.DetailOf(err), unanswered)
 		return
 	}
 	cleanup = func() { up.Close() }
-	e.stats.proxyResult("")
+	e.stats.proxyResult("", false, 0)
 
 	var wq waiter.Queue
 	ep, terr := r.CreateEndpoint(&wq)
@@ -176,6 +177,11 @@ func (e *Engine) handleTCP(r *tcp.ForwarderRequest) {
 // CANCELED (Stop or ResetFlows during set-up) is counted but not reported as
 // a failure.
 func (e *Engine) refuse(r *tcp.ForwarderRequest, f *flow, code adapters.Code, detail string) {
+	e.refuseWith(r, f, code, detail, false)
+}
+
+// refuseWith is refuse for a dial's failure; unanswered marks a SOCKS5 request the proxy left unanswered.
+func (e *Engine) refuseWith(r *tcp.ForwarderRequest, f *flow, code adapters.Code, detail string, unanswered bool) {
 	r.Complete(true)
 	if code == adapters.CodeCanceled {
 		e.stats.canceled.Add(1)
@@ -184,7 +190,7 @@ func (e *Engine) refuse(r *tcp.ForwarderRequest, f *flow, code adapters.Code, de
 	e.stats.tcpFailed.Add(1)
 	e.stats.failure(code, detail, f.dstKind == "hostname")
 	e.emit(Event{Type: EvConnFail, ConnID: f.id, Proto: FlowTCP, DstKind: f.dstKind, Dst: f.dst, Port: f.port,
-		Code: string(code), Detail: detail})
+		Code: string(code), Detail: detail, Unanswered: unanswered})
 }
 
 func (e *Engine) recovered() {

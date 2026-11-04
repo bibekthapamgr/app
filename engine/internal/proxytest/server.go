@@ -48,6 +48,9 @@ type Config struct {
 	TunnelPreface  []byte        // bytes sent right after a successful reply, before relaying
 	RawResponse    []byte        // HTTP: send these bytes instead of any response, then close
 	DestDialTimout time.Duration // default 5 s
+	// SOCKS5: answer the method selection (and the sign-in), then never answer CONNECT, as a proxy still
+	// trying to reach an unresponsive site does.
+	StallConnect bool
 }
 
 // Record is what the mock proxy saw for one client connection. Test-only:

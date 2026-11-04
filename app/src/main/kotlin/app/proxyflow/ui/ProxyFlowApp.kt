@@ -16,15 +16,28 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import app.proxyflow.feature.about.HelpTopics
 import app.proxyflow.feature.about.aboutScreen
+import app.proxyflow.feature.about.helpScreen
+import app.proxyflow.feature.about.licenceTextScreen
+import app.proxyflow.feature.about.licencesScreen
 import app.proxyflow.feature.about.navigateToAbout
+import app.proxyflow.feature.about.navigateToHelp
+import app.proxyflow.feature.about.navigateToLicenceText
+import app.proxyflow.feature.about.navigateToLicences
+import app.proxyflow.feature.about.navigateToPrivacyPolicy
+import app.proxyflow.feature.about.privacyPolicyScreen
 import app.proxyflow.feature.home.HomeDestination
 import app.proxyflow.feature.home.homeScreen
 import app.proxyflow.feature.logs.logsScreen
+import app.proxyflow.feature.onboarding.howItWorksScreen
+import app.proxyflow.feature.onboarding.navigateToHowItWorks
 import app.proxyflow.feature.profiles.AddEditProxyDestination
 import app.proxyflow.feature.profiles.addEditProxyScreen
 import app.proxyflow.feature.profiles.navigateToAddEditProxy
 import app.proxyflow.feature.profiles.profilesScreen
+import app.proxyflow.feature.settings.killSwitchGuideScreen
+import app.proxyflow.feature.settings.navigateToKillSwitchGuide
 import app.proxyflow.feature.settings.settingsScreen
 import app.proxyflow.navigation.TopLevelDestination
 import app.proxyflow.navigation.isTopLevel
@@ -32,7 +45,9 @@ import app.proxyflow.navigation.navigateToTopLevel
 
 /**
  * The app shell: bottom navigation for the four top-level screens and one
- * navigation graph. Add/Edit proxy and About are full screen, without the bar.
+ * navigation graph. Add/Edit proxy, About and the pages it opens (how ProxyFlow
+ * works, the privacy policy, Help) and the system kill switch guide are full
+ * screen, without the bar.
  */
 @Composable
 fun ProxyFlowApp(
@@ -70,8 +85,11 @@ fun ProxyFlowApp(
             homeScreen(
                 viewModelFactory = viewModelFactory,
                 onAddProxy = { navController.navigateToAddEditProxy() },
-                onChangeProfile = { navController.navigateToTopLevel(TopLevelDestination.Profiles) },
+                onManageProfiles = { navController.navigateToTopLevel(TopLevelDestination.Profiles) },
                 onEditProfile = { id -> navController.navigateToAddEditProxy(id) },
+                onOpenLogs = { navController.navigateToTopLevel(TopLevelDestination.Logs) },
+                onOpenKillSwitchGuide = { navController.navigateToKillSwitchGuide() },
+                onLearnAboutCertificates = { navController.navigateToHelp(HelpTopics.CERTIFICATES) },
             )
             profilesScreen(
                 viewModelFactory = viewModelFactory,
@@ -83,9 +101,30 @@ fun ProxyFlowApp(
                 viewModelFactory = viewModelFactory,
                 onDone = { navController.popBackStack<AddEditProxyDestination>(inclusive = true) },
             )
-            logsScreen(viewModelFactory = viewModelFactory)
-            settingsScreen(viewModelFactory = viewModelFactory, onOpenAbout = { navController.navigateToAbout() })
-            aboutScreen(version = version, onBack = { navController.popBackStack() })
+            logsScreen(viewModelFactory = viewModelFactory, appVersion = version)
+            settingsScreen(
+                viewModelFactory = viewModelFactory,
+                onOpenAbout = { navController.navigateToAbout() },
+                onOpenKillSwitchGuide = { navController.navigateToKillSwitchGuide() },
+                onOpenHelp = { navController.navigateToHelp() },
+            )
+            killSwitchGuideScreen(viewModelFactory = viewModelFactory, onBack = { navController.popBackStack() })
+            aboutScreen(
+                version = version,
+                onBack = { navController.popBackStack() },
+                onOpenHowItWorks = { navController.navigateToHowItWorks() },
+                onOpenPrivacyPolicy = { navController.navigateToPrivacyPolicy() },
+                onOpenHelp = { navController.navigateToHelp() },
+                onOpenLicences = { navController.navigateToLicences() },
+            )
+            licencesScreen(onBack = { navController.popBackStack() }, onOpenLicence = { id -> navController.navigateToLicenceText(id) })
+            licenceTextScreen(onBack = { navController.popBackStack() })
+            howItWorksScreen(onBack = { navController.popBackStack() })
+            privacyPolicyScreen(version = version, onBack = { navController.popBackStack() })
+            helpScreen(
+                onBack = { navController.popBackStack() },
+                onOpenKillSwitchGuide = { navController.navigateToKillSwitchGuide() },
+            )
         }
     }
 }

@@ -30,6 +30,8 @@ kotlin {
 }
 
 dependencies {
+    // The error catalogue's words (ProxyErrors.kt) are written for the model's errors and profiles.
+    api(project(":core:model"))
     api(platform(libs.androidx.compose.bom))
     api(libs.androidx.compose.ui)
     api(libs.androidx.compose.foundation)

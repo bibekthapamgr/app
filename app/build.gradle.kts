@@ -34,8 +34,9 @@ android {
         applicationId = providers.gradleProperty("proxyflow.applicationId").get()
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 5
-        versionName = "0.5.0"
+        // M9: the feature-complete candidate (ADR-0014); M11 sets the release's.
+        versionCode = 9
+        versionName = "0.9.0"
         // The VPN's end-to-end tests (src/androidTest): the real service, engine and proxies on emulators. The runner
         // lets a test trust the lab's CA for TLS proxies (ADR-0011); the app as installed never does.
         testInstrumentationRunner = "app.proxyflow.e2e.E2eTestRunner"
@@ -111,6 +112,9 @@ dependencies {
     implementation(project(":feature:settings"))
     implementation(project(":feature:logs"))
     implementation(project(":feature:about"))
+    implementation(project(":feature:onboarding"))
+    // ProxyFlow's own Lint checks (LogSecret), run by :app:lintDebug over every module above.
+    lintChecks(project(":lint-rules"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
