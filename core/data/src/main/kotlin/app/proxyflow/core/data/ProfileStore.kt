@@ -3,13 +3,17 @@ package app.proxyflow.core.data
 import app.proxyflow.core.data.crypto.SealedCredentials
 import app.proxyflow.core.data.db.ProfileDao
 import app.proxyflow.core.data.db.ProfileEntity
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.model.TlsMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-/** A profile as stored: its settings plus the encrypted credentials, if any. */
+/**
+ * A profile as stored: its settings plus the encrypted credentials, if any, and its last connection test ([lastTest],
+ * M9), which belongs to these settings and credentials only.
+ */
 data class ProfileRecord(
     val id: String,
     val name: String,
@@ -22,6 +26,7 @@ data class ProfileRecord(
     val credentials: SealedCredentials?,
     val createdAtMillis: Long,
     val updatedAtMillis: Long,
+    val lastTest: ProfileTest? = null,
 ) {
     fun toProfile() = ProxyProfile(
         id = id,
@@ -37,7 +42,7 @@ data class ProfileRecord(
     )
 
     companion object {
-        fun of(profile: ProxyProfile, credentials: SealedCredentials?) = ProfileRecord(
+        fun of(profile: ProxyProfile, credentials: SealedCredentials?, lastTest: ProfileTest? = null) = ProfileRecord(
             id = profile.id,
             name = profile.name,
             protocol = profile.protocol,
@@ -49,6 +54,7 @@ data class ProfileRecord(
             credentials = credentials,
             createdAtMillis = profile.createdAtMillis,
             updatedAtMillis = profile.updatedAtMillis,
+            lastTest = lastTest,
         )
     }
 }
@@ -74,6 +80,9 @@ interface ProfileStore {
     /** @return false when there is no record with that id. */
     suspend fun update(record: ProfileRecord): Boolean
 
+    /** Keeps [test] as [id]'s last connection test, changing nothing else. @return false when there is no such record. */
+    suspend fun recordTest(id: String, test: ProfileTest): Boolean
+
     suspend fun delete(id: String)
 }
 
@@ -90,6 +99,9 @@ class RoomProfileStore(private val dao: ProfileDao) : ProfileStore {
     override suspend fun insert(record: ProfileRecord) = dao.insert(record.toEntity())
 
     override suspend fun update(record: ProfileRecord): Boolean = dao.update(record.toEntity()) == 1
+
+    override suspend fun recordTest(id: String, test: ProfileTest): Boolean =
+        dao.recordTest(id, test.atMillis, test.code, test.latencyMillis) == 1
 
     override suspend fun delete(id: String) {
         dao.delete(id)
@@ -117,6 +129,7 @@ class RoomProfileStore(private val dao: ProfileDao) : ProfileStore {
             },
             createdAtMillis = createdAtMillis,
             updatedAtMillis = updatedAtMillis,
+            lastTest = lastTestAtMillis?.let { ProfileTest(it, lastTestCode, lastTestLatencyMillis) },
         )
     }
 
@@ -135,5 +148,8 @@ class RoomProfileStore(private val dao: ProfileDao) : ProfileStore {
         credentialsKey = credentials?.keyId,
         createdAtMillis = createdAtMillis,
         updatedAtMillis = updatedAtMillis,
+        lastTestAtMillis = lastTest?.atMillis,
+        lastTestCode = lastTest?.code,
+        lastTestLatencyMillis = lastTest?.latencyMillis,
     )
 }

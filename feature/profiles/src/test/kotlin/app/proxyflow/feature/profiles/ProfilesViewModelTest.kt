@@ -1,14 +1,21 @@
 package app.proxyflow.feature.profiles
 
 import app.proxyflow.core.data.ConnectionController
+import app.proxyflow.core.data.ConnectionTester
 import app.proxyflow.core.data.CredentialsRead
 import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.ConnectionTestResult
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
+import app.proxyflow.core.testing.FakeConnectionTester
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
+import app.proxyflow.core.testing.UnavailableConnectionController
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
@@ -27,10 +34,14 @@ class ProfilesViewModelTest {
     val main = MainDispatcherRule()
 
     private val repository = TestProfiles().repository
+    private val tester = FakeConnectionTester()
+
+    private fun viewModel(repo: ProfileRepository = repository, connection: ConnectionController = UnavailableConnectionController()) =
+        ProfilesViewModel(repo, connection, tester)
 
     @Test
     fun listsProfilesInSaveOrderAndMarksTheActiveOne() = runTest {
-        val vm = ProfilesViewModel(repository)
+        val vm = viewModel()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
         assertFalse(vm.uiState.value.loading)
         assertTrue(vm.uiState.value.profiles.isEmpty())
@@ -44,7 +55,7 @@ class ProfilesViewModelTest {
 
     @Test
     fun useAndDeleteChangeTheList() = runTest {
-        val vm = ProfilesViewModel(repository)
+        val vm = viewModel()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
         repository.save(null, ProxyProfileInput(server = "a.example.com", port = "1080"))
         repository.save(null, ProxyProfileInput(server = "b.example.com", port = "1080"))
@@ -60,7 +71,7 @@ class ProfilesViewModelTest {
     @Test
     fun deletingTheProfileAConnectionUsesDisconnectsFirst() = runTest {
         val connection = RecordingConnection()
-        val vm = ProfilesViewModel(repository, connection)
+        val vm = viewModel(connection = connection)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
         repository.save(null, ProxyProfileInput(server = "a.example.com", port = "1080"))
         repository.save(null, ProxyProfileInput(server = "b.example.com", port = "1080"))
@@ -77,7 +88,7 @@ class ProfilesViewModelTest {
 
     @Test
     fun duplicateAddsANamedCopyWithTheSameSignIn() = runTest {
-        val vm = ProfilesViewModel(repository)
+        val vm = viewModel()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
         val office =
             ProxyProfileInput(
@@ -105,7 +116,7 @@ class ProfilesViewModelTest {
         val broken = object : ProfileRepository by repository {
             override suspend fun duplicate(id: String, name: String): ProxyProfile? = throw IllegalStateException("Keystore unavailable")
         }
-        val vm = ProfilesViewModel(broken)
+        val vm = viewModel(broken)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
         repository.save(null, ProxyProfileInput(name = "Office", server = "a.example.com", port = "1080"))
 
@@ -115,6 +126,61 @@ class ProfilesViewModelTest {
 
         vm.onFailureShown()
         assertNull(vm.uiState.value.failed)
+    }
+
+    @Test
+    fun useThisProxySwitchesARunningConnectionToItAndOnlyThen() = runTest {
+        val connection = RecordingConnection()
+        val vm = viewModel(connection = connection)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
+        repository.save(null, ProxyProfileInput(server = "a.example.com", port = "1080"))
+        repository.save(null, ProxyProfileInput(server = "b.example.com", port = "1080"))
+
+        vm.setActive("p2")
+        assertEquals("disconnected: nothing starts", emptyList<String>(), connection.calls)
+        connection.current.value = ConnectionState(ConnectionStatus.Connected, profileId = "p2")
+        vm.setActive("p2")
+        assertEquals("already its connection", emptyList<String>(), connection.calls)
+        vm.setActive("p1")
+        assertEquals(listOf("connect p1"), connection.calls)
+        assertEquals("p1", vm.uiState.value.activeProfileId)
+    }
+
+    @Test
+    fun testFromTheListShowsItRunningThenTheKeptResult() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val keeping = object : ConnectionTester by tester {
+            override suspend fun testSaved(profileId: String): ConnectionTestResult? {
+                gate.await()
+                val tested = repository.get(profileId) ?: return null
+                repository.recordTest(profileId, tested, ProfileTest(5_000, code = "AUTH_FAILED", latencyMillis = null))
+                return ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED"))
+            }
+        }
+        val vm = ProfilesViewModel(repository, UnavailableConnectionController(), keeping)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
+        repository.save(null, ProxyProfileInput(server = "a.example.com", port = "1080"))
+
+        vm.test("p1")
+        vm.test("p1") // not twice at once
+        assertEquals(setOf("p1"), vm.uiState.value.testing)
+        gate.complete(Unit)
+        assertEquals(emptySet<String>(), vm.uiState.value.testing)
+        assertEquals("AUTH_FAILED", vm.uiState.value.lastTests["p1"]?.code)
+        assertNull("the proxy's answer is no failure of the app's", vm.uiState.value.failed)
+    }
+
+    @Test
+    fun aTestThatCouldntRunOnThisPhoneIsReported() = runTest {
+        val vm = viewModel()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
+        repository.save(null, ProxyProfileInput(server = "a.example.com", port = "1080"))
+
+        tester.result = ConnectionTestResult.Failed(ConnectionError(ConnectionError.INTERNAL, "the packet engine could not be loaded"))
+        vm.test("p1")
+        assertEquals(ProfileAction.Test, vm.uiState.value.failed)
+        assertEquals(listOf("p1"), tester.savedRequests)
+        assertTrue(vm.uiState.value.testing.isEmpty())
     }
 
     private class RecordingConnection : ConnectionController {

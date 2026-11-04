@@ -28,6 +28,7 @@ import app.proxyflow.core.model.DnsProblems
 import app.proxyflow.core.model.ExitReason
 import app.proxyflow.core.model.Interruption
 import app.proxyflow.core.model.KillSwitchStatus
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.model.ReconnectInfo
@@ -54,6 +55,9 @@ class HomeScreenTest {
     private val actions = HomeActions(
         onAddProxy = { calls += "add" },
         onChangeProfile = { calls += "change" },
+        onChooseProfile = { calls += "choose $it" },
+        onManageProfiles = { calls += "manage" },
+        onDismissPicker = { calls += "dismiss picker" },
         onEditProfile = { calls += "edit $it" },
         onConnect = { calls += "connect" },
         onDisconnect = { calls += "disconnect" },
@@ -628,6 +632,32 @@ class HomeScreenTest {
 
     private fun stateOf(text: String): String? =
         compose.onNodeWithText(text, useUnmergedTree = false).fetchSemanticsNode().config.getOrNull(SemanticsProperties.StateDescription)
+
+    /** Board B8: every profile with its last test, the one Home shows chosen; while connected, it says picking switches. */
+    @Test
+    fun thePickerListsTheProfilesAndSaysWhenPickingSwitches() {
+        val tokyo = ProxyProfile(id = "p2", name = "Tokyo", protocol = ProxyProtocol.SOCKS5, host = "proxy.example.com", port = 1443)
+        val now = 1_793_000_000_000L
+        val disconnected = ready(ConnectionState.Idle).copy(
+            profiles = listOf(profile, tokyo),
+            lastTests = mapOf("p2" to ProfileTest(now - 2 * 60_000L, code = null, latencyMillis = 182)),
+        )
+        var state by mutableStateOf<HomeUiState>(disconnected)
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions, nowMillis = now, picking = true) } }
+
+        compose.onNodeWithText("Choose proxy").assertIsDisplayed()
+        compose.onNodeWithText("Works · 182 ms · tested 2 min ago").assertIsDisplayed()
+        compose.onNodeWithText("Not tested yet").assertIsDisplayed()
+        compose.onNodeWithText("Choosing another proxy", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Tokyo").performClick()
+        compose.onNodeWithText("Manage profiles").performClick()
+        compose.onNodeWithText("Add proxy").performClick()
+        assertEquals(listOf("choose p2", "manage", "add"), calls)
+
+        state =
+            disconnected.copy(connection = ConnectionState(ConnectionStatus.Connected, "p1", "Office", profile, connectedSinceMillis = now))
+        compose.onNodeWithText("Choosing another proxy reconnects through it", substring = true).assertIsDisplayed()
+    }
 
     private fun ready(
         connection: ConnectionState,

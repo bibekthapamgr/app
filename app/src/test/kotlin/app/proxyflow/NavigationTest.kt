@@ -96,8 +96,10 @@ class NavigationTest {
         compose.onNodeWithText("proxy.example.com").assertIsDisplayed()
         compose.onNodeWithText("Connect").assertIsEnabled()
 
-        // Home → Profiles (Change) → Edit proxy → Back.
+        // Home → the picker (Change, B8) → Profiles (Manage profiles) → Edit proxy → Back.
         compose.onNodeWithText("Change").performClick()
+        compose.waitForText("Choose proxy").assertIsDisplayed()
+        compose.onNodeWithText("Manage profiles").performClick()
         compose.tab("Profiles").assertIsSelected()
         compose.waitForText("ACTIVE").assertIsDisplayed()
         compose.onNodeWithText("proxy.example.com:1080").performClick()

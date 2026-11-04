@@ -81,7 +81,7 @@ fun ProxyFlowApp(
             homeScreen(
                 viewModelFactory = viewModelFactory,
                 onAddProxy = { navController.navigateToAddEditProxy() },
-                onChangeProfile = { navController.navigateToTopLevel(TopLevelDestination.Profiles) },
+                onManageProfiles = { navController.navigateToTopLevel(TopLevelDestination.Profiles) },
                 onEditProfile = { id -> navController.navigateToAddEditProxy(id) },
                 onOpenLogs = { navController.navigateToTopLevel(TopLevelDestination.Logs) },
                 onOpenKillSwitchGuide = { navController.navigateToKillSwitchGuide() },

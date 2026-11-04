@@ -13,7 +13,7 @@ data object HomeDestination
 fun NavGraphBuilder.homeScreen(
     viewModelFactory: ViewModelProvider.Factory,
     onAddProxy: () -> Unit,
-    onChangeProfile: () -> Unit,
+    onManageProfiles: () -> Unit,
     onEditProfile: (String) -> Unit,
     onOpenLogs: () -> Unit,
     onOpenKillSwitchGuide: () -> Unit = {},
@@ -23,7 +23,7 @@ fun NavGraphBuilder.homeScreen(
         HomeRoute(
             viewModel = viewModel(factory = viewModelFactory),
             onAddProxy = onAddProxy,
-            onChangeProfile = onChangeProfile,
+            onManageProfiles = onManageProfiles,
             onEditProfile = onEditProfile,
             onOpenLogs = onOpenLogs,
             onOpenKillSwitchGuide = onOpenKillSwitchGuide,

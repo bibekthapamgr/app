@@ -21,9 +21,13 @@
     <string name="profiles_disconnect_delete_body">ProxyFlow is using this proxy. Deleting it ends the connection first: apps then use your normal network unless Android\'s system kill switch is on.</string>
     <string name="profiles_cancel">Cancel</string>
     <string name="profiles_duplicate">Duplicate</string>
+    <!-- Board C2's menu: tests the saved profile as connecting would (J3, ADR-0014). -->
+    <string name="profiles_test">Test</string>
     <string name="profiles_use_failed">Couldn\'t switch to this proxy. Try again.</string>
     <string name="profiles_duplicate_failed">Couldn\'t duplicate this proxy. Try again.</string>
     <string name="profiles_delete_failed">Couldn\'t delete this proxy. Try again.</string>
+    <!-- A test that couldn't run on this phone (the Android Keystore or the connection engine), so nothing was found. -->
+    <string name="profiles_test_failed">Couldn\'t test this proxy on this phone. Try again.</string>
     <!-- Name of a duplicated profile: %1$s is the original's name. -->
     <string name="profiles_copy_name">%1$s (copy)</string>
     <!-- Name of a further duplicate: %1$s is the original's name, %2$d counts the copies (2, 3, …). -->
@@ -50,12 +54,15 @@
     <string name="edit_credentials_unreadable_body">The saved sign-in can\'t be read on this phone any more, so it isn\'t used. Enter it again.</string>
     <string name="edit_test">Test connection</string>
     <string name="edit_test_running">Testing the connection…</string>
-    <string name="edit_test_unavailable_title">Testing isn\'t available yet</string>
-    <string name="edit_test_unavailable_body">Testing needs the connection engine, which comes in a later version. Nothing was sent to your proxy.</string>
-    <string name="edit_test_passed_title">Test passed</string>
-    <string name="edit_test_passed_body">Your proxy opened a test connection in %1$d ms.</string>
-    <string name="edit_test_failed_title">Test failed</string>
-    <string name="edit_test_failed_body">The test stopped with %1$s.</string>
+    <string name="edit_test_cancel">Cancel</string>
+    <!-- Board D5. The test is ProxyFlow's pre-flight check (ADR-0010 §4, ADR-0014): the target is named in the privacy policy. -->
+    <string name="edit_test_running_note">ProxyFlow asks this proxy to open a connection to connectivitycheck.gstatic.com, then closes it without sending anything through it. Your phone\'s network doesn\'t change, and your username and password go only to this proxy.</string>
+    <!-- Board D6: how long reaching the proxy, its sign-in and its tunnel took; what still can't go through it. -->
+    <string name="edit_test_passed_title">Proxy works</string>
+    <string name="edit_test_passed_body">Your proxy opened a test connection in %1$d ms. While connected, UDP is still blocked and ping isn\'t answered.</string>
+    <!-- Board D7. %1$s: the error catalogue's title, the one connecting shows for the same failure. -->
+    <string name="edit_test_failed_title">Test failed: %1$s</string>
+    <string name="edit_test_code">Code: %1$s</string>
     <string name="edit_password_reenter">Enter the password again: the server, port, protocol, username or TLS setting changed</string>
     <string name="edit_tls">TLS to the proxy</string>
     <string name="edit_tls_hint">Recommended. Encrypts the connection between this phone and your proxy, which must support TLS on this port. HTTPS sites stay encrypted end to end either way.</string>

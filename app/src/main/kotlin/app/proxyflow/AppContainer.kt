@@ -21,7 +21,6 @@ import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.data.ProfileStorage
 import app.proxyflow.core.data.ProtectionStore
 import app.proxyflow.core.data.SettingsRepository
-import app.proxyflow.core.data.UnavailableConnectionTester
 import app.proxyflow.core.data.crypto.AndroidKeystoreSecretKeyStore
 import app.proxyflow.core.data.crypto.SecretKeyStore
 import app.proxyflow.core.vpn.RetryPolicy
@@ -46,7 +45,8 @@ import kotlinx.coroutines.launch
  * Manual dependency injection (ADR-0008): the one place that decides which
  * implementation each screen gets. Later milestones swap implementations here
  * without touching the screens: the VPN-backed connection controller arrived in
- * M5 (ADR-0010); the engine-backed connection tester waits for decision D6.
+ * M5 (ADR-0010), the engine-backed connection tester in M9 (ADR-0014; what it
+ * contacts follows the pre-flight check, open decision D6).
  *
  * @param credentialKeys where the per-profile credential keys live: the Android
  *   Keystore in the app; JVM tests, where it does not exist, pass software keys.
@@ -94,7 +94,7 @@ class AppContainer(
     val vpnRuntime =
         VpnRuntime(appContext, profiles, appScope, proxyTrust, logs = logRepository, retry = retry, protection = protectionStore)
     val connectionController: ConnectionController = vpnRuntime.controller
-    val connectionTester: ConnectionTester = UnavailableConnectionTester()
+    val connectionTester: ConnectionTester = vpnRuntime.tester
 
     init {
         // Keys left behind by a delete that was interrupted (ADR-0006). A failure here only delays that clean-up.
@@ -121,7 +121,7 @@ class AppContainer(
     /** Creates every screen's ViewModel; navigation passes it to each destination. */
     val viewModelFactory: ViewModelProvider.Factory = viewModelFactory {
         initializer { HomeViewModel(profileRepository, connectionController, protectionStore) }
-        initializer { ProfilesViewModel(profileRepository, connectionController) }
+        initializer { ProfilesViewModel(profileRepository, connectionController, connectionTester) }
         initializer { AddEditProxyViewModel(createSavedStateHandle(), profileRepository, connectionTester) }
         initializer { SettingsViewModel(settingsRepository, protectionStore, connectionController, logRepository) }
         initializer { LogsViewModel(logRepository, profileRepository) }

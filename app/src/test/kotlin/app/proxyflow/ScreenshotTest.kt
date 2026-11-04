@@ -28,6 +28,7 @@ import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
 import app.proxyflow.core.model.LogFilter
 import app.proxyflow.core.model.LogRetention
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
@@ -85,8 +86,8 @@ import org.robolectric.annotation.GraphicsMode
  *
  * The proxy form states are the ones its ViewModel produces for that input (D3
  * takes its errors from the validator itself), so those images show what a user
- * sees. D5 shows the only answer "Test connection" can give before the engine
- * exists (M4): not available, never a pass. F2 and F3 show sample entries of the kinds the
+ * sees. D6 and D7 show the answers of the engine's test (M9, ADR-0014) for a pass and a
+ * failed sign-in; nothing but the engine produces a pass. F2 and F3 show sample entries of the kinds the
  * session writes (ADR-0012).
  */
 @RunWith(AndroidJUnit4::class)
@@ -110,6 +111,31 @@ class ScreenshotTest {
 
     @Test
     fun homeWithProfile() = captureBothThemes("B2_home_disconnected") { HomeScreen(home(ConnectionState.Idle), HomeActions()) }
+
+    /** B8, the profile picker, while disconnected: each profile with its last test, the one Home shows chosen. */
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun profilePicker() {
+        compose.setContent {
+            ProxyFlowTheme { HomeScreen(home(ConnectionState.Idle).withProfiles(), HomeActions(), nowMillis = SAMPLE_TIME, picking = true) }
+        }
+        compose.waitForIdle() // let the sheet draw before the screen is captured
+        captureScreenRoboImage("$DIR/B8_profile_picker_light.png")
+    }
+
+    /** B8 while connected: picking another proxy switches the connection to it (J11), which the sheet says first. */
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun profilePickerConnected() {
+        val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, tokyo, connectedSinceMillis = SAMPLE_TIME)
+        compose.setContent {
+            ProxyFlowTheme(darkTheme = true) {
+                HomeScreen(home(connected).withProfiles(), HomeActions(), nowMillis = SAMPLE_TIME, picking = true)
+            }
+        }
+        compose.waitForIdle()
+        captureScreenRoboImage("$DIR/B8_profile_picker_connected_dark.png")
+    }
 
     /** B2 with Android's kill switch on, as Android last said (M8): apps have no internet while ProxyFlow is off. */
     @Test
@@ -261,16 +287,33 @@ class ScreenshotTest {
         ProfilesScreen(ProfilesUiState(loading = false), onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {})
     }
 
+    /** C2 as the board: one profile that works, one whose sign-in failed yesterday, one never tested (M9). */
     @Test
     fun profilesList() = captureBothThemes("C2_profiles_list") {
-        ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {})
+        ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}, nowMillis = SAMPLE_TIME)
+    }
+
+    /** A test from C2's menu running: its card says so, and Test can't be started twice. */
+    @Test
+    fun profileTesting() = captureBothThemes("C2_profile_testing") {
+        ProfilesScreen(
+            profilesState.copy(testing = setOf("p3")),
+            onAddProxy = {},
+            onEditProxy = {},
+            onUseProxy = {},
+            onDeleteProxy = {},
+            nowMillis = SAMPLE_TIME,
+        )
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun deleteConfirmation() {
         compose.setContent {
-            ProxyFlowTheme { ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}) }
+            ProxyFlowTheme {
+                ProfilesScreen(profilesState, onAddProxy = {
+                }, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}, nowMillis = SAMPLE_TIME)
+            }
         }
         compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
         compose.onNodeWithText("Delete").performClick()
@@ -282,7 +325,10 @@ class ScreenshotTest {
     @Test
     fun profileActions() {
         compose.setContent {
-            ProxyFlowTheme { ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}) }
+            ProxyFlowTheme {
+                ProfilesScreen(profilesState, onAddProxy = {
+                }, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}, nowMillis = SAMPLE_TIME)
+            }
         }
         compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
         compose.waitForIdle() // let the menu draw before the screen is captured
@@ -365,10 +411,21 @@ class ScreenshotTest {
         AddEditProxyScreen(AddEditUiState(input = tokyoForm, dirty = true, test = ConnectionTestState.Testing), AddEditActions())
     }
 
+    /** D6: the engine opened a test connection through the proxy (EngineConnectionTester); nothing else shows this. */
     @Test
-    fun testNotAvailableYet() = captureBothThemes("D5_test_unavailable", scrollTo = "Testing isn't available yet") {
+    fun testPassed() = captureBothThemes("D6_test_passed", scrollTo = "Proxy works") {
         AddEditProxyScreen(
-            AddEditUiState(input = tokyoForm, dirty = true, test = ConnectionTestState.Done(ConnectionTestResult.Unavailable)),
+            AddEditUiState(input = tokyoForm, dirty = true, test = ConnectionTestState.Done(ConnectionTestResult.Passed(182), tokyo)),
+            AddEditActions(),
+        )
+    }
+
+    /** D7: the proxy rejected the sign-in, in the words Home uses for it (the error catalogue), with its code. */
+    @Test
+    fun testFailed() = captureBothThemes("D7_test_failed", scrollTo = "Code: AUTH_FAILED") {
+        val rejected = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED", "proxy rejected the credentials"))
+        AddEditProxyScreen(
+            AddEditUiState(input = officeForm, dirty = true, test = ConnectionTestState.Done(rejected, office)),
             AddEditActions(),
         )
     }
@@ -535,6 +592,9 @@ class ScreenshotTest {
         interruption = interruption,
     )
 
+    /** Home's state with the saved profiles and their last tests, for the picker (B8). */
+    private fun HomeUiState.Ready.withProfiles() = copy(profiles = profilesState.profiles, lastTests = profilesState.lastTests)
+
     /** A screen with a dialog open, in the light theme (dialogs draw in their own window, so the whole screen is captured). */
     @OptIn(ExperimentalRoborazziApi::class)
     private fun captureDialog(name: String, content: @Composable () -> Unit) {
@@ -662,7 +722,17 @@ class ScreenshotTest {
         )
         val backup =
             ProxyProfile(id = "p3", name = "Backup SOCKS", protocol = ProxyProtocol.SOCKS5, host = "socks.example.net", port = 1080)
-        val profilesState = ProfilesUiState(loading = false, profiles = listOf(tokyo, office, backup), activeProfileId = "p1")
+        val profilesState = ProfilesUiState(
+            loading = false,
+            profiles = listOf(tokyo, office, backup),
+            activeProfileId = "p1",
+            // As the tester keeps them (ADR-0014): Tokyo passed 2 minutes ago, Office's sign-in failed 20 hours ago.
+            lastTests = mapOf(
+                "p1" to ProfileTest(SAMPLE_TIME - 2 * 60_000, code = null, latencyMillis = 182),
+                "p2" to ProfileTest(SAMPLE_TIME - 20 * 3_600_000, code = "AUTH_FAILED", latencyMillis = null),
+            ),
+        )
         val tokyoForm = ProxyProfileInput.from(tokyo, username = "user").copy(password = "secret")
+        val officeForm = ProxyProfileInput.from(office, username = "office-user").copy(password = "wrong")
     }
 }

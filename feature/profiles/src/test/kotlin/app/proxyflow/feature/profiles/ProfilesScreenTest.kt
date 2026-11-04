@@ -1,12 +1,17 @@
 package app.proxyflow.feature.profiles
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
 import org.junit.Assert.assertEquals
@@ -66,6 +71,47 @@ class ProfilesScreenTest {
         compose.onNodeWithText("Delete").performClick()
         compose.onNodeWithText("Delete").performClick()
         assertEquals(listOf("p2"), deleted)
+    }
+
+    /** Board C2: each card says how its last test went and when, in the catalogue's words; Test runs one from the menu. */
+    @Test
+    fun eachCardShowsItsLastTestAndTestRunsOne() {
+        val tested = mutableListOf<String>()
+        val now = 1_793_000_000_000L
+        val state = ProfilesUiState(
+            loading = false,
+            profiles = listOf(office, backup),
+            activeProfileId = "p1",
+            lastTests = mapOf("p1" to ProfileTest(now - 20 * 3_600_000L, code = "AUTH_FAILED", latencyMillis = null)),
+        )
+        var shown by mutableStateOf(state)
+        compose.setContent {
+            ProxyFlowTheme {
+                ProfilesScreen(
+                    shown,
+                    onAddProxy = {},
+                    onEditProxy = {},
+                    onUseProxy = {},
+                    onDeleteProxy = {},
+                    onTestProxy = { tested += it },
+                    nowMillis = now,
+                )
+            }
+        }
+        compose.onNodeWithText("Username or password rejected · tested 20 hours ago").assertIsDisplayed()
+        compose.onNodeWithText("Not tested yet").assertIsDisplayed()
+
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Test").performClick()
+        assertEquals(listOf("p2"), tested)
+
+        shown = state.copy(testing = setOf("p2"))
+        compose.onNodeWithText("Testing…").assertIsDisplayed()
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Test").assertIsNotEnabled()
+
+        shown = state.copy(lastTests = state.lastTests + ("p2" to ProfileTest(now - 2 * 60_000L, code = null, latencyMillis = 182)))
+        compose.onNodeWithText("Works · 182 ms · tested 2 min ago").assertIsDisplayed()
     }
 
     /** J11: the profile a connection uses can only be deleted together with ending the connection, and the dialog says so. */

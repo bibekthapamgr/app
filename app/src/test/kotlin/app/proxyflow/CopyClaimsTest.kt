@@ -125,6 +125,10 @@ class CopyClaimsTest {
             "privacy_sent_check" to listOf("connectivitycheck.gstatic.com"),
             "privacy_sent_nothing" to listOf("Nothing is sent to ProxyFlow's developer"),
             "privacy_android_outside" to listOf("doesn't use the VPN"),
+            // M9 (ADR-0014): what a connection test sends and where, what a pass leaves blocked, and what switching does.
+            "edit_test_running_note" to listOf("connectivitycheck.gstatic.com", "without sending anything", "go only to this proxy"),
+            "edit_test_passed_body" to listOf("UDP is still blocked", "ping isn't answered"),
+            "home_picker_switch_note" to listOf("open connections end", "Nothing is sent around a proxy"),
         )
         val missing = required.flatMap { (name, needles) -> needles.filterNot { it in text(name) }.map { "$name lacks \"$it\"" } }
         assertEquals(missing.joinToString("\n"), emptyList<String>(), missing)

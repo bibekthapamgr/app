@@ -47,6 +47,9 @@ import app.proxyflow.core.designsystem.component.PfSwitchRow
 import app.proxyflow.core.designsystem.component.PfTextButton
 import app.proxyflow.core.designsystem.component.PfTextField
 import app.proxyflow.core.designsystem.component.PfTopAppBar
+import app.proxyflow.core.designsystem.component.proxyCheckErrorMessage
+import app.proxyflow.core.designsystem.component.proxyCheckErrorTitle
+import app.proxyflow.core.designsystem.theme.MonoSmall
 import app.proxyflow.core.designsystem.theme.Spacing
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
@@ -72,6 +75,7 @@ internal fun AddEditProxyRoute(viewModel: AddEditProxyViewModel, onDone: () -> U
             onTlsServerNameChange = viewModel::onTlsServerNameChange,
             onSave = viewModel::save,
             onTest = viewModel::testConnection,
+            onCancelTest = viewModel::cancelTest,
             onBack = onDone,
         ),
     )
@@ -90,6 +94,7 @@ data class AddEditActions(
     val onTlsServerNameChange: (String) -> Unit = {},
     val onSave: () -> Unit = {},
     val onTest: () -> Unit = {},
+    val onCancelTest: () -> Unit = {},
     val onBack: () -> Unit = {},
 )
 
@@ -166,7 +171,7 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
             }
             FormFields(state, actions)
             Spacer(Modifier.height(Spacing.sm))
-            TestConnection(state.test, onTest = actions.onTest)
+            TestConnection(state.test, onTest = actions.onTest, onCancel = actions.onCancelTest)
             Spacer(Modifier.height(Spacing.sm))
             PfPrimaryButton(
                 text = stringResource(R.string.edit_save),
@@ -309,12 +314,11 @@ private fun errorText(error: ProfileError, protocol: ProxyProtocol): String = st
 )
 
 /**
- * "Test connection" and what it found (boards D5–D7). The text only ever reports
- * the tester's own answer; with no engine in this build that answer is
- * [ConnectionTestResult.Unavailable], never a pass.
+ * "Test connection" and what it found (boards D5–D7): only ever the tester's own answer, a real test through the
+ * connection engine (ADR-0014), and a failure in the words connecting uses for it (the error catalogue, docs/m1/04 §4).
  */
 @Composable
-private fun TestConnection(test: ConnectionTestState, onTest: () -> Unit) {
+private fun TestConnection(test: ConnectionTestState, onTest: () -> Unit, onCancel: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         PfSecondaryButton(
             text = stringResource(R.string.edit_test),
@@ -324,29 +328,43 @@ private fun TestConnection(test: ConnectionTestState, onTest: () -> Unit) {
         )
         when (test) {
             ConnectionTestState.Idle -> Unit
-            ConnectionTestState.Testing -> Row(
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PfLoadingIndicator(Modifier.size(Spacing.lg))
-                Text(stringResource(R.string.edit_test_running), style = MaterialTheme.typography.bodyMedium)
+            ConnectionTestState.Testing -> {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PfLoadingIndicator(Modifier.size(Spacing.lg))
+                    Text(
+                        stringResource(R.string.edit_test_running),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PfTextButton(text = stringResource(R.string.edit_test_cancel), onClick = onCancel)
+                }
+                Text(
+                    stringResource(R.string.edit_test_running_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             is ConnectionTestState.Done -> when (val result = test.result) {
-                ConnectionTestResult.Unavailable -> PfBanner(
-                    title = stringResource(R.string.edit_test_unavailable_title),
-                    text = stringResource(R.string.edit_test_unavailable_body),
-                    tone = BannerTone.Info,
-                )
                 is ConnectionTestResult.Passed -> PfBanner(
                     title = stringResource(R.string.edit_test_passed_title),
                     text = stringResource(R.string.edit_test_passed_body, result.latencyMillis),
                     tone = BannerTone.Success,
                 )
-                is ConnectionTestResult.Failed -> PfBanner(
-                    title = stringResource(R.string.edit_test_failed_title),
-                    text = stringResource(R.string.edit_test_failed_body, result.code),
-                    tone = BannerTone.Error,
-                )
+                is ConnectionTestResult.Failed -> {
+                    PfBanner(
+                        title = stringResource(R.string.edit_test_failed_title, proxyCheckErrorTitle(result.error, test.tested)),
+                        text = proxyCheckErrorMessage(result.error, test.tested),
+                        tone = BannerTone.Error,
+                    )
+                    Text(
+                        stringResource(R.string.edit_test_code, listOfNotNull(result.code, result.error.detail).joinToString(" · ")),
+                        style = MonoSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

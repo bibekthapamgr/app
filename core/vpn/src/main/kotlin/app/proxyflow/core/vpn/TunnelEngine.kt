@@ -129,8 +129,9 @@ data class EngineTraffic(
  * 0x01, or another HTTP status such as 401, 402, 404, 429 or 500), that can't reach it
  * (HTTP 502–504, SOCKS5 0x03–0x06: usually no working way out to the Internet) or that
  * doesn't support the request would show Connected while apps' connections fail.
+ * [latencyMillis] is how long the proxy took to open the tunnel, when it did (a connection test's result, M9).
  */
-data class PreflightAnswer(val ok: Boolean, val code: String? = null, val detail: String? = null) {
+data class PreflightAnswer(val ok: Boolean, val code: String? = null, val detail: String? = null, val latencyMillis: Long = 0) {
     val passes: Boolean get() = ok
 
     /** Why the check failed, for the screens: the engine's code, or INTERNAL when it gave none. */
@@ -166,7 +167,7 @@ class ProxyTunnelEngine(
             timeoutMillis,
             AndroidEnginePlatform(protect, trustManager = trust()),
         )
-        return PreflightAnswer(ok = result.ok, code = result.code, detail = result.detail)
+        return PreflightAnswer(ok = result.ok, code = result.code, detail = result.detail, latencyMillis = result.latencyMillis)
     }
 
     override fun start(

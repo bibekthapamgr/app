@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import app.proxyflow.core.data.ConnectionController
+import app.proxyflow.core.data.ConnectionTester
 import app.proxyflow.core.data.InMemoryLogRepository
 import app.proxyflow.core.data.InMemoryProtectionStore
 import app.proxyflow.core.data.LogRepository
@@ -91,6 +92,12 @@ class VpnRuntime(
     )
 
     val controller: ConnectionController = VpnConnectionController(this)
+
+    /**
+     * "Test connection" (M9, ADR-0014): the session's own pre-flight check on the same engine — and so with the same
+     * trust for TLS proxies — without the VPN.
+     */
+    val tester: ConnectionTester = EngineConnectionTester(profiles, engine)
 
     /**
      * Home's diagnostics (ADR-0011): while connected, the engine's counters read once a second for

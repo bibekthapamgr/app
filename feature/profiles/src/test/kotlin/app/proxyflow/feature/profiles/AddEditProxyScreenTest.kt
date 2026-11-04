@@ -17,10 +17,13 @@ import androidx.compose.ui.test.printToString
 import androidx.lifecycle.SavedStateHandle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
+import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
+import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.testing.DumpOnFailureRule
 import app.proxyflow.core.testing.FakeConnectionTester
 import app.proxyflow.core.testing.TestProfiles
@@ -137,10 +140,13 @@ class AddEditProxyScreenTest {
     }
 
     @Test
-    fun testConnectionNeverShowsAPassItWasNotGiven() {
+    fun testConnectionShowsOnlyTheTestersAnswerInTheCataloguesWords() {
         var tests = 0
+        var cancels = 0
         var state by mutableStateOf(AddEditUiState())
-        compose.setContent { ProxyFlowTheme { AddEditProxyScreen(state, AddEditActions(onTest = { tests++ })) } }
+        compose.setContent {
+            ProxyFlowTheme { AddEditProxyScreen(state, AddEditActions(onTest = { tests++ }, onCancelTest = { cancels++ })) }
+        }
 
         compose.onNodeWithText("Test connection").performScrollTo().performClick()
         assertEquals(1, tests)
@@ -148,20 +154,30 @@ class AddEditProxyScreenTest {
         state = state.copy(test = ConnectionTestState.Testing)
         compose.onNodeWithText("Testing the connection…").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Test connection").assertIsNotEnabled()
+        // What the test sends, and where, before it ends (D5; the privacy policy names the same address).
+        compose.onNodeWithText("connectivitycheck.gstatic.com", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("your username and password go only to this proxy", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Cancel").performScrollTo().performClick()
+        assertEquals(1, cancels)
 
-        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Unavailable))
-        compose.onNodeWithText("Testing isn't available yet").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Nothing was sent to your proxy", substring = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Test passed").assertDoesNotExist()
+        val office = ProxyProfile(id = "p1", name = "Office", protocol = ProxyProtocol.HTTP, host = "203.0.113.10", port = 3128)
+        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Failed(ConnectionError("PROXY_UNREACHABLE")), office))
+        compose.onNodeWithText("Test failed: Can't reach your proxy").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow couldn't connect to 203.0.113.10:3128", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Code: PROXY_UNREACHABLE").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Proxy works").assertDoesNotExist()
 
-        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Failed("AUTH_FAILED")))
-        compose.onNodeWithText("Test failed").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("AUTH_FAILED", substring = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Test passed").assertDoesNotExist()
+        val unsupported = ConnectionError("AUTH_FAILED", ConnectionError.DETAIL_UNSUPPORTED_SIGN_IN + "Digest")
+        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Failed(unsupported), office))
+        compose.onNodeWithText("Test failed: Username or password rejected").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow signs in to HTTP proxies with Basic sign-in", substring = true).performScrollTo()
+            .assertIsDisplayed()
 
-        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Passed(latencyMillis = 87)))
-        compose.onNodeWithText("Test passed").performScrollTo().assertIsDisplayed()
+        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Passed(latencyMillis = 87), office))
+        compose.onNodeWithText("Proxy works").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("87 ms", substring = true).performScrollTo().assertIsDisplayed()
+        // What a pass doesn't change: UDP and ping stay blocked while connected (ADR-0004).
+        compose.onNodeWithText("UDP is still blocked", substring = true).performScrollTo().assertIsDisplayed()
     }
 
     @Test

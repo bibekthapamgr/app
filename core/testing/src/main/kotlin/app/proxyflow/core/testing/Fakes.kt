@@ -1,13 +1,17 @@
 package app.proxyflow.core.testing
 
+import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.LogRepository
 import app.proxyflow.core.data.SettingsRepository
+import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogRetention
 import app.proxyflow.core.model.ThemePreference
 import app.proxyflow.core.model.UserSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 /** Settings held in memory, for ViewModel and UI tests. */
@@ -50,4 +54,15 @@ class FakeLogRepository(initial: List<LogEntry> = emptyList()) : LogRepository {
     override suspend fun purge() {
         purges++
     }
+}
+
+/** A controller that can't connect, for ViewModel tests that don't connect: always disconnected, Connect not available. */
+class UnavailableConnectionController : ConnectionController {
+    private val current = MutableStateFlow(ConnectionState.Idle)
+    override val state: StateFlow<ConnectionState> = current.asStateFlow()
+    override val canConnect: Boolean = false
+
+    override fun connect(profileId: String) = Unit
+
+    override fun disconnect() = Unit
 }

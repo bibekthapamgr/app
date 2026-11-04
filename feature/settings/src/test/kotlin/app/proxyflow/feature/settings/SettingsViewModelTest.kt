@@ -2,7 +2,6 @@ package app.proxyflow.feature.settings
 
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.InMemoryProtectionStore
-import app.proxyflow.core.data.UnavailableConnectionController
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.LogEntry
@@ -14,6 +13,7 @@ import app.proxyflow.core.model.UserSettings
 import app.proxyflow.core.testing.FakeLogRepository
 import app.proxyflow.core.testing.FakeSettingsRepository
 import app.proxyflow.core.testing.MainDispatcherRule
+import app.proxyflow.core.testing.UnavailableConnectionController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect

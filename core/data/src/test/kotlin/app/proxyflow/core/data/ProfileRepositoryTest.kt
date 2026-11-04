@@ -7,6 +7,7 @@ import app.proxyflow.core.data.crypto.SealedCredentials
 import app.proxyflow.core.model.CredentialState
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.model.TlsMode
@@ -417,5 +418,56 @@ class ProfileRepositoryTest {
         val saved = repo.save("deleted-meanwhile", home)
         assertEquals("p1", saved.id)
         assertEquals(listOf("p1"), repo.profiles.first().map { it.id })
+    }
+
+    /** Board C2's line (ADR-0014): a last test stays while the profile reaches the same proxy with the same sign-in. */
+    @Test
+    fun aLastTestStaysWhileTheServerAndSignInStayAsTested() = runTest {
+        val saved = repo.save(null, office)
+        val works = ProfileTest(5_000, code = null, latencyMillis = 182)
+        assertTrue(repo.recordTest(saved.id, saved, works))
+        assertEquals(mapOf(saved.id to works), repo.lastTests.first())
+
+        // A new name, or saving with the saved password kept: still the proxy and sign-in that were tested.
+        val renamed = repo.save(saved.id, office.copy(name = "Office 2", password = ""))
+        assertEquals(works, repo.lastTests.first()[saved.id])
+
+        // A new password is a sign-in the test never tried.
+        repo.save(saved.id, office.copy(password = "new-pass"))
+        assertNull(repo.lastTests.first()[saved.id])
+
+        // Another port is another proxy, a profile without a sign-in too.
+        val open = repo.save(null, home)
+        assertTrue(repo.recordTest(open.id, open, works))
+        repo.save(open.id, home.copy(port = "1081"))
+        assertNull(repo.lastTests.first()[open.id])
+        assertEquals("Office 2", renamed.name)
+    }
+
+    @Test
+    fun aTestIsOnlyKeptForTheProfileExactlyAsTested() = runTest {
+        val saved = repo.save(null, home)
+        val newer = repo.save(saved.id, home.copy(name = "Home 2"))
+        assertFalse(
+            "saved again since the test began",
+            repo.recordTest(saved.id, saved, ProfileTest(5_000, code = null, latencyMillis = 1)),
+        )
+        assertFalse(
+            "another server",
+            repo.recordTest(saved.id, newer.copy(port = 1081), ProfileTest(5_000, code = null, latencyMillis = 1)),
+        )
+        assertFalse("gone", repo.recordTest("p404", newer, ProfileTest(5_000, code = null, latencyMillis = 1)))
+        assertTrue(repo.lastTests.first().isEmpty())
+
+        assertTrue(repo.recordTest(saved.id, newer, ProfileTest(6_000, code = "PROXY_UNREACHABLE", latencyMillis = null)))
+        assertEquals(
+            "a copy is a profile of its own, never tested",
+            null,
+            repo.duplicate(saved.id, "Copy")?.let {
+                repo.lastTests.first()[it.id]
+            },
+        )
+        repo.delete(saved.id)
+        assertTrue(repo.lastTests.first().isEmpty())
     }
 }

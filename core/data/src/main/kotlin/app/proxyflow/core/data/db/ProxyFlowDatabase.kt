@@ -42,6 +42,10 @@ data class ProfileEntity(
     @ColumnInfo(name = "credentials_key") val credentialsKey: String?,
     @ColumnInfo(name = "created_at") val createdAtMillis: Long,
     @ColumnInfo(name = "updated_at") val updatedAtMillis: Long,
+    /** The last connection test (version 3, M9): when, its code if it failed, and the proxy's time if it passed. */
+    @ColumnInfo(name = "last_test_at") val lastTestAtMillis: Long? = null,
+    @ColumnInfo(name = "last_test_code") val lastTestCode: String? = null,
+    @ColumnInfo(name = "last_test_latency") val lastTestLatencyMillis: Long? = null,
 )
 
 @Dao
@@ -65,6 +69,9 @@ interface ProfileDao {
     @Update
     suspend fun update(profile: ProfileEntity): Int
 
+    @Query("UPDATE profiles SET last_test_at = :atMillis, last_test_code = :code, last_test_latency = :latencyMillis WHERE id = :id")
+    suspend fun recordTest(id: String, atMillis: Long, code: String?, latencyMillis: Long?): Int
+
     @Query("DELETE FROM profiles WHERE id = :id")
     suspend fun delete(id: String): Int
 }
@@ -77,8 +84,9 @@ interface ProfileDao {
  *
  * - Version 1 (M3): profiles, credentials sealed under one key per profile.
  * - Version 2 (M3): `credentials_key`, so every new set of credentials gets a new key.
+ * - Version 3 (M9): the last connection test (`last_test_at`, `last_test_code`, `last_test_latency`).
  */
-@Database(entities = [ProfileEntity::class], version = 2, exportSchema = true)
+@Database(entities = [ProfileEntity::class], version = 3, exportSchema = true)
 abstract class ProxyFlowDatabase : RoomDatabase() {
     abstract fun profileDao(): ProfileDao
 
@@ -92,7 +100,7 @@ abstract class ProxyFlowDatabase : RoomDatabase() {
          */
         fun create(context: Context, name: String = NAME): ProxyFlowDatabase =
             Room.databaseBuilder(context.applicationContext, ProxyFlowDatabase::class.java, name)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }
@@ -105,5 +113,14 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE profiles ADD COLUMN credentials_key TEXT")
         db.execSQL("UPDATE profiles SET credentials_key = id WHERE credentials_ct IS NOT NULL")
+    }
+}
+
+/** Version 3 keeps each profile's last connection test; profiles from before were never tested (M9). */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE profiles ADD COLUMN last_test_at INTEGER")
+        db.execSQL("ALTER TABLE profiles ADD COLUMN last_test_code TEXT")
+        db.execSQL("ALTER TABLE profiles ADD COLUMN last_test_latency INTEGER")
     }
 }

@@ -6,12 +6,14 @@ import androidx.lifecycle.viewModelScope
 import app.proxyflow.core.data.ConnectionTester
 import app.proxyflow.core.data.InvalidProfileException
 import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.CredentialState
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
 import app.proxyflow.core.model.ProfileNames
 import app.proxyflow.core.model.ProfileValidator
+import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
 import kotlin.coroutines.cancellation.CancellationException
@@ -28,8 +30,8 @@ sealed interface ConnectionTestState {
 
     data object Testing : ConnectionTestState
 
-    /** What the tester found for the form exactly as it is now; any edit clears it. */
-    data class Done(val result: ConnectionTestResult) : ConnectionTestState
+    /** What the tester found for the form exactly as it is now, which is [tested]; any edit clears it. */
+    data class Done(val result: ConnectionTestResult, val tested: ProxyProfile) : ConnectionTestState
 }
 
 data class AddEditUiState(
@@ -73,6 +75,7 @@ class AddEditProxyViewModel(
     private val savedState: SavedStateHandle,
     private val repository: ProfileRepository,
     private val tester: ConnectionTester,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : ViewModel() {
     /** Navigation argument (AddEditProxyDestination.profileId); null when adding. */
     private val profileId: String? = savedState[ARG_PROFILE_ID]
@@ -88,6 +91,9 @@ class AddEditProxyViewModel(
     private var initial: ProxyProfileInput = ProxyProfileInput()
     private var showErrors: Boolean = savedState[KEY_SHOW_ERRORS] ?: false
     private var testJob: Job? = null
+
+    /** The last test's form, result and time: kept with the profile when exactly that form is saved (board C2). */
+    private var lastTested: Tested? = null
 
     init {
         if (profileId != null) {
@@ -153,7 +159,9 @@ class AddEditProxyViewModel(
         val id = profileId.takeIf { current.isEdit }
         viewModelScope.launch {
             try {
-                repository.save(id, current.input)
+                val saved = repository.save(id, current.input)
+                // Before the screen closes, which ends this scope: a test of exactly what was saved is its last test.
+                lastTested?.takeIf { it.input == current.input }?.let { keep(saved, it) }
                 state.update { it.copy(saving = false, saved = true, dirty = false) }
             } catch (e: CancellationException) {
                 throw e
@@ -172,6 +180,8 @@ class AddEditProxyViewModel(
         if (current.loading || current.loadFailed || current.test == ConnectionTestState.Testing || !passesValidation()) return
         val input = state.value.input
         val id = profileId.takeIf { state.value.isEdit }
+        // Validated, so its port is a number; the screen words the result for this server.
+        val tested = input.toProfile(id ?: "", createdAtMillis = 0, updatedAtMillis = 0)
         state.update { it.copy(test = ConnectionTestState.Testing) }
         testJob = viewModelScope.launch {
             val result = try {
@@ -180,10 +190,33 @@ class AddEditProxyViewModel(
                 throw e
             } catch (e: Exception) {
                 // A tester that broke tested nothing: that is a failure, never a pass.
-                ConnectionTestResult.Failed(INTERNAL_ERROR)
+                ConnectionTestResult.Failed(ConnectionError(ConnectionError.INTERNAL, "the test could not run"))
             }
             // A result is only shown for the form it was made with.
-            if (state.value.input == input) state.update { it.copy(test = ConnectionTestState.Done(result)) }
+            if (state.value.input == input) {
+                lastTested = Tested(input, result, clock())
+                state.update { it.copy(test = ConnectionTestState.Done(result, tested)) }
+            }
+        }
+    }
+
+    /** Stops a test that is running; nothing is shown or kept for it. */
+    fun cancelTest() {
+        if (state.value.test != ConnectionTestState.Testing) return
+        testJob?.cancel()
+        state.update { it.copy(test = ConnectionTestState.Idle) }
+    }
+
+    /** Keeps [test] as [profile]'s last test; this phone's own failures aren't kept, and a storage failure only loses it. */
+    private suspend fun keep(profile: ProxyProfile, test: Tested) {
+        val result = test.result
+        if (result is ConnectionTestResult.Failed && result.code == ConnectionError.INTERNAL) return
+        try {
+            repository.recordTest(profile.id, profile, result.asProfileTest(test.atMillis))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The profile is saved; only its test result isn't shown in the list.
         }
     }
 
@@ -240,12 +273,12 @@ class AddEditProxyViewModel(
         )
     }
 
+    private data class Tested(val input: ProxyProfileInput, val result: ConnectionTestResult, val atMillis: Long)
+
     companion object {
         /** Must match the property name in [AddEditProxyDestination]. */
         const val ARG_PROFILE_ID = "profileId"
 
-        /** Error code for a test that could not run (docs/m1/04 error catalogue: `INTERNAL`). */
-        const val INTERNAL_ERROR = "INTERNAL"
         private const val KEY_NAME = "form.name"
         private const val KEY_PROTOCOL = "form.protocol"
         private const val KEY_SERVER = "form.server"

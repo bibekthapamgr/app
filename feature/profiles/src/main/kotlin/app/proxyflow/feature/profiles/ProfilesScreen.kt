@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -38,11 +39,14 @@ import app.proxyflow.core.designsystem.component.PfCard
 import app.proxyflow.core.designsystem.component.PfConfirmDialog
 import app.proxyflow.core.designsystem.component.PfEmptyState
 import app.proxyflow.core.designsystem.component.PfLoadingScreen
+import app.proxyflow.core.designsystem.component.PfProfileTestLine
 import app.proxyflow.core.designsystem.component.PfTopAppBar
 import app.proxyflow.core.designsystem.icon.PfIcons
 import app.proxyflow.core.designsystem.theme.MonoSmall
 import app.proxyflow.core.designsystem.theme.Spacing
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
+import kotlinx.coroutines.delay
 
 @Composable
 internal fun ProfilesRoute(viewModel: ProfilesViewModel, onAddProxy: () -> Unit, onEditProxy: (String) -> Unit) {
@@ -51,8 +55,17 @@ internal fun ProfilesRoute(viewModel: ProfilesViewModel, onAddProxy: () -> Unit,
     val copyPattern = stringResource(R.string.profiles_copy_name)
     val numberedCopyPattern = stringResource(R.string.profiles_copy_name_numbered)
     val locale = LocalConfiguration.current.locales[0]
+    // "tested 2 min ago" moves on with the clock, on whole minutes, while a result is shown.
+    val ticking = state.lastTests.isNotEmpty()
+    val now by produceState(System.currentTimeMillis(), ticking) {
+        while (ticking) {
+            value = System.currentTimeMillis()
+            delay(MINUTE_MILLIS - value % MINUTE_MILLIS)
+        }
+    }
     ProfilesScreen(
         state = state,
+        nowMillis = now,
         onAddProxy = onAddProxy,
         onEditProxy = onEditProxy,
         onUseProxy = viewModel::setActive,
@@ -63,6 +76,7 @@ internal fun ProfilesRoute(viewModel: ProfilesViewModel, onAddProxy: () -> Unit,
             }
         },
         onFailureShown = viewModel::onFailureShown,
+        onTestProxy = viewModel::test,
     )
 }
 
@@ -76,6 +90,8 @@ fun ProfilesScreen(
     modifier: Modifier = Modifier,
     onDuplicateProxy: (String) -> Unit = {},
     onFailureShown: () -> Unit = {},
+    onTestProxy: (String) -> Unit = {},
+    nowMillis: Long = 0L,
 ) {
     // Saved by id so the confirmation survives rotation; it closes by itself if the profile disappears.
     var pendingDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -86,6 +102,7 @@ fun ProfilesScreen(
                 ProfileAction.Use -> R.string.profiles_use_failed
                 ProfileAction.Duplicate -> R.string.profiles_duplicate_failed
                 ProfileAction.Delete -> R.string.profiles_delete_failed
+                ProfileAction.Test -> R.string.profiles_test_failed
             },
         )
     }
@@ -129,8 +146,12 @@ fun ProfilesScreen(
                     ProfileItem(
                         profile = profile,
                         active = profile.id == state.activeProfileId,
+                        lastTest = state.lastTests[profile.id],
+                        testing = profile.id in state.testing,
+                        nowMillis = nowMillis,
                         onClick = { onEditProxy(profile.id) },
                         onUse = { onUseProxy(profile.id) },
+                        onTest = { onTestProxy(profile.id) },
                         onDuplicate = { onDuplicateProxy(profile.id) },
                         onDelete = { pendingDeleteId = profile.id },
                     )
@@ -167,8 +188,12 @@ fun ProfilesScreen(
 private fun ProfileItem(
     profile: ProxyProfile,
     active: Boolean,
+    lastTest: ProfileTest?,
+    testing: Boolean,
+    nowMillis: Long,
     onClick: () -> Unit,
     onUse: () -> Unit,
+    onTest: () -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -196,6 +221,7 @@ private fun ProfileItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(profile.endpoint, style = MonoSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                PfProfileTestLine(profile, lastTest, testing, nowMillis)
             }
             Box {
                 IconButton(onClick = { menuOpen = true }) {
@@ -221,6 +247,15 @@ private fun ProfileItem(
                         },
                     )
                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.profiles_test)) },
+                        leadingIcon = { Icon(PfIcons.Bolt, contentDescription = null) },
+                        enabled = !testing,
+                        onClick = {
+                            menuOpen = false
+                            onTest()
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text(stringResource(R.string.profiles_duplicate)) },
                         leadingIcon = { Icon(PfIcons.Copy, contentDescription = null) },
                         onClick = {
@@ -241,3 +276,5 @@ private fun ProfileItem(
         }
     }
 }
+
+private const val MINUTE_MILLIS = 60_000L

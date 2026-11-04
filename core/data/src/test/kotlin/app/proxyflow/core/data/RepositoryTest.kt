@@ -4,10 +4,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
-import app.proxyflow.core.model.ConnectionStatus
-import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.LogRetention
-import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ThemePreference
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -67,16 +64,5 @@ class RepositoryTest {
         val store = PreferenceDataStoreFactory.create(scope = backgroundScope) { file }
         store.edit { it[stringPreferencesKey("log_retention")] = "30d" } // as a later version might write it
         assertEquals(LogRetention.Day, DataStoreSettingsRepository(store).settings.first().logRetention)
-    }
-
-    @Test
-    fun connectionControllerAndTesterAreHonestAboutThisBuild() = runTest {
-        val controller = UnavailableConnectionController()
-        assertFalse(controller.canConnect)
-        controller.connect("any")
-        assertEquals(ConnectionStatus.Disconnected, controller.state.value.status)
-        assertEquals(null, controller.consentIntent())
-        // Test Connection never claims success without an engine to test with (M3 acceptance).
-        assertEquals(ConnectionTestResult.Unavailable, UnavailableConnectionTester().test(null, ProxyProfileInput()))
     }
 }

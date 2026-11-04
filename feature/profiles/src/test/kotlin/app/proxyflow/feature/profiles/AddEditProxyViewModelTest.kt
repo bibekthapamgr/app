@@ -1,14 +1,17 @@
 package app.proxyflow.feature.profiles
 
 import androidx.lifecycle.SavedStateHandle
+import app.proxyflow.core.data.ConnectionTester
 import app.proxyflow.core.data.CredentialsRead
 import app.proxyflow.core.data.CredentialsUnavailableException
 import app.proxyflow.core.data.ProfileForEditing
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.data.crypto.AesGcmCredentialCipher
+import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
@@ -16,6 +19,7 @@ import app.proxyflow.core.testing.FakeConnectionTester
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -342,21 +346,74 @@ class AddEditProxyViewModelTest {
         val vm = viewModel()
         vm.onServerChange("proxy.example.com")
         vm.onPortChange("1080")
+        val tested = vm.uiState.value.input.toProfile("", 0, 0)
 
+        tester.result = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED"))
         vm.testConnection()
-        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Unavailable), vm.uiState.value.test)
+        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED")), tested), vm.uiState.value.test)
         assertEquals(listOf<String?>(null), tester.requests.map { it.first })
-
-        tester.result = ConnectionTestResult.Failed("AUTH_FAILED")
-        vm.testConnection()
-        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Failed("AUTH_FAILED")), vm.uiState.value.test)
 
         tester.result = ConnectionTestResult.Passed(latencyMillis = 42)
         vm.testConnection()
-        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Passed(42)), vm.uiState.value.test)
+        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Passed(42), tested), vm.uiState.value.test)
 
         vm.onPortChange("1081")
         assertEquals("a result belongs to the form it tested", ConnectionTestState.Idle, vm.uiState.value.test)
+    }
+
+    @Test
+    fun aTestOfExactlyWhatIsSavedIsKeptWithTheProfile() = runTest {
+        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, tester, clock = { 7_000L })
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        tester.result = ConnectionTestResult.Passed(latencyMillis = 182)
+        vm.testConnection()
+        vm.save()
+
+        val saved = repository.profiles.first().single()
+        assertEquals(mapOf(saved.id to ProfileTest(7_000L, code = null, latencyMillis = 182)), repository.lastTests.first())
+    }
+
+    @Test
+    fun aTestOfAnotherFormOrOfThisPhoneIsNotKept() = runTest {
+        // Tested, then changed before saving: the result was of other settings.
+        val changed = viewModel()
+        changed.onServerChange("proxy.example.com")
+        changed.onPortChange("1080")
+        changed.testConnection()
+        changed.onPortChange("1081")
+        changed.save()
+        // A test that couldn't run on this phone says nothing about the proxy.
+        tester.result = ConnectionTestResult.Failed(ConnectionError(ConnectionError.INTERNAL))
+        val broken = viewModel()
+        broken.onServerChange("other.example.com")
+        broken.onPortChange("1080")
+        broken.testConnection()
+        broken.save()
+
+        assertEquals(2, repository.profiles.first().size)
+        assertTrue(repository.lastTests.first().isEmpty())
+    }
+
+    @Test
+    fun cancellingATestShowsNothingForIt() = runTest {
+        val gate = CompletableDeferred<ConnectionTestResult>()
+        val slow = object : ConnectionTester {
+            override suspend fun test(profileId: String?, input: ProxyProfileInput) = gate.await()
+
+            override suspend fun testSaved(profileId: String): ConnectionTestResult? = null
+        }
+        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, slow)
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.testConnection()
+        assertEquals(ConnectionTestState.Testing, vm.uiState.value.test)
+
+        vm.cancelTest()
+        assertEquals(ConnectionTestState.Idle, vm.uiState.value.test)
+        // The form is as it was tested, so only the cancelled test keeps this answer from being shown.
+        gate.complete(ConnectionTestResult.Passed(1))
+        assertEquals("never a pass for a test that was cancelled", ConnectionTestState.Idle, vm.uiState.value.test)
     }
 
     @Test
@@ -373,8 +430,10 @@ class AddEditProxyViewModelTest {
     @Test
     fun aTestInProgressIsDroppedWhenTheFormChanges() = runTest {
         val gate = CompletableDeferred<ConnectionTestResult>()
-        val slow = object : app.proxyflow.core.data.ConnectionTester {
+        val slow = object : ConnectionTester {
             override suspend fun test(profileId: String?, input: ProxyProfileInput) = gate.await()
+
+            override suspend fun testSaved(profileId: String): ConnectionTestResult? = null
         }
         val vm = AddEditProxyViewModel(SavedStateHandle(), repository, slow)
         vm.onServerChange("proxy.example.com")
@@ -398,14 +457,17 @@ class AddEditProxyViewModelTest {
 
     @Test
     fun aTesterThatBreaksIsReportedAsAFailureNeverAPass() = runTest {
-        val broken = object : app.proxyflow.core.data.ConnectionTester {
+        val broken = object : ConnectionTester {
             override suspend fun test(profileId: String?, input: ProxyProfileInput): ConnectionTestResult = error("engine crashed")
+
+            override suspend fun testSaved(profileId: String): ConnectionTestResult? = error("engine crashed")
         }
         val vm = AddEditProxyViewModel(SavedStateHandle(), repository, broken)
         vm.onServerChange("proxy.example.com")
         vm.onPortChange("1080")
         vm.testConnection()
-        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Failed(AddEditProxyViewModel.INTERNAL_ERROR)), vm.uiState.value.test)
+        val done = vm.uiState.value.test as ConnectionTestState.Done
+        assertEquals(ConnectionError.INTERNAL, (done.result as ConnectionTestResult.Failed).code)
     }
 
     @Test

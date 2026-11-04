@@ -8,6 +8,7 @@ import app.proxyflow.core.model.CredentialState
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
 import app.proxyflow.core.model.ProfileNames
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
@@ -43,6 +44,12 @@ interface ProfileRepository {
      * did not pick.
      */
     val chosenProfileId: Flow<String?>
+
+    /**
+     * Each profile's last connection test, by id (board C2, M9): kept while the profile's server and sign-in stay as they
+     * were tested, gone once either changes. Profiles never tested are not in the map.
+     */
+    val lastTests: Flow<Map<String, ProfileTest>>
 
     suspend fun get(id: String): ProxyProfile?
 
@@ -81,6 +88,13 @@ interface ProfileRepository {
     suspend fun delete(id: String)
 
     suspend fun setActive(id: String)
+
+    /**
+     * Keeps [test] as [id]'s last connection test, if [id] is still exactly as [tested] was when the test began — the
+     * same save ([ProxyProfile.updatedAtMillis]) and so the same server and credentials — so a result never belongs to
+     * settings it didn't test. @return whether it was kept.
+     */
+    suspend fun recordTest(id: String, tested: ProxyProfile, test: ProfileTest): Boolean
 
     /** The username and password for connecting (from M4). The caller wipes them as soon as they are sent. */
     suspend fun readCredentials(id: String): CredentialsRead
@@ -155,6 +169,10 @@ class DefaultProfileRepository(
         chosen?.takeIf { id -> records.any { it.id == id } } ?: records.firstOrNull()?.id
     }.distinctUntilChanged()
 
+    override val lastTests: Flow<Map<String, ProfileTest>> = store.observeAll()
+        .map { records -> records.mapNotNull { record -> record.lastTest?.let { record.id to it } }.toMap() }
+        .distinctUntilChanged()
+
     override suspend fun get(id: String): ProxyProfile? = store.get(id)?.toProfile()
 
     override suspend fun loadForEditing(id: String): ProfileForEditing? {
@@ -196,8 +214,12 @@ class DefaultProfileRepository(
                 keepsSavedPassword -> previous
                 else -> seal(profileId, input.username.toCharArray(), input.password.toCharArray())
             }
+            // The last test stays only while it still describes this proxy: the same server, the same credentials.
+            val lastTest = existing?.let { old ->
+                old.lastTest?.takeIf { old.toProfile().sameServerAs(profile) && credentials?.keyId == previous?.keyId }
+            }
             writeSealed(credentials, previous) {
-                val record = ProfileRecord.of(profile, credentials)
+                val record = ProfileRecord.of(profile, credentials, lastTest)
                 if (existing == null) store.insert(record) else check(store.update(record)) { "profile disappeared while saving" }
             }
             profile
@@ -237,6 +259,13 @@ class DefaultProfileRepository(
 
     override suspend fun setActive(id: String) {
         if (store.get(id) != null) active.set(id)
+    }
+
+    override suspend fun recordTest(id: String, tested: ProxyProfile, test: ProfileTest): Boolean = writes.withLock {
+        val record = store.get(id) ?: return@withLock false
+        // Saved since the test began (another server, new credentials, or only a new name): it is tested again instead.
+        if (record.updatedAtMillis != tested.updatedAtMillis || !record.toProfile().sameServerAs(tested)) return@withLock false
+        store.recordTest(id, test)
     }
 
     override suspend fun readCredentials(id: String): CredentialsRead {

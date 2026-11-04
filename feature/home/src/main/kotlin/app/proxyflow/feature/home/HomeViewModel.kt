@@ -7,14 +7,17 @@ import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.InMemoryProtectionStore
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.data.ProtectionStore
+import app.proxyflow.core.data.switchIfConnected
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.Interruption
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.SystemKillSwitch
 import app.proxyflow.core.model.TrafficStats
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +45,7 @@ sealed interface HomeUiState {
      *   when it never did.
      * @param interruption the last process ended while connected, without the connection being stopped, and the user
      *   has not acknowledged it yet (M8).
+     * @param profiles every saved profile, for the profile picker (B8), with [lastTests], each one's last connection test.
      */
     data class Ready(
         val profile: ProxyProfile,
@@ -52,6 +56,8 @@ sealed interface HomeUiState {
         val traffic: TrafficStats? = null,
         val killSwitch: SystemKillSwitch? = null,
         val interruption: Interruption? = null,
+        val profiles: List<ProxyProfile> = emptyList(),
+        val lastTests: Map<String, ProfileTest> = emptyMap(),
     ) : HomeUiState {
         val status: ConnectionStatus get() = connection.status
 
@@ -97,8 +103,12 @@ class HomeViewModel(
     private val kept =
         combine(protection.killSwitch, protection.interruption) { killSwitch, interruption -> Kept(killSwitch, interruption) }
 
+    // The saved profiles and each one's last test, for the picker (B8).
+    private val saved = combine(profiles.profiles, profiles.lastTests) { list, tests -> Saved(list, tests) }
+
     val uiState: StateFlow<HomeUiState> =
-        combine(profiles.profiles, profiles.activeProfileId, live, dialog, kept) { list, activeId, now, dialog, kept ->
+        combine(saved, profiles.activeProfileId, live, dialog, kept) { stored, activeId, now, dialog, kept ->
+            val list = stored.profiles
             val current = now.connection
             val active = list.firstOrNull { it.id == activeId } ?: list.firstOrNull()
             val running = current.profile?.takeIf { current.active }
@@ -115,6 +125,8 @@ class HomeViewModel(
                     now.traffic,
                     killSwitch = kept.killSwitch,
                     interruption = kept.interruption,
+                    profiles = list,
+                    lastTests = stored.lastTests,
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), HomeUiState.Loading)
@@ -160,6 +172,24 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * B8: [id] becomes the profile Home shows and connects, the user's choice (M8). While a connection runs on another
+     * profile it switches to [id] (J11): the old proxy's flows end and apps' traffic is held until the new proxy is
+     * checked, never sent around a proxy (ADR-0010 §5).
+     */
+    fun chooseProfile(id: String) {
+        connection.switchIfConnected(id)
+        viewModelScope.launch {
+            try {
+                profiles.setActive(id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Not saved: Home goes on showing the profile it showed (after a switch, the connection's).
+            }
+        }
+    }
+
     /** The notice that ProxyFlow was stopped while connected, acknowledged (M8): the one Home shows, if it still is. */
     fun dismissInterruption() {
         (uiState.value as? HomeUiState.Ready)?.interruption?.let(connection::dismissInterruption)
@@ -196,6 +226,8 @@ class HomeViewModel(
     private data class Live(val connection: ConnectionState, val diagnostics: RoutingDiagnostics?, val traffic: TrafficStats?)
 
     private data class Kept(val killSwitch: SystemKillSwitch?, val interruption: Interruption?)
+
+    private data class Saved(val profiles: List<ProxyProfile>, val lastTests: Map<String, ProfileTest>)
 
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L

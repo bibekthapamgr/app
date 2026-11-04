@@ -18,21 +18,32 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -49,11 +60,14 @@ import app.proxyflow.core.designsystem.component.PfConfirmDialog
 import app.proxyflow.core.designsystem.component.PfEmptyState
 import app.proxyflow.core.designsystem.component.PfLoadingIndicator
 import app.proxyflow.core.designsystem.component.PfPrimaryButton
+import app.proxyflow.core.designsystem.component.PfProfileTestLine
 import app.proxyflow.core.designsystem.component.PfSecondaryButton
 import app.proxyflow.core.designsystem.component.PfStatusPill
 import app.proxyflow.core.designsystem.component.PfTextButton
 import app.proxyflow.core.designsystem.component.StatusTone
 import app.proxyflow.core.designsystem.component.openVpnSettings
+import app.proxyflow.core.designsystem.component.proxyCheckErrorMessage
+import app.proxyflow.core.designsystem.component.proxyCheckErrorTitle
 import app.proxyflow.core.designsystem.component.refusingObscuredTouches
 import app.proxyflow.core.designsystem.component.shortWhen
 import app.proxyflow.core.designsystem.icon.PfIcons
@@ -66,6 +80,7 @@ import app.proxyflow.core.model.ExitReason
 import app.proxyflow.core.model.Formats
 import app.proxyflow.core.model.Interruption
 import app.proxyflow.core.model.KillSwitchStatus
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ReconnectInfo
 import app.proxyflow.core.model.ReconnectReason
@@ -76,7 +91,13 @@ import kotlinx.coroutines.delay
 /** What Home's buttons and dialogs do; the defaults do nothing (previews, screenshots, tests). */
 data class HomeActions(
     val onAddProxy: () -> Unit = {},
+    /** Change, Use another proxy: opens the profile picker (B8). */
     val onChangeProfile: () -> Unit = {},
+    /** A profile picked in B8: it becomes Home's, and a running connection switches to it (J11). */
+    val onChooseProfile: (String) -> Unit = {},
+    /** B8's Manage profiles: the Profiles tab. */
+    val onManageProfiles: () -> Unit = {},
+    val onDismissPicker: () -> Unit = {},
     val onEditProfile: (String) -> Unit = {},
     /** Connect, Try again, Reconnect, Restart. */
     val onConnect: () -> Unit = {},
@@ -108,7 +129,7 @@ data class HomeActions(
 internal fun HomeRoute(
     viewModel: HomeViewModel,
     onAddProxy: () -> Unit,
-    onChangeProfile: () -> Unit,
+    onManageProfiles: () -> Unit,
     onEditProfile: (String) -> Unit,
     onOpenLogs: () -> Unit,
     onOpenKillSwitchGuide: () -> Unit = {},
@@ -128,8 +149,10 @@ internal fun HomeRoute(
     // Connect never asks again. The VPN works without it (ADR-0010 §10).
     val connect = viewModel::connect
     val connection = (state as? HomeUiState.Ready)?.connection
-    // The connected timer and the wait before the next attempt (B5) tick on whole seconds, only while shown.
-    val ticking = connection?.status == ConnectionStatus.Connected || connection?.reconnect?.nextAttemptAtMillis != null
+    var picking by rememberSaveable { mutableStateOf(false) }
+    // The connected timer, the wait before the next attempt (B5) and the picker's "tested 2 min ago" (B8) tick on whole
+    // seconds, only while shown.
+    val ticking = connection?.status == ConnectionStatus.Connected || connection?.reconnect?.nextAttemptAtMillis != null || picking
     val now by produceState(System.currentTimeMillis(), ticking) {
         while (ticking) {
             value = System.currentTimeMillis()
@@ -139,12 +162,24 @@ internal fun HomeRoute(
     HomeScreen(
         state = state,
         nowMillis = now,
+        picking = picking,
         actions = HomeActions(
-            onAddProxy = onAddProxy,
-            onChangeProfile = {
-                viewModel.dismissError()
-                onChangeProfile()
+            onAddProxy = {
+                picking = false
+                onAddProxy()
             },
+            onChangeProfile = { picking = true },
+            onChooseProfile = { id ->
+                picking = false
+                viewModel.dismissError()
+                viewModel.chooseProfile(id)
+            },
+            onManageProfiles = {
+                picking = false
+                viewModel.dismissError()
+                onManageProfiles()
+            },
+            onDismissPicker = { picking = false },
             onEditProfile = { id ->
                 viewModel.dismissError()
                 onEditProfile(id)
@@ -183,7 +218,7 @@ internal fun HomeRoute(
 }
 
 @Composable
-fun HomeScreen(state: HomeUiState, actions: HomeActions, modifier: Modifier = Modifier, nowMillis: Long = 0L) {
+fun HomeScreen(state: HomeUiState, actions: HomeActions, modifier: Modifier = Modifier, nowMillis: Long = 0L, picking: Boolean = false) {
     // Default insets: status bar on top; the app's bottom bar has already consumed the bottom.
     Scaffold(modifier = modifier) { padding ->
         Column(
@@ -208,6 +243,7 @@ fun HomeScreen(state: HomeUiState, actions: HomeActions, modifier: Modifier = Mo
                 is HomeUiState.Ready -> {
                     ReadyContent(state, actions, nowMillis)
                     HomeDialogs(state, actions)
+                    if (picking) ProfilePicker(state, actions, nowMillis)
                 }
             }
         }
@@ -949,6 +985,81 @@ private fun count(@PluralsRes plural: Int, value: Long): String {
 @Composable
 private fun countOrNull(@PluralsRes plural: Int, value: Long): String? = if (value > 0) count(plural, value) else null
 
+/**
+ * Board B8: the saved profiles, the one Home shows marked, each with its last test (board C2's line). Picking one makes it
+ * Home's; while connected, the connection switches to it (J11), which the sheet says before anything is picked.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProfilePicker(state: HomeUiState.Ready, actions: HomeActions, nowMillis: Long) {
+    ModalBottomSheet(onDismissRequest = actions.onDismissPicker, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.screenGutter)
+                .padding(bottom = Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Text(
+                stringResource(R.string.home_picker_title),
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() },
+            )
+            if (state.connection.active) {
+                Text(
+                    stringResource(R.string.home_picker_switch_note),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Column(Modifier.selectableGroup()) {
+                state.profiles.ifEmpty { listOf(state.profile) }.forEach { profile ->
+                    PickerRow(
+                        profile = profile,
+                        selected = profile.id == state.profile.id,
+                        lastTest = state.lastTests[profile.id],
+                        nowMillis = nowMillis,
+                        onClick = { actions.onChooseProfile(profile.id) },
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                PfTextButton(text = stringResource(R.string.home_add_proxy), onClick = actions.onAddProxy)
+                PfTextButton(text = stringResource(R.string.home_picker_manage), onClick = actions.onManageProfiles)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PickerRow(profile: ProxyProfile, selected: Boolean, lastTest: ProfileTest?, nowMillis: Long, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .selectable(selected = selected, onClick = onClick, role = Role.RadioButton)
+            .padding(vertical = Spacing.sm),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Text(profile.displayName, style = MaterialTheme.typography.titleMedium)
+            Text(
+                listOf(
+                    profile.protocol.name,
+                    stringResource(if (profile.useTls) R.string.home_tls else R.string.home_not_encrypted),
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(profile.endpoint, style = MonoSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            PfProfileTestLine(profile, lastTest, testing = false, nowMillis = nowMillis)
+        }
+    }
+}
+
 @Composable
 private fun ProfileCard(profile: ProxyProfile, onChangeProfile: () -> Unit) {
     PfCard(modifier = Modifier.fillMaxWidth()) {
@@ -979,58 +1090,24 @@ private fun ProfileCard(profile: ProxyProfile, onChangeProfile: () -> Unit) {
 private fun protocolLabel(profile: ProxyProfile): String =
     if (profile.useTls) stringResource(R.string.home_protocol_with_tls, profile.protocol.name) else profile.protocol.name
 
-/** The catalogue title for [error] (docs/m1/04 §4). */
+/** The catalogue title for [error] (docs/m1/04 §4): a proxy check's as the proxy form words it, and Home's own. */
 @Composable
 private fun errorTitle(error: ConnectionError, profile: ProxyProfile): String = when (error.code) {
-    "PROXY_UNREACHABLE" -> stringResource(R.string.home_error_unreachable_title)
-    "PROXY_DNS_FAILED" -> stringResource(R.string.home_error_dns_title)
-    "AUTH_REQUIRED" -> stringResource(R.string.home_error_auth_required_title)
-    "AUTH_FAILED" -> stringResource(R.string.home_error_auth_failed_title)
-    "TLS_UNTRUSTED" -> stringResource(R.string.home_error_tls_untrusted_title)
-    "TLS_HOSTNAME" -> stringResource(R.string.home_error_tls_hostname_title)
-    "TLS_EXPIRED" -> stringResource(R.string.home_error_tls_expired_title)
-    "TLS_HANDSHAKE" -> stringResource(R.string.home_error_tls_handshake_title)
-    "PROTOCOL_ERROR" -> stringResource(R.string.home_error_protocol_title, profile.protocol.name)
-    "HANDSHAKE_TIMEOUT" -> stringResource(R.string.home_error_timeout_title)
-    "TARGET_NOT_ALLOWED" -> stringResource(R.string.home_error_refused_title)
-    "TARGET_UNREACHABLE", "TARGET_REFUSED" -> stringResource(R.string.home_error_unreachable_target_title)
-    "PROXY_GENERAL_FAILURE" -> stringResource(R.string.home_error_proxy_failure_title)
-    "TARGET_UNSUPPORTED" -> stringResource(R.string.home_error_unsupported_title)
-    ConnectionError.CREDENTIAL_UNREADABLE -> stringResource(R.string.home_error_credentials_title)
     ConnectionError.ENGINE_STOPPED -> stringResource(R.string.home_error_engine_stopped_title)
     ConnectionError.PROFILE_DELETED -> stringResource(R.string.home_error_profile_deleted_title)
     ConnectionError.OFFLINE -> stringResource(R.string.home_error_offline_title)
     ConnectionError.ALWAYS_ON_NO_PROFILE -> stringResource(R.string.home_error_always_on_no_profile_title)
-    else -> stringResource(R.string.home_error_internal_title)
+    else -> proxyCheckErrorTitle(error, profile)
 }
 
 /** The catalogue message for [error], filled in with the profile's server. */
 @Composable
 private fun errorMessage(error: ConnectionError, profile: ProxyProfile): String = when (error.code) {
-    "PROXY_UNREACHABLE" -> stringResource(R.string.home_error_unreachable_message, profile.endpoint)
-    "PROXY_DNS_FAILED" -> stringResource(R.string.home_error_dns_message, profile.host)
-    "AUTH_REQUIRED" -> stringResource(R.string.home_error_auth_required_message)
-    "AUTH_FAILED" -> stringResource(
-        if (error.unsupportedSignIn) R.string.home_error_auth_unsupported_message else R.string.home_error_auth_failed_message,
-    )
-    "TLS_UNTRUSTED" -> stringResource(R.string.home_error_tls_untrusted_message)
-    "TLS_HOSTNAME" -> stringResource(R.string.home_error_tls_hostname_message, profile.tlsServerName ?: profile.host)
-    "TLS_EXPIRED" -> stringResource(R.string.home_error_tls_expired_message)
-    "TLS_HANDSHAKE" -> stringResource(R.string.home_error_tls_handshake_message)
-    "PROTOCOL_ERROR" -> stringResource(
-        if (error.noConnect) R.string.home_error_no_connect_message else R.string.home_error_protocol_message,
-    )
-    "HANDSHAKE_TIMEOUT" -> stringResource(R.string.home_error_timeout_message)
-    "TARGET_NOT_ALLOWED" -> stringResource(R.string.home_error_refused_message, profile.endpoint)
-    "TARGET_UNREACHABLE", "TARGET_REFUSED" -> stringResource(R.string.home_error_unreachable_target_message, profile.endpoint)
-    "PROXY_GENERAL_FAILURE" -> stringResource(R.string.home_error_proxy_failure_message, profile.endpoint)
-    "TARGET_UNSUPPORTED" -> stringResource(R.string.home_error_unsupported_message)
-    ConnectionError.CREDENTIAL_UNREADABLE -> stringResource(R.string.home_error_credentials_message)
     ConnectionError.ENGINE_STOPPED -> stringResource(R.string.home_error_engine_stopped_message)
     ConnectionError.PROFILE_DELETED -> stringResource(R.string.home_error_profile_deleted_message)
     ConnectionError.OFFLINE -> stringResource(R.string.home_error_offline_message)
     ConnectionError.ALWAYS_ON_NO_PROFILE -> stringResource(R.string.home_error_always_on_no_profile_message)
-    else -> stringResource(R.string.home_error_internal_message)
+    else -> proxyCheckErrorMessage(error, profile)
 }
 
 /** B3's rows: one per stage of an attempt, in order. */

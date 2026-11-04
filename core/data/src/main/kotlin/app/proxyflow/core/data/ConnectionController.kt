@@ -6,9 +6,7 @@ import app.proxyflow.core.model.Interruption
 import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.TrafficStats
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flowOf
 
 /**
@@ -73,13 +71,12 @@ interface ConnectionController {
     fun dismissInterruption(shown: Interruption) = Unit
 }
 
-/** For builds and tests without a VPN service: always disconnected, connecting is not available. */
-class UnavailableConnectionController : ConnectionController {
-    private val current = MutableStateFlow(ConnectionState.Idle)
-    override val state: StateFlow<ConnectionState> = current.asStateFlow()
-    override val canConnect: Boolean = false
-
-    override fun connect(profileId: String) = Unit
-
-    override fun disconnect() = Unit
+/**
+ * The user picked [profileId] (board B8, or "Use this proxy"): while a connection runs on another profile, it switches to
+ * [profileId] (J11) — the old proxy's flows end and apps' traffic is held until the new proxy is checked, never sent
+ * around a proxy (ADR-0010 §5). Without a connection nothing starts: connecting stays the user's own step.
+ */
+fun ConnectionController.switchIfConnected(profileId: String) {
+    val current = state.value
+    if (current.active && current.profileId != profileId) connect(profileId)
 }

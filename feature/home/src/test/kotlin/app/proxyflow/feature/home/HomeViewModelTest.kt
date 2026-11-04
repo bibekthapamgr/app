@@ -5,12 +5,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.InMemoryProtectionStore
 import app.proxyflow.core.data.ProtectionStore
-import app.proxyflow.core.data.UnavailableConnectionController
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ExitReason
 import app.proxyflow.core.model.Interruption
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ReconnectInfo
 import app.proxyflow.core.model.ReconnectReason
@@ -19,6 +19,7 @@ import app.proxyflow.core.model.SystemKillSwitch
 import app.proxyflow.core.model.TrafficStats
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
+import app.proxyflow.core.testing.UnavailableConnectionController
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -136,6 +137,39 @@ class HomeViewModelTest {
 
         controller.current.value = ConnectionState(ConnectionStatus.Disconnected, profileId = first.id, profile = first)
         assertEquals(second.id, ready(viewModel).profile.id)
+    }
+
+    /** B8: picking a profile makes it Home's; with a connection running on another one, the connection switches (J11). */
+    @Test
+    fun pickingAProfileSwitchesARunningConnectionToItAndOnlyThen() = runTest {
+        val controller = RecordingController()
+        val first = profiles.save(null, ProxyProfileInput(name = "Tokyo", server = "tokyo.example.com", port = "1080"))
+        val second = profiles.save(null, ProxyProfileInput(name = "Office", server = "office.example.com", port = "3128"))
+        val viewModel = HomeViewModel(profiles, controller)
+        observe(viewModel)
+        assertEquals("the picker lists every profile", listOf(first.id, second.id), ready(viewModel).profiles.map { it.id })
+
+        viewModel.chooseProfile(second.id)
+        assertEquals(second.id, ready(viewModel).profile.id)
+        assertEquals("disconnected: picking starts nothing", emptyList<String>(), controller.connects)
+
+        controller.current.value = ConnectionState(ConnectionStatus.Connected, profileId = second.id, profile = second)
+        viewModel.chooseProfile(second.id)
+        assertEquals("its own connection: nothing to switch", emptyList<String>(), controller.connects)
+        viewModel.chooseProfile(first.id)
+        assertEquals(listOf(first.id), controller.connects)
+        assertEquals("the choice is kept for Always-on VPN too (M8)", first.id, profiles.chosenProfileId.first())
+    }
+
+    @Test
+    fun thePickerShowsEachProfilesLastTest() = runTest {
+        val saved = profiles.save(null, ProxyProfileInput(name = "Tokyo", server = "tokyo.example.com", port = "1080"))
+        val viewModel = HomeViewModel(profiles, UnavailableConnectionController())
+        observe(viewModel)
+        assertTrue(ready(viewModel).lastTests.isEmpty())
+
+        profiles.recordTest(saved.id, saved, ProfileTest(5_000, code = null, latencyMillis = 182))
+        assertEquals(mapOf(saved.id to ProfileTest(5_000, code = null, latencyMillis = 182)), ready(viewModel).lastTests)
     }
 
     /** Edits apply at the next connect; until then Home must not describe settings the engine doesn't run. */
