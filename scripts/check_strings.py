@@ -4,7 +4,9 @@ apostrophe or a double quote without its backslash, and a backslash before anyth
 
 One such string fails the whole build at resource merging, every device job's too, minutes in and with a message that
 names no string ("Can not extract resource from ParsedResource": M10-6). This finds it in a second, with the file, the
-line and the string's name. A string wholly in double quotes may hold an apostrophe as it is (Android's own rule).
+line and the string's name. A string wholly in double quotes may hold an apostrophe as it is (Android's own rule), but
+not one with markup in it (<b>, <xliff:g>): the resource compiler starts its quoting afresh at each span, so this script
+asks for the backslash there.
 
 Usage: check_strings.py [ROOT]  (default: the repository; every src/<set>/res/values*/*.xml under it, build output left out)
 Exit status: 0 when nothing is found, 1 otherwise.
@@ -17,15 +19,15 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-ESCAPABLE = set("'\"\\nt@?")
+ESCAPABLE = set("'\"\\nt@?#")
 HEX4 = re.compile(r"[0-9a-fA-F]{4}")
 
 
-def problems_in(text: str) -> list[str]:
-    """What is wrong in one string's text as Android reads it (XML entities already decoded)."""
+def problems_in(text: str, markup: bool = False) -> list[str]:
+    """What is wrong in one string's text as Android reads it (XML entities already decoded); [markup]: it has spans."""
     found: list[str] = []
     body = text.strip()
-    quoted = len(body) >= 2 and body.startswith('"') and body.endswith('"')
+    quoted = len(body) >= 2 and body.startswith('"') and body.endswith('"') and not markup
     if quoted:
         body = body[1:-1]
     i = 0
@@ -50,19 +52,19 @@ def problems_in(text: str) -> list[str]:
     return found
 
 
-def strings_of(path: pathlib.Path) -> list[tuple[str, str]]:
-    """(name, text) of every string, plural item and array item in a values file."""
+def strings_of(path: pathlib.Path) -> list[tuple[str, str, bool]]:
+    """(name, text, whether it has markup) of every string, plural item and array item in a values file."""
     root = ET.parse(path).getroot()
-    out: list[tuple[str, str]] = []
+    out: list[tuple[str, str, bool]] = []
     for element in root:
         tag = element.tag
         name = element.get("name", "?")
         if tag == "string":
-            out.append((name, "".join(element.itertext())))
-        elif tag in ("plurals", "string-array"):
+            out.append((name, "".join(element.itertext()), len(element) > 0))
+        elif tag in ("plurals", "string-array", "array"):
             for index, item in enumerate(element.iter("item")):
                 label = f"{name}[{item.get('quantity', index)}]"
-                out.append((label, "".join(item.itertext())))
+                out.append((label, "".join(item.itertext()), len(item) > 0))
     return out
 
 
@@ -83,8 +85,8 @@ def check(root: pathlib.Path) -> list[str]:
         except ET.ParseError as e:
             report.append(f"{path.relative_to(root)}: not well-formed XML: {e}")
             continue
-        for name, text in entries:
-            for problem in problems_in(text):
+        for name, text, markup in entries:
+            for problem in problems_in(text, markup):
                 report.append(f"{path.relative_to(root)}:{line_of(source, name)}: {name}: {problem}")
     return report
 

@@ -2,6 +2,7 @@ package app.proxyflow
 
 import android.content.Intent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -82,7 +83,6 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import java.util.TimeZone
 import org.junit.After
-import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -781,31 +781,25 @@ class ScreenshotTest {
 
     // M10's localisation review: right to left, as Arabic, Hebrew, Persian and Urdu are written. ProxyFlow declares
     // supportsRtl, so on a phone set to one of them Android mirrors its screens, English words and all (it ships in
-    // English only until decision D8). Six screens, light theme, the top of the screen as it opens; the layout must be
-    // right to left (Robolectric's ldrtl), and the icons that point a way must turn round with it (defect M10-2).
+    // English only until decision D8). Six screens, light theme, the top of the screen as it opens, laid out right to left
+    // as Compose does for a right-to-left configuration; the icons that point a way must turn round with it (defect M10-2).
 
     @Test
-    @Config(qualifiers = "+ldrtl")
     fun rightToLeftHomeDisconnected() = captureRightToLeft("B2_home_disconnected") { HomeScreen(home(ConnectionState.Idle), HomeActions()) }
 
     @Test
-    @Config(qualifiers = "+ldrtl")
     fun rightToLeftHomeConnected() = captureRightToLeft("B4_home_connected") { ConnectedHome() }
 
     @Test
-    @Config(qualifiers = "+ldrtl")
     fun rightToLeftConnectFailed() = captureRightToLeft("B6b_connect_failed") { ConnectFailedHome() }
 
     @Test
-    @Config(qualifiers = "+ldrtl")
     fun rightToLeftProfiles() = captureRightToLeft("C2_profiles_list") { ProfilesList() }
 
     @Test
-    @Config(qualifiers = "+ldrtl")
     fun rightToLeftAddProxy() = captureRightToLeft("D1_add_proxy") { AddProxyForm() }
 
     @Test
-    @Config(qualifiers = "+ldrtl")
     fun rightToLeftSettings() = captureRightToLeft("E1_settings") { SettingsSample() }
 
     @Composable
@@ -836,15 +830,16 @@ class ScreenshotTest {
         SettingsScreen(state, onThemeChange = {}, onOpenAbout = {}, notificationsOn = true)
     }
 
-    /** [content] laid out right to left, as the test's @Config sets — which must be in force — captured in screenshots/rtl and checked. */
+    /**
+     * [content] laid out right to left, as Compose lays out every screen when Android's configuration is right to left
+     * (`LocalLayoutDirection`, which Compose takes from it): captured in screenshots/rtl and checked. Robolectric's `ldrtl`
+     * qualifier left Compose's direction left to right (run 41826918038), so the direction is given here as Android gives it.
+     */
     private fun captureRightToLeft(name: String, content: @Composable () -> Unit) {
-        var direction: LayoutDirection? = null
         compose.setContent {
-            direction = LocalLayoutDirection.current
-            ProxyFlowTheme { content() }
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { ProxyFlowTheme { content() } }
         }
         val captured = runCatching { compose.onRoot().captureRoboImage("$DIR/rtl/$name.png") }
-        assertEquals("laid out right to left", LayoutDirection.Rtl, direction)
         assertAccessible("$name (right to left)")
         captured.getOrThrow()
     }

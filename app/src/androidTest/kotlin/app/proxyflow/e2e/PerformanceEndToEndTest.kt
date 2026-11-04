@@ -7,6 +7,7 @@ import android.system.Os
 import android.system.OsConstants
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.proxyflow.core.engine.EngineFlow
 import app.proxyflow.core.engine.EngineStats
 import app.proxyflow.core.engine.ProxyEngine
 import app.proxyflow.core.model.ConnectionStatus
@@ -225,27 +226,36 @@ class PerformanceEndToEndTest {
     fun throughputAndItsCpu() {
         for ((protocol, profile) in listOf("socks5" to socks(), "http" to http())) {
             val byPath = mapOf(PROXY_ONLY to Transfers(), VPN to Transfers())
-            for (round in 1..TRANSFERS) {
-                for (path in if (round % 2 == 1) listOf(PROXY_ONLY, VPN) else listOf(VPN, PROXY_ONLY)) {
-                    if (path == VPN) app.connect(profile.id) else app.disconnectAndSettle()
-                    for (direction in DIRECTIONS) {
-                        val cpuBefore = cpuMillis()
-                        val before = if (path == VPN) ProxyEngine().stats() else null
-                        val result = if (path == VPN) {
-                            shell("rate", env.destinationName, lab.bulkPort, direction, BULK_BYTES, RATE_TIMEOUT_MS)
-                        } else {
-                            shell("rate", env.destinationName, lab.bulkPort, direction, BULK_BYTES, RATE_TIMEOUT_MS, "via", protocol)
+            try {
+                for (round in 1..TRANSFERS) {
+                    for (path in if (round % 2 == 1) listOf(PROXY_ONLY, VPN) else listOf(VPN, PROXY_ONLY)) {
+                        // A round that starts through ProxyFlow follows one that ended there: still connected, nothing to do.
+                        if (path == PROXY_ONLY) {
+                            app.disconnectAndSettle()
+                        } else if (!connectedTo(profile)) {
+                            app.connect(profile.id)
                         }
-                        val cpu = cpuMillis() - cpuBefore
-                        val after = if (before != null) ProxyEngine().stats() else null
-                        val carried = if (before != null && after != null) carriedBy(before, after) else null
-                        byPath.getValue(path).add(direction, result, cpu, carried)
+                        for (direction in DIRECTIONS) {
+                            val cpuBefore = cpuMillis()
+                            val before = if (path == VPN) ProxyEngine().stats() else null
+                            val result = if (path == VPN) {
+                                shell("rate", env.destinationName, lab.bulkPort, direction, BULK_BYTES, RATE_TIMEOUT_MS)
+                            } else {
+                                shell("rate", env.destinationName, lab.bulkPort, direction, BULK_BYTES, RATE_TIMEOUT_MS, "via", protocol)
+                            }
+                            val cpu = cpuMillis() - cpuBefore
+                            val after = if (before != null) ProxyEngine().stats() else null
+                            val carried = if (before != null && after != null) carriedBy(before, after) else null
+                            byPath.getValue(path).add(direction, result, cpu, carried)
+                        }
                     }
                 }
-            }
-            app.disconnectAndSettle()
-            for (direction in DIRECTIONS) {
-                for (path in listOf(PROXY_ONLY, VPN)) byPath.getValue(path).report(protocol, direction, path)
+                app.disconnectAndSettle()
+            } finally {
+                // Logged even when a round failed part way (a connect that timed out): the figures of the transfers that ran.
+                for (direction in DIRECTIONS) {
+                    for (path in listOf(PROXY_ONLY, VPN)) byPath.getValue(path).report(protocol, direction, path)
+                }
             }
             for (path in listOf(PROXY_ONLY, VPN)) byPath.getValue(path).assertAll(protocol, path)
             app.connect(profile.id)
@@ -253,6 +263,9 @@ class PerformanceEndToEndTest {
             app.disconnectAndSettle()
         }
     }
+
+    private fun connectedTo(profile: ProxyProfile): Boolean =
+        app.controller.state.value.let { it.status == ConnectionStatus.Connected && it.profileId == profile.id }
 
     /** The bytes the engine carried between two of its readings, both ways: the shell's transfer and other apps' traffic. */
     private fun carriedBy(before: EngineStats, after: EngineStats): Long =
@@ -370,37 +383,55 @@ class PerformanceEndToEndTest {
                 .getOrElse { "ERROR $it" }
         }
         clientThreads += holder
+        // Other apps' connections come and go meanwhile, through the VPN too (Android's own and Google's): the test's are the
+        // engine's flows to the bulk server, which each check counts one by one. The engine's totals, which include the
+        // others', only say when that is worth reading: they are never less than the test's own.
         var peakRss = idleRss
-        var engine = idle
-        eventually("$MANY connections open at once", MANY_OPEN_MS, diagnose = { "engine: ${ProxyEngine().stats()}; shell: $held" }) {
-            peakRss = maxOf(peakRss, rssKib())
-            engine = ProxyEngine().stats()
-            engine.tcpActive >= MANY
-        }
-        if (load.isNotEmpty()) {
-            // What the engine handed on to the connections, which read none of it: their buffers and the netstack's full.
-            eventually("data in flight on every connection", MANY_OPEN_MS, diagnose = { "engine: ${ProxyEngine().stats()}" }) {
-                ProxyEngine().stats().bytesDown - idle.bytesDown >= MANY * IN_FLIGHT_MIN_BYTES
+        var mine = bulkFlows()
+        val diagnosis = { "${described(mine)}; engine: ${ProxyEngine().stats()}; shell: $held" }
+        val notReady = runCatching {
+            eventually("$MANY connections open at once", MANY_OPEN_MS, diagnosis) {
+                peakRss = maxOf(peakRss, rssKib())
+                ProxyEngine().stats().tcpActive >= MANY && bulkFlows().also { mine = it }.count { it.state == OPEN } >= MANY
             }
-        }
-        var most: EngineStats = engine
+            if (load.isNotEmpty()) {
+                // What the engine handed on to each connection, which reads none of it: its buffers and the netstack's full.
+                eventually("data in flight on every connection", MANY_OPEN_MS, diagnosis) {
+                    ProxyEngine().stats().bytesDown - idle.bytesDown >= MANY * IN_FLIGHT_MIN_BYTES &&
+                        bulkFlows().also { mine = it }.count { it.bytesDown >= IN_FLIGHT_MIN_BYTES } >= MANY
+                }
+            }
+        }.exceptionOrNull()
+        var most = ProxyEngine().stats()
+        var mostFlows = mine
         repeat(SAMPLES) {
             Thread.sleep(1_000)
             peakRss = maxOf(peakRss, rssKib())
             val now = ProxyEngine().stats()
-            if (now.tcpActive >= MANY && now.goHeldKib >= most.goHeldKib) most = now
+            val flows = bulkFlows()
+            if (flows.count { it.state == OPEN } >= MANY && now.goHeldKib >= most.goHeldKib) {
+                most = now
+                mostFlows = flows
+            }
         }
         holder.join()
-        // Other apps' connections may come and go meanwhile: what remains open is allowed for, by the flows still tracked.
+        // Every one of the test's connections must end; the goroutines allow for the others'.
         var closed = ProxyEngine().stats()
-        eventually("the $MANY connections closed", CLOSE_MS, diagnose = { "engine: $closed" }) {
-            ProxyEngine().stats().also { closed = it }.tcpActive <= idle.tcpActive + OTHER_FLOWS
-        }
+        var left = -1
+        val notClosed = runCatching {
+            eventually("the $MANY connections closed", CLOSE_MS, diagnose = { "$left flows to the bulk server left; engine: $closed" }) {
+                closed = ProxyEngine().stats()
+                left = bulkFlows().size
+                left == 0
+            }
+        }.exceptionOrNull()
         val allowed = idle.goroutines + GOROUTINES_PER_FLOW * (closed.flows - idle.flows).coerceAtLeast(0) + GOROUTINE_SLACK
+        // Logged before anything is asserted, a wait that ran out included: the figures show what it ran out on.
         perf(
             "memory",
             "traffic" to traffic,
-            "connections" to most.tcpActive,
+            "connections" to mostFlows.count { it.state == OPEN },
+            "least_down_bytes" to mostFlows.minOfOrNull { it.bytesDown },
             "load_bytes" to (load.lastOrNull() ?: 0),
             "rss_disconnected_kib" to disconnected,
             "rss_idle_kib" to idleRss,
@@ -414,6 +445,8 @@ class PerformanceEndToEndTest {
             "goroutines_closed" to closed.goroutines,
             "opening_ms" to held.substringAfter(" IN ", "?").substringBefore(' '),
         )
+        notReady?.let { throw it }
+        notClosed?.let { throw it }
         assertTrue("every connection opened: $held", held.startsWith("HELD $MANY OF $MANY FAILED 0 "))
         if (load.isNotEmpty()) assertTrue("every connection read its $LOAD_BYTES bytes: $held", " DRAINED $MANY" in held)
         assertTrue(
@@ -421,6 +454,13 @@ class PerformanceEndToEndTest {
             closed.goroutines <= allowed,
         )
     }
+
+    /** The test's connections: the engine's TCP flows to the bulk server, which only this test's clients open. */
+    private fun bulkFlows(): List<EngineFlow> = ProxyEngine().flows().filter { it.kind == "tcp" && it.port == lab.bulkPort }
+
+    private fun described(flows: List<EngineFlow>): String =
+        "${flows.size} flows to the bulk server, ${flows.count { it.state == OPEN }} open, " +
+            "${flows.count { it.bytesDown >= IN_FLIGHT_MIN_BYTES }} with $IN_FLIGHT_MIN_BYTES bytes or more down"
 
     /**
      * Quality bar: under 2 % battery an hour above the phone's own, connected and idle with the screen off — battery only
@@ -537,8 +577,8 @@ class PerformanceEndToEndTest {
         const val MANY_OPEN_MS = 90_000L
         const val CLOSE_MS = 30_000L
 
-        /** Connections other apps may have open through the VPN when the test's own have closed. */
-        const val OTHER_FLOWS = 5
+        /** A flow's state once its tunnel through the proxy is set up and bytes are relayed (engine/tunnel/flows.go). */
+        const val OPEN = "open"
         const val SAMPLES = 5
         const val GOROUTINES_PER_FLOW = 3
         const val GOROUTINE_SLACK = 20

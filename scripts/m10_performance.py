@@ -53,6 +53,8 @@ CPU_PCT_AT_50_MBIT = 50.0
 ENGINE_BYTES_AT_200 = 50_000_000  # "50 MB": megabytes of 10^6 bytes
 CONNECTIONS = 200
 GB_PER_SECOND_AT_50_MBIT = 0.00625  # 50 Mbit/s is 6.25 MB, so 0.00625 GB, a second
+PACED_MBIT_S = 50.0
+PACED_BAND = 0.05  # a paced upload counts for the bar only within 5 % of 50 Mbit/s: a slower one costs less CPU
 
 
 def measurements(logcat: list[str]) -> list[dict[str, str]]:
@@ -216,17 +218,25 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
     slowest = min(down, default=None)
     bars.append(bar("Throughput down through a local test proxy", f"≥ {DOWN_MBIT_S:.0f} Mbit/s", "?" if slowest is None else f"{slowest:.1f} Mbit/s (the slower protocol)",
                     None if slowest is None else slowest >= DOWN_MBIT_S))
-    measured = []
+    measured, off_rate = [], []
     for protocol in PROTOCOLS:
         paced = find(found, "cpu_at_50mbit", protocol=protocol)
         if paced and number(paced.get("cpu_pct")) is not None:
-            measured.append(number(paced["cpu_pct"]))
+            rate = number(paced.get("mbit_s"))
+            at_rate = rate is not None and abs(rate - PACED_MBIT_S) <= PACED_MBIT_S * PACED_BAND
+            if at_rate:
+                measured.append(number(paced["cpu_pct"]))
+            else:
+                off_rate.append(NAMES[protocol])
             facts.append(f"CPU at 50 Mbit/s, measured, {NAMES[protocol]}: an upload paced at it, {paced.get('bytes')} bytes in {paced.get('ms')} ms "
-                         f"({paced.get('mbit_s')} Mbit/s): {paced.get('cpu_ms')} ms of CPU, {paced.get('cpu_pct')} % of one core")
+                         f"({paced.get('mbit_s')} Mbit/s): {paced.get('cpu_ms')} ms of CPU, {paced.get('cpu_pct')} % of one core"
+                         + ("" if at_rate else f"; left out of the bar: not within {PACED_BAND * 100:.0f} % of {PACED_MBIT_S:.0f} Mbit/s"))
     costliest = max(measured + extrapolated_down, default=None)
+    left_out = f"; {'/'.join(off_rate)} left out, not paced at 50 Mbit/s" if off_rate else ""
     bars.append(bar("CPU at 50 Mbit/s", f"< {CPU_PCT_AT_50_MBIT:.0f} % of one core",
                     "?" if costliest is None else f"{costliest:.1f} % (the costliest: uploads paced at 50 Mbit/s "
-                    f"{'/'.join(f'{v:.1f}' for v in measured) or '?'} %, downloads by their rate {'/'.join(f'{v:.1f}' for v in extrapolated_down) or '?'} %)",
+                    f"{'/'.join(f'{v:.1f}' for v in measured) or '?'} %, downloads by their rate {'/'.join(f'{v:.1f}' for v in extrapolated_down) or '?'} %"
+                    f"{left_out})",
                     None if costliest is None else costliest < CPU_PCT_AT_50_MBIT))
 
     # Memory with 200 connections open: idle, then with data in flight on each (the bar's case: buffers in use).
@@ -240,6 +250,8 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
         held_by[traffic] = (held, connections)
         peak, idle, before = number(memory.get("rss_peak_kib")), number(memory.get("rss_idle_kib")), number(memory.get("rss_disconnected_kib"))
         what = "idle" if traffic == "idle" else f"each with {memory.get('load_bytes')} bytes in flight"
+        if traffic != "idle" and number(memory.get("least_down_bytes")) is not None:
+            what += f" (ProxyFlow had handed each at least {memory['least_down_bytes']} bytes on when read)"
         facts.append(
             f"memory with {connections} connections open at once, {what} (opened in {memory.get('opening_ms')} ms): the Go runtime holds {mib(held)} "
             f"(heap {mib(number(memory.get('go_heap_kib')))}, stacks {mib(number(memory.get('go_stacks_kib')))}; {mib(number(memory.get('go_held_idle_kib')))} "

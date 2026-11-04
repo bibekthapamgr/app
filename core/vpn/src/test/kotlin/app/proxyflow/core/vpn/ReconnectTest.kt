@@ -1007,6 +1007,100 @@ class ReconnectTest {
         assertFalse(host.tuns.single().closed)
     }
 
+    /**
+     * An Always-on start whose attempts ran out is over: the user's own Try again from that block follows the usual rules —
+     * one check, blocked again at once if it fails — never another round of Always-on attempts (M10 re-review).
+     */
+    @Test
+    fun theUsersTryAgainAfterAnAlwaysOnStartRanOutIsTheUsers() {
+        val tokyo = save()
+        runBlocking { profiles.repository.setActive(tokyo.id) }
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        session.attach(host, alwaysOn = true, startId = host.started())
+        await { it.status == ConnectionStatus.Blocked }
+        val checks = log.count("probe ${tokyo.id}")
+        val before = state.history.size
+
+        session.connect(tokyo.id) // Home's Try again
+        eventually("the user's check") { log.count("probe ${tokyo.id}") == checks + 1 }
+        await { it.status == ConnectionStatus.Blocked && state.history.size > before + 1 }
+        runBlocking { session.awaitIdle() }
+        assertEquals("one check", checks + 1, log.count("probe ${tokyo.id}"))
+        val rounds = state.history.drop(before).mapNotNull { it.reconnect?.reason }.toSet()
+        assertEquals("no Always-on round", emptySet<ReconnectReason>(), rounds)
+        assertFalse("traffic still held", host.tuns.single().closed)
+    }
+
+    /**
+     * The page going while an attempt's engine runs, waiting for Android's routing: that engine is stopped before the
+     * attempt runs again, so two engines never run on one interface.
+     */
+    @Test
+    fun thePageGoingDuringAnAttemptsRoutingStopsItsEngineFirst() {
+        val profile = connect()
+        session.underlyingNetwork(WIFI)
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        host.routes = false
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        escalate()
+        await { it.status == ConnectionStatus.Reconnecting }
+        engine.answer = PreflightAnswer(ok = true)
+        val starts = log.count("start ${profile.id}")
+        eventually("the attempt's engine started") { log.count("start ${profile.id}") == starts + 1 }
+
+        session.underlyingNetwork(WIFI)
+        eventually("the attempt ran again") { log.count("start ${profile.id}") == starts + 2 }
+        host.routes = true
+        await { it.status == ConnectionStatus.Connected }
+        var running = false
+        for (call in log.all.filter { it == "stop" || it.startsWith("start ") }) {
+            if (call.startsWith("start ")) {
+                assertFalse("two engines at once: ${log.all}", running)
+                running = true
+            } else {
+                running = false
+            }
+        }
+        eventually("no job left") { session.activeJobs() == 0 }
+        assertFalse(host.tuns.single().closed)
+    }
+
+    /** A move to another network from a block starts the attempts again without the block's detail (M10-13). */
+    @Test
+    fun aNetworkChangeFromABlockShowsNoStaleDetail() {
+        val profile = connect()
+        session.underlyingNetwork(WIFI)
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        escalate()
+        assertEquals("reconnecting stopped after 3 attempts", await { it.status == ConnectionStatus.Blocked }.error?.detail)
+        val checks = log.count("probe ${profile.id}")
+
+        val gate = CountDownLatch(1)
+        engine.gate = gate
+        session.underlyingNetwork(MOBILE)
+        eventually("the attempt on the new network") { log.count("probe ${profile.id}") == checks + 1 }
+        runBlocking { session.awaitIdle() }
+        val running = state.value.reconnect
+        assertEquals(ReconnectReason.NetworkChanged, running?.reason)
+        assertEquals(ConnectionError("PROXY_UNREACHABLE"), running?.lastError)
+        engine.gate = null
+        gate.countDown()
+    }
+
+    /** A move from a network with a sign-in page to another network is a move, not the page going. */
+    @Test
+    fun movingFromASignInNetworkIsNotThePageGoing() {
+        connect()
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        session.underlyingNetwork(MOBILE)
+        val moved = await { !it.networkSignIn }
+        assertEquals(ConnectionStatus.Connected, moved.status)
+        runBlocking { session.awaitIdle() }
+        assertEquals(0, entries.count { it.event == LogEvent.SignInPageGone })
+        assertEquals(1, entries.count { it.event == LogEvent.NetworkChanged })
+        assertFalse(sessionLog.all.toString(), sessionLog.all.any { "no sign-in page any more" in it })
+    }
+
     /** The tile's Disconnect while traffic is held, and the page going then, release nothing (M10, review C). */
     @Test
     fun theTilesDisconnectAndThePageGoingReleaseNothingHeld() {

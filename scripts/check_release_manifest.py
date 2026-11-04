@@ -415,47 +415,91 @@ def check_apk(references: list[tuple[str, str]], apk: str | None = None, aapt2: 
     return problems, facts
 
 
-# M10: what the engine's native code finds by name (core/engine/consumer-rules.pro keeps them): class descriptors, and
-# the Java methods Go calls back (the Platform interface) or the app calls (Pfengine's).
+# M10: what the engine's native code finds by name, which core/engine/consumer-rules.pro keeps: gomobile's JNI glue
+# (golang.org/x/mobile bind/java/seq_android.c: go.Seq's static methods and Seq.Ref's field, looked up in Seq's init)
+# and the bindings it generated for the engine (Pfengine's natives; the Platform interface, whose methods Go calls back,
+# and the app's implementation of it). Each must be defined in a dex file under its own name: R8 renaming or removing one
+# crashes the engine at its first call.
 ENGINE_CLASSES = (
     "Lgo/Seq;",
+    "Lgo/Seq$Ref;",
+    "Lgo/Seq$GoObject;",
     "Lapp/proxyflow/engine/go/pfengine/Pfengine;",
     "Lapp/proxyflow/engine/go/pfengine/Platform;",
     "Lapp/proxyflow/core/engine/AndroidEnginePlatform;",
 )
-ENGINE_METHODS = ("protect", "resolveProxyHost", "verifyChain", "onEvent", "start", "probe", "resetFlows", "networkPlan", "selfTest")
+PLATFORM_METHODS = ("protect", "resolveProxyHost", "verifyChain", "onEvent")
+ENGINE_METHODS = {
+    "Lgo/Seq;": ("getRef", "decRef", "incRefnum", "incRef", "incGoObjectRef"),
+    "Lapp/proxyflow/engine/go/pfengine/Pfengine;": (
+        "start", "stop", "status", "stats", "flows", "resetFlows", "probe", "selfTest", "networkPlan", "version",
+    ),
+    "Lapp/proxyflow/engine/go/pfengine/Platform;": PLATFORM_METHODS,
+    "Lapp/proxyflow/core/engine/AndroidEnginePlatform;": PLATFORM_METHODS,
+}
+ENGINE_FIELDS = {"Lgo/Seq$Ref;": ("obj",)}
 
 
-def dex_strings(data: bytes) -> set[str]:
-    """Every string of one dex file's string table (string_ids → string_data_item: a ULEB128 length, MUTF-8 bytes, 0)."""
+def dex_strings(data: bytes) -> list[str]:
+    """One dex file's string table, by index (string_ids → string_data_item: a ULEB128 length, MUTF-8 bytes, a 0)."""
     if data[:4] != b"dex\n":
-        return set()
+        return []
     count, offset = int.from_bytes(data[56:60], "little"), int.from_bytes(data[60:64], "little")
-    out: set[str] = set()
+    out: list[str] = []
     for i in range(count):
         at = int.from_bytes(data[offset + 4 * i : offset + 4 * i + 4], "little")
         while data[at] & 0x80:  # the UTF-16 length, not needed: the bytes end at a 0
             at += 1
         end = data.index(b"\0", at + 1)
-        out.add(data[at + 1 : end].decode("utf-8", "replace"))
+        out.append(data[at + 1 : end].decode("utf-8", "replace"))
     return out
 
 
+def dex_tables(data: bytes) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str]]]:
+    """The classes one dex file defines, and its (class, name) method and field ids (the header's tables)."""
+    strings = dex_strings(data)
+    if not strings:
+        return set(), set(), set()
+
+    def u32(at: int) -> int:
+        return int.from_bytes(data[at : at + 4], "little")
+
+    def u16(at: int) -> int:
+        return int.from_bytes(data[at : at + 2], "little")
+
+    types = [strings[u32(u32(68) + 4 * i)] for i in range(u32(64))]
+    fields = {(types[u16(u32(84) + 8 * i)], strings[u32(u32(84) + 8 * i + 4)]) for i in range(u32(80))}
+    methods = {(types[u16(u32(92) + 8 * i)], strings[u32(u32(92) + 8 * i + 4)]) for i in range(u32(88))}
+    classes = {types[u32(u32(100) + 32 * i)] for i in range(u32(96))}
+    return classes, methods, fields
+
+
 def check_engine_names(apk: str) -> tuple[list[str], list[str]]:
-    """M10: the release APK's dex files still name what the engine's JNI layer finds by name (ENGINE_CLASSES, _METHODS)."""
+    """M10: every class, method and field the engine's JNI layer finds by name is in the release APK under that name."""
     import zipfile
 
-    strings: set[str] = set()
+    classes: set[str] = set()
+    methods: set[tuple[str, str]] = set()
+    fields: set[tuple[str, str]] = set()
     with zipfile.ZipFile(apk) as archive:
         dexes = [name for name in archive.namelist() if re.fullmatch(r"classes\d*\.dex", name)]
         for name in dexes:
-            strings |= dex_strings(archive.read(name))
-    missing = [name for name in ENGINE_CLASSES + ENGINE_METHODS if name not in strings]
+            c, m, f = dex_tables(archive.read(name))
+            classes |= c
+            methods |= m
+            fields |= f
     if not dexes:
         return [f"{apk}: no dex file"], []
+    missing = [c for c in ENGINE_CLASSES if c not in classes]
+    missing += [f"{c}.{m}()" for c, names in ENGINE_METHODS.items() for m in names if (c, m) not in methods]
+    missing += [f"{c}.{f}" for c, names in ENGINE_FIELDS.items() for f in names if (c, f) not in fields]
     if missing:
         return [f"the release APK's dex files ({len(dexes)}) lack what the engine's JNI layer finds by name: {missing} (R8 renamed or removed them)"], []
-    return [], [f"release APK dex files ({len(dexes)}): the engine's JNI names survive R8 ({len(ENGINE_CLASSES)} classes, {len(ENGINE_METHODS)} methods)"]
+    count = sum(len(v) for v in ENGINE_METHODS.values())
+    return [], [
+        f"release APK dex files ({len(dexes)}): the engine's JNI names survive R8 ({len(ENGINE_CLASSES)} classes, {count} methods, "
+        f"{sum(len(v) for v in ENGINE_FIELDS.values())} field, each defined under its own name)"
+    ]
 
 
 def escape(text: str) -> str:

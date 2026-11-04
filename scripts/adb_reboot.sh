@@ -17,6 +17,7 @@ reboot_and_wait() { # <seconds>
     local old new state deadline=$((SECONDS + $1))
     old="$(boot_id)"
     REBOOT_WENT_DOWN=""
+    REBOOT_SEEN="boot id before: ${old:-unreadable}"
     timeout 60 adb reboot >/dev/null 2>&1 || true
     # The old boot going: adb no longer has the device, or already a new boot.
     while [ "$SECONDS" -lt "$deadline" ]; do
@@ -32,15 +33,19 @@ reboot_and_wait() { # <seconds>
         fi
         sleep 1
     done
+    local completed=""
     while [ "$SECONDS" -lt "$deadline" ]; do
         if timeout 10 adb wait-for-device >/dev/null 2>&1; then
             new="$(boot_id)"
+            completed="$(timeout 10 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
             if [ -n "$new" ] && { { [ -n "$old" ] && [ "$new" != "$old" ]; } || { [ -z "$old" ] && [ -n "$REBOOT_WENT_DOWN" ]; }; } &&
-                [ "$(timeout 10 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
+                [ "$completed" = 1 ]; then
                 return 0
             fi
         fi
         sleep 2
     done
+    # What was last seen, for the error: whether adb ever left the old boot, the boot id now, the boot's progress.
+    REBOOT_SEEN="$REBOOT_SEEN; adb $([ -n "$REBOOT_WENT_DOWN" ] && echo "left the old boot" || echo "never left the old boot"); boot id now: ${new:-unreadable}; sys.boot_completed: ${completed:-unset}; adb state: $(timeout 5 adb get-state 2>&1 | tr -d '\r' | head -c 80)"
     return 1
 }

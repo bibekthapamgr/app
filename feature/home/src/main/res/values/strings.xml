@@ -132,7 +132,6 @@
     <string name="home_reconnect_back_online_message">Your phone has a network again. ProxyFlow is reconnecting to your proxy.</string>
     <string name="home_reconnect_network_changed_title">Network changed</string>
     <string name="home_reconnect_network_changed_message">Your phone moved to another network. ProxyFlow is reconnecting to your proxy.</string>
-    <string name="home_reconnect_sign_in_gone_title">Sign-in page gone</string>
     <string name="home_reconnect_sign_in_gone_message">This network no longer asks for a sign-in. ProxyFlow is reconnecting to your proxy.</string>
     <string name="home_reconnect_attempt">Attempt %1$d of %2$d</string>
     <string name="home_reconnect_next_try">next try in %1$d s</string>

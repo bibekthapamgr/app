@@ -588,7 +588,6 @@ private fun AutoReconnectContent(state: HomeUiState.Ready, reconnect: ReconnectI
             lastError != null -> errorTitle(lastError, state.profile)
             reconnect.reason == ReconnectReason.NetworkBack -> stringResource(R.string.home_reconnect_back_online_title)
             reconnect.reason == ReconnectReason.AlwaysOnStart -> stringResource(R.string.home_reconnect_always_on_title)
-            reconnect.reason == ReconnectReason.SignInPageGone -> stringResource(R.string.home_reconnect_sign_in_gone_title)
             else -> stringResource(R.string.home_reconnect_network_changed_title)
         },
         text = stringResource(
@@ -598,7 +597,12 @@ private fun AutoReconnectContent(state: HomeUiState.Ready, reconnect: ReconnectI
                 ReconnectReason.NetworkChanged -> R.string.home_reconnect_network_changed_message
                 ReconnectReason.ProxyUnanswered -> R.string.home_reconnect_unanswered_message
                 ReconnectReason.AlwaysOnStart -> R.string.home_reconnect_always_on_message
-                ReconnectReason.SignInPageGone -> R.string.home_reconnect_sign_in_gone_message
+                // Started as the page went; should it be back meanwhile, the banner below says so, and this says only what runs.
+                ReconnectReason.SignInPageGone -> if (state.connection.networkSignIn) {
+                    R.string.home_reconnect_proxy_message
+                } else {
+                    R.string.home_reconnect_sign_in_gone_message
+                }
             },
         ),
         tone = BannerTone.Warning,

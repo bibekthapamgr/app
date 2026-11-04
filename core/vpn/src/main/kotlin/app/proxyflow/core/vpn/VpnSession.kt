@@ -427,8 +427,8 @@ class VpnSession(
         }
         cancelAttempt()
         recovery = null
-        // Android's Always-on start lasts until connected: a switch or a restart meanwhile (the picker, the edit screen's
-        // reconnect) holds traffic on the same interface and is retried as the start was (M10, ADR-0015 §3).
+        // Android's Always-on start lasts until connected, or blocked: a switch or a restart meanwhile (the picker, the edit
+        // screen's reconnect) holds traffic on the same interface and is retried as the start was (M10, ADR-0015 §6).
         startedByAlwaysOn = alwaysOn || startedByAlwaysOn
         // Switching or restarting: flows end now. Once connected, the interface stays, so traffic is held until the next engine runs on it.
         stopEngine()
@@ -1303,6 +1303,8 @@ class VpnSession(
         val stage = state.value.stage
         cancelAttempt()
         recovery = null
+        // An Always-on start that blocked is over: what the user does next (Try again, Restart) follows the usual rules.
+        startedByAlwaysOn = false
         stopEngine()
         if (heldSinceMillis == null) heldSinceMillis = clock()
         log("blocked: ${error.code}")

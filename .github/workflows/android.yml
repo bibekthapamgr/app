@@ -371,10 +371,10 @@ jobs:
   #   sets each against the V1 quality bars (docs/m1/01-scope.md §7) and saves m10-performance.json
   #   with the evidence. A network with a sign-in page (ReconnectEndToEndTest).
   # - M10 scenarios (scripts/m10_scenarios.sh): Android 13+ without the notification permission,
-  #   connected all the same (N, before the captures stop); then, with ProxyFlow started by Android
-  #   as Always-on VPN with "Block connections without VPN" and no instrumentation running, Doze,
-  #   App Standby's most restricted bucket and Battery Saver (P), and a restart (R): Android starts
-  #   it, it connects by itself, and the lab's witness never answers meanwhile.
+  #   connected all the same (N, before the captures stop); then a restart with ProxyFlow as
+  #   Always-on VPN with "Block connections without VPN" (R): Android starts it, it connects by
+  #   itself, and the lab's witness never answers meanwhile; then, on that connection, with no
+  #   instrumentation running, Doze, App Standby's most restricted bucket and Battery Saver (P).
   device:
     needs: engine
     if: ${{ !cancelled() }}

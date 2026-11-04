@@ -10,7 +10,7 @@ Legend: ✅ in place and checked automatically on every CI run · 🔁 in place,
 |---|---|---|
 | ✅ | No connection to a destination except through the active profile's adapter; no fallback dial (§6 item 1) | Engine tests; device evidence: every line arrives once, through a proxy (`m5_evidence.py`, `m6_evidence.py`) |
 | ✅ | While the VPN interface exists, every failure holds traffic: engine failure, proxy refusing or hanging, certificate change, reconnecting, offline, switch, restart (I-5) | Device tests M5–M7 with captures |
-| ✅ | An Always-on VPN start holds traffic before the proxy check and retries with traffic held (I-5, ADR-0013 §3), until connected also across a switch or a restart (M10) | `KillSwitchTest`, `ReconnectTest`; device scenario B |
+| ✅ | An Always-on VPN start holds traffic before the proxy check and retries with traffic held (I-5, ADR-0013 §3), until connected or blocked, also across a switch or a restart (M10) | `KillSwitchTest`, `ReconnectTest`; device scenario B |
 | ✅ | A sign-in page on the phone's network releases nothing; its going only tries held traffic again (M10, ADR-0015 §3) | `ReconnectTest`; `ReconnectEndToEndTest.signingInToTheNetworkReconnectsAtOnce` |
 | ✅ | Always-on VPN connects only the profile the user chose; none chosen → nothing connects, the user is told | `KillSwitchTest`, `HomeViewModelTest`, `HomeScreenTest` |
 | ✅ | Process death while connected: measured on devices with and without Android's kill switch; found and explained on the next start (I-6) | `scripts/m8_failure_injection.sh` + `scripts/m8_evidence.py`, API 29/34/35/36, on every CI run (the verified run: `docs/m8/failure-injection.md` §3); Home's notice: `HomeScreenTest`, screenshot B2 |
@@ -53,7 +53,8 @@ Legend: ✅ in place and checked automatically on every CI run · 🔁 in place,
 | ✅ | Not debuggable; no cleartext opt-in; network security config: no cleartext, system CAs only, no exceptions | `check_release_manifest.py` (`test_release_manifest.py`) |
 | ✅ | What the release APK ships for the network security config and both backup rule files passes the same checks in every configuration it ships, read back strictly (a library's qualified variant would apply where it matches, the release build type's copy instead of main's) | `check_release_manifest.py` with `aapt2 dump resources` and `dump xmltree` (`test_release_manifest.py`) |
 | ✅ | `PendingIntent`s immutable | Code review; Lint |
-| ✅ | The notification's Disconnect, Cancel and Restart run only on an unlocked phone (M10): Android's flag from Android 12, a not-exported activity before it; the tile asks to unlock first (M9) | `VpnNotificationsTest`, `VpnEndToEndTest` (Android 12+); the tile's locked tap: by review and on the phone checklist |
+| ✅ | The notification's Disconnect, Cancel and Restart run only on an unlocked phone (M10): Android's flag from Android 12, a not-exported activity before it | `VpnNotificationsTest`, `VpnEndToEndTest` (Android 12+) |
+| 🔁 | The tile asks to unlock first when tapped on a locked phone (M9) | By review per release, and on the phone checklist: no automated test reaches it (Robolectric's tile unlocks at once; the device test unlocks first) |
 | ✅ | Taps through another app's window dropped on Disconnect, Stop, Delete, Discard, Clear (S4) | `ObscuredTouchesTest` |
 | ✅ | Quick Settings tile exported only behind `BIND_QUICK_SETTINGS_TILE` (M9) | `check_release_manifest.py` (`check_tile_service`), `ManifestTest` |
 | ✅ | What the engine's JNI layer finds by name survives R8 in the release APK (M10) | `check_release_manifest.py` (`check_engine_names`) |
@@ -65,7 +66,7 @@ Legend: ✅ in place and checked automatically on every CI run · 🔁 in place,
 | ✅ | `MaxConns`, `MaxInFlight`, DNS slots, buffers, timeouts, event queue, name pool | Engine tests incl. M8's load tests (`docs/m8/security-review.md` §3.6) |
 | ✅ | Malformed packets dropped, the engine goes on (T-3) | `TestMalformedPacketsAreDroppedAndTheEngineGoesOn`, `FuzzPacketLoop` in CI |
 | ✅ | Parsers bounded and fuzzed (T-2) | Fuzz targets in CI |
-| ✅ | Reconnects bounded (8, about 2 min), cancellable, one at a time; SOCKS5 unanswered rule needs 2+ sites; a sign-in page that comes and goes adds no attempts (M10) | `ReconnectTest`, `KillSwitchTest` |
+| ✅ | Reconnects bounded (8, about 2 min), cancellable, one at a time; SOCKS5 unanswered rule needs 2+ sites; a sign-in page that comes and goes adds no attempts to a reconnection, and from a block each time it goes starts one round (M10-14) | `ReconnectTest`, `KillSwitchTest` |
 | ⚠️ | A netstack bug could still end the engine; with Android's kill switch on, apps then stay offline until the user opens ProxyFlow (R4) | Told in E2 |
 | ⏳ | Memory and battery on low-end physical phones (the emulators' baseline: `docs/m10/performance-baseline.md`) | `docs/m10/physical-phone-checklist.md`, the owner's |
 

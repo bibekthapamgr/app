@@ -29,6 +29,10 @@ VALUES = """<?xml version="1.0" encoding="utf-8"?>
     <string name="bad_escape">50\\% off</string>
     <string name="bad_unicode">\\u12</string>
     <string name="stray_quote">Say "hi"</string>
+    <array name="mixed">
+        <item>it's typed</item>
+    </array>
+    <string name="quoted_markup">"Tap <b>Connect</b>, it's quick"</string>
 </resources>
 """
 
@@ -41,6 +45,13 @@ class ProblemsInTest(unittest.TestCase):
     def test_an_apostrophe_without_its_backslash(self) -> None:
         self.assertEqual(["an apostrophe without its backslash (write \\')"], check_strings.problems_in("Android's"))
         self.assertEqual(2, len(check_strings.problems_in("Android's page doesn't open")))
+
+    def test_markup_ends_a_quoted_strings_exemption_and_hash_escapes(self) -> None:
+        # aapt2 starts quoting afresh at each span, so a wholly quoted string with markup needs its backslashes.
+        quote, apostrophe = 'a double quote without its backslash (write \\")', "an apostrophe without its backslash (write \\')"
+        self.assertEqual([quote, apostrophe, quote], check_strings.problems_in('"Tap Connect, it\'s quick"', markup=True))
+        self.assertEqual([], check_strings.problems_in('"Tap Connect, it\'s quick"'))
+        self.assertEqual([], check_strings.problems_in("\\#1 in \\@ and \\?"))
 
     def test_bad_escapes_and_stray_quotes(self) -> None:
         self.assertIn("a backslash before '%', which Android does not escape", check_strings.problems_in("50\\% off"))
@@ -72,6 +83,10 @@ class CheckTest(unittest.TestCase):
                 f"{where}:13: bad_unicode: a \\u escape without four hex digits after it",
                 f"{where}:14: stray_quote: a double quote without its backslash (write \\\")",
                 f"{where}:14: stray_quote: a double quote without its backslash (write \\\")",
+                f"{where}:15: mixed[0]: an apostrophe without its backslash (write \\')",
+                f"{where}:18: quoted_markup: a double quote without its backslash (write \\\")",
+                f"{where}:18: quoted_markup: an apostrophe without its backslash (write \\')",
+                f"{where}:18: quoted_markup: a double quote without its backslash (write \\\")",
             ],
             report,
         )

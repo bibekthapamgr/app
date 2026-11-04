@@ -5,22 +5,29 @@
 #   notifications  N  Android 13 and later without the notification permission: revoked while ProxyFlow is not running
 #      (revoking it ends the app's process), then NotificationPermissionEndToEndTest alone connects, carries a line
 #      through the proxy and finds none of ProxyFlow's notifications shown. Given back afterwards. Run while the phone's
-#      captures and socket samples still run, so they cover it.
-#   restart  P, R  ProxyFlow as the phone's Always-on VPN with "Block connections without VPN" on, as a user sets them in
-#      Android's VPN settings (here through the lab's device owner, the test APK's LabDeviceAdmin, as in M8's scenario
-#      B). Android starts ProxyFlow, which connects the chosen profile by itself, in a process of its own: no
+#      captures still run, so the checks over whole captures cover it (M6: no packet to or from a lab address, no lookup
+#      of a lab name); M6's account of each connection that left the phone while ProxyFlow was connected does not: it
+#      reads the device tests' logcat and their ProxyFlow's uid, and N's ProxyFlow is a new install (a new uid, its own
+#      logcat).
+#   restart  R, P  ProxyFlow as the phone's Always-on VPN with "Block connections without VPN" on, as a user sets them
+#      in Android's VPN settings (here through the lab's device owner, the test APK's LabDeviceAdmin, as in M8's
+#      scenario B). Android starts ProxyFlow, which connects the chosen profile by itself, in a process of its own: no
 #      instrumentation runs in it, whose rank would keep any process on the network.
-#      P  Android's power saving, each on in turn while connected, once Android's own allowance for a VPN it has just
-#         started is over: deep Doze (on battery, the screen off), App Standby's most restricted bucket, Battery Saver.
-#         ProxyFlow's foreground service must keep it on the network: with each on, Android still has its VPN, reads
-#         back the state asked for, and a line from the shell goes through the proxy to the destination by name.
 #      R  the phone restarts. Until ProxyFlow is connected again, Android's blocking keeps apps off the network: a probe
 #         of the lab's witness — which only a connection around ProxyFlow reaches — made while Android has no VPN
 #         network must be refused as that blocking refuses (M8's scenario B), and none may ever be answered; Android
 #         must still have the setting, and ProxyFlow log its Always-on start; then a line goes through the proxy to the
 #         destination by name, which only a proxy reaches.
+#      P  then, on the connection Android started after the restart: Android's power saving, each on in turn, once
+#         Android's own allowance for a VPN it has just started is over: deep Doze (on battery, the screen off), App
+#         Standby's most restricted bucket, Battery Saver. With each on, Android still has ProxyFlow's VPN, reads back
+#         the state asked for, and a line from the shell goes through the proxy to the destination by name. Android
+#         binds a VPN service with BIND_FOREGROUND_SERVICE, which may by itself let its process past all three, so what
+#         ties the result to ProxyFlow's own foreground service is the rank check: Android must rank ProxyFlow's process
+#         as a started foreground service (FGS), with no instrumentation in it. P runs after R: a restart after P once
+#         made API 30's emulator exit (run 41826918038).
 #
-# Run by scripts/e2e_device.sh: N before the phone's captures stop, P and R last, after every capture and sample was
+# Run by scripts/e2e_device.sh: N before the phone's captures stop, R and P last, after every capture and sample was
 # pulled (the restart ends them), while the lab's files are still on the phone. adbd must run as the shell user (the VPN
 # covers the shell, not root): checked before each part and after the restart. Nothing here looks a lab name up while
 # ProxyFlow is not connected: the destination is tried only once Android has a VPN network (the lab's uplink resolver
@@ -76,6 +83,7 @@ client() { timeout 40 adb shell "CLASSPATH=$CLIENT app_process /system/bin app.p
 witness() { client tcp 10.0.2.2 "$WITNESS_PORT" "PF10-reboot-$1" 3000; }
 line_through() { # <label>: one line to the destination by name, which only a proxy reaches; succeeds when it came back
     local reply
+    LAST_REPLY=""
     reply="$(client tcp "$DESTINATION_NAME" "$DESTINATION_PORT" "PF10-$1" 10000)"
     LAST_REPLY="$reply"
     [ "$reply" = "REPLY PROXYFLOW-DEST PF10-$1" ]
@@ -139,7 +147,10 @@ install() {
         fail "the test APK did not install"
         return 1
     }
-    timeout 60 adb push "$TEST_APK" "$CLIENT" >/dev/null 2>&1 && timeout 10 adb shell chmod 644 "$CLIENT"
+    if ! { timeout 60 adb push "$TEST_APK" "$CLIENT" >/dev/null 2>&1 && timeout 10 adb shell chmod 644 "$CLIENT" >/dev/null 2>&1; }; then
+        fail "the shell client could not be copied to the phone"
+        return 1
+    fi
 }
 
 reset_power() {
@@ -155,17 +166,27 @@ reset_power() {
     timeout 10 adb shell wm dismiss-keyguard >/dev/null 2>&1
 }
 
+# A clean-up step the lab's device owner answers: no answer, or an error, fails the part (the phone may still have it).
+cleaned_up() { # <step> <answer>
+    case "$2" in
+        "result 1: "*) note "$1: $2" ;;
+        "") fail "$1: no answer from the phone" ;;
+        *) fail "$1: $2" ;;
+    esac
+}
+
 on_exit() {
+    local code=$?
     trap '' TERM INT
     reset_power
     if [ -n "$ALWAYS_ON_SET" ]; then
         ALWAYS_ON_SET=""
-        note "Always-on VPN off: $(admin ALWAYS_ON --es package "''")"
+        cleaned_up "Always-on VPN off" "$(admin ALWAYS_ON --es package "''")"
     fi
     timeout 30 adb shell am force-stop "$APP_ID" >/dev/null 2>&1
     if [ -n "$OWNER_SET" ]; then
         OWNER_SET=""
-        note "device owner released: $(admin RELEASE)"
+        cleaned_up "device owner released" "$(admin RELEASE)"
     fi
     timeout 60 adb uninstall "$TEST_ID" >/dev/null 2>&1 || true
     timeout 60 adb uninstall "$APP_ID" >/dev/null 2>&1 || true
@@ -176,7 +197,7 @@ on_exit() {
     token="$(openssl rand -hex 16 2>/dev/null || echo "m10$RANDOM$RANDOM")"
     case "$PART" in
         notifications) title="M10 scenarios: no notification permission (API $API)" ;;
-        *) title="M10 scenarios: power saving and a restart with Always-on VPN (API $API)" ;;
+        *) title="M10 scenarios: a restart with Always-on VPN, then power saving (API $API)" ;;
     esac
     echo "::group::$title"
     echo "::stop-commands::$token" # what the phone printed, with workflow commands off
@@ -188,6 +209,8 @@ on_exit() {
     else
         echo "::notice title=$title::$(grep -E '^[0-9:]+ (N|P|R): (connected|not on API|deep Doze|the most restricted|Battery Saver|after the restart)' "$STEPS" | sed 's/^[0-9:]* //' | paste -sd ' ' | cut -c1-3000)"
     fi
+    # A part that passed but whose clean-up failed exits with the failure; one stopped (143) keeps its status.
+    if [ "$code" = 0 ] && [ "$STATUS" != 0 ]; then exit "$STATUS"; fi
 }
 trap on_exit EXIT
 trap 'fail "stopped by a signal (its time limit?)"; exit 143' TERM INT
@@ -232,8 +255,9 @@ saver_state() {
 connected_now() { # <label> <what>: Android still has ProxyFlow's VPN and a line goes through the proxy; a failure if not
     local vpn
     vpn="$(vpn_networks)"
+    LAST_REPLY=""
     if vpn_up "$vpn" && line_through "$1"; then return 0; fi
-    fail "P: $2: Android's VPN: $(echo "$vpn" | cut -c1-120); a line through the proxy: ${LAST_REPLY:-none}"
+    fail "P: $2: Android's VPN: $(echo "$vpn" | cut -c1-120); a line through the proxy: ${LAST_REPLY:-not sent}"
     return 1
 }
 
@@ -257,11 +281,24 @@ part_power() {
     # allowlist): only after that does power saving test ProxyFlow's own foreground service.
     uid="$(app_uid)"
     since=$SECONDS
-    while [ -n "$uid" ] && [ $((SECONDS - since)) -lt 120 ] &&
-        timeout 20 adb shell dumpsys deviceidle tempwhitelist 2>/dev/null | tr -d '\r' | grep -qE "UID=$((uid % 100000))[^0-9]"; do
+    local list allowance=""
+    while [ $((SECONDS - since)) -lt 120 ]; do
+        list="$(timeout 20 adb shell 'dumpsys deviceidle tempwhitelist; echo "dumpsys-rc=$?"' 2>/dev/null | tr -d '\r')"
+        # Without the uid, or the list, nothing tells the allowance is over: it is waited out (Android's is 60 s or less).
+        # An empty list is read (dumpsys answered): the allowance is over.
+        if [ -z "$uid" ] || ! echo "$list" | grep -q '^dumpsys-rc=0$'; then
+            if [ $((SECONDS - since)) -ge 75 ]; then
+                allowance="not readable (uid ${uid:-unknown}): waited it out, $((SECONDS - since)) s"
+                break
+            fi
+        elif ! echo "$list" | grep -qE "UID=$((uid % 100000))[^0-9]"; then
+            allowance="none now (uid $uid; waited $((SECONDS - since)) s)"
+            break
+        fi
         sleep 5
     done
-    note "P: Android's temporary allowance for ProxyFlow (uid ${uid:-unknown}): $([ $((SECONDS - since)) -lt 120 ] && echo "none now (waited $((SECONDS - since)) s)" || echo "still there after 120 s")"
+    note "P: Android's temporary allowance for ProxyFlow: ${allowance:-still there after 120 s}"
+    [ -n "$allowance" ] || fail "P: Android's temporary allowance for ProxyFlow was still there after 120 s: power saving would not test its own service"
     POWER_SET=1
     timeout 10 adb shell dumpsys battery unplug >/dev/null 2>&1
 
@@ -293,7 +330,8 @@ part_power() {
     timeout 10 adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1
     timeout 10 adb shell wm dismiss-keyguard >/dev/null 2>&1
 
-    # App Standby's most restricted bucket (restricted from Android 11, rare before), read back after the hold.
+    # App Standby's most restricted bucket, read back after the hold: restricted (45) from Android 12; on Android 11, asked
+    # for restricted, Android gave rare (40) — seen on API 30 — the most restricted it gives there; rare before.
     if [ "$API" -ge 30 ]; then
         bucket=restricted
         want=45
@@ -304,6 +342,10 @@ part_power() {
     timeout 10 adb shell am set-standby-bucket "$APP_ID" "$bucket" >/dev/null 2>&1
     sleep 10
     got="$(timeout 10 adb shell am get-standby-bucket "$APP_ID" 2>/dev/null | tr -d '\r[:space:]')"
+    if [ "$API" = 30 ] && [ "$got" = 40 ]; then
+        bucket="rare (what Android 11 gave for restricted)"
+        want=40
+    fi
     if [ "$got" != "$want" ]; then
         fail "P: Android did not keep ProxyFlow in the $bucket bucket ($want): $got"
     elif connected_now standby "in the $bucket bucket"; then
@@ -383,12 +425,11 @@ part_restart() {
         exit 1
     }
 
-    part_power
-
     note "R: restarting the phone"
     stop_logcat
-    if ! reboot_and_wait 300; then
-        fail "R: the phone did not start again within 5 minutes (a new boot, its boot completed)"
+    # An emulator's restart takes a minute or two, its first boot up to fifteen: ten minutes at most.
+    if ! reboot_and_wait 600; then
+        fail "R: the phone did not start again within 10 minutes (a new boot, its boot completed): $REBOOT_SEEN"
         exit 1
     fi
     local up=$SECONDS
@@ -453,7 +494,12 @@ part_restart() {
         note "R: ProxyFlow's session: $(timeout 30 adb logcat -d -v brief -s ProxyFlowVpn 2>/dev/null | tr -d '\r' | grep -m6 -E 'always-on start|connected |reconnect|blocked' | paste -sd ';' | cut -c1-600)"
     else
         fail "R: after the restart, no line went through the proxy within 240 s: VPN $(vpn_networks | cut -c1-120); the last reply: ${LAST_REPLY:-none}"
+        return
     fi
+
+    # P on the connection Android started after the restart, with no instrumentation in its process: a restart after P
+    # once made API 30's emulator exit (run 41826918038), so P comes last.
+    part_power
 }
 
 LAST_REPLY=""

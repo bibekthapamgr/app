@@ -634,6 +634,8 @@ class HomeScreenTest {
             ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.PROFILE_DELETED)),
             ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.ENGINE_STOPPED)),
             ConnectionState(profileId = "p1", error = ConnectionError(ConnectionError.CREDENTIAL_UNREADABLE)),
+            ConnectionState(profileId = "p1", error = ConnectionError(ConnectionError.ALWAYS_ON_NO_PROFILE)),
+            ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.INTERNAL)),
         )
         var state by mutableStateOf(ready(cases.first().copy(networkSignIn = true)))
         compose.setContent { ProxyFlowTheme { HomeScreen(state, actions, nowMillis = 0) } }
@@ -642,6 +644,25 @@ class HomeScreenTest {
             compose.waitForIdle()
             compose.onNodeWithText("This network asks you to sign in").assertDoesNotExist()
         }
+    }
+
+    /**
+     * Attempts that started as the sign-in page went are said as such; should the page be back meanwhile, Home doesn't say
+     * the network no longer asks for one beside the banner that says it does (M10 re-review).
+     */
+    @Test
+    fun attemptsTheSignInPagesGoingStartedAreSaidAsTheNetworkIs() {
+        val unreachable = ConnectionError("PROXY_UNREACHABLE")
+        val retry = ReconnectInfo(ReconnectReason.SignInPageGone, 1, 8, nextAttemptAtMillis = 3_000, lastError = unreachable)
+        val reconnecting = ConnectionState(ConnectionStatus.Reconnecting, "p1", "Office", connectedSinceMillis = 0, reconnect = retry)
+        var state by mutableStateOf(ready(reconnecting))
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions, nowMillis = 0) } }
+        scrolledTo("This network no longer asks for a sign-in. ProxyFlow is reconnecting to your proxy.").assertIsDisplayed()
+
+        state = ready(reconnecting.copy(networkSignIn = true))
+        scrolledTo("This network asks you to sign in").assertIsDisplayed()
+        compose.onNodeWithText("This network no longer asks for a sign-in", substring = true).assertDoesNotExist()
+        scrolledTo("ProxyFlow is trying your proxy again. Apps stay paused until it answers.").assertIsDisplayed()
     }
 
     /** What the profile fixes offers Edit profile first; what may pass by itself offers Try again first (docs/m1/04 §4). */

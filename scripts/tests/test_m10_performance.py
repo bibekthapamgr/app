@@ -62,7 +62,7 @@ GOOD = [
     "cpu_at_50mbit protocol=http direction=up bytes=62500000 ms=10020 mbit_s=49.9 cpu_ms=900 cpu_pct=9.0 engine_bytes=62501000",
     "memory traffic=idle connections=203 load_bytes=0 rss_disconnected_kib=150000 rss_idle_kib=160000 rss_peak_kib=161000 "
     "go_held_idle_kib=20480 go_held_kib=30720 go_heap_kib=12000 go_stacks_kib=3200 goroutines_idle=40 goroutines=650 goroutines_closed=44 opening_ms=4100",
-    "memory traffic=in_flight connections=201 load_bytes=262144 rss_disconnected_kib=150000 rss_idle_kib=160000 rss_peak_kib=196000 "
+    "memory traffic=in_flight connections=200 least_down_bytes=98304 load_bytes=262144 rss_disconnected_kib=150000 rss_idle_kib=160000 rss_peak_kib=196000 "
     "go_held_idle_kib=20480 go_held_kib=40960 go_heap_kib=36000 go_stacks_kib=3300 goroutines_idle=40 goroutines=652 goroutines_closed=45 opening_ms=4300",
     "idle seconds=300 cpu_ms=420 cpu_pct=0.140 cpu_s_per_hour=5.0 bytes=12000 screen_off=true goroutines_before=40 goroutines_after=40 "
     "flows_before=2 flows_after=2",
@@ -98,7 +98,7 @@ class M10PerformanceTest(unittest.TestCase):
             "23.5 % (the costliest: uploads paced at 50 Mbit/s 8.2/9.0 %, downloads by their rate 22.3/23.5 %)", values["CPU at 50 Mbit/s"]
         )
         # The bar's case is the one with data in flight; 40 MiB is 41.9 MB of 10^6 bytes.
-        self.assertEqual("40.0 MiB (41.9 MB) held by the Go runtime at 201 connections, data in flight", values["Engine memory"])
+        self.assertEqual("40.0 MiB (41.9 MB) held by the Go runtime at 200 connections, data in flight", values["Engine memory"])
         text = "\n".join(facts)
         self.assertIn("HTTP p50 905 ms, p90 1210 ms, max 1650 ms (n=20, 1 left out (the emulator's uplink dropped))", text)
         self.assertIn("SOCKS5 121.5 Mbit/s through ProxyFlow (each 119.4,121.5,122.7; set-up 35 ms), 243.1 straight through the proxy", text)
@@ -107,14 +107,14 @@ class M10PerformanceTest(unittest.TestCase):
         self.assertIn("the worst of the 2 made while the session was still connected after 15 ms", text)
         self.assertIn("SOCKS5 p50 9 ms, p90 14 ms, max 30 ms (n=20), a TCP connection straight to the proxy p50 2 ms, p90 3 ms", text)
         self.assertIn("throughput down (16 MiB each, the median of 3, timed without its set-up)", text)
-        self.assertIn("each with 262144 bytes in flight", text)
+        self.assertIn("each with 262144 bytes in flight (ProxyFlow had handed each at least 98304 bytes on when read)", text)
         self.assertIn("so 44.9 MiB (47.1 MB) more than before connecting", text)
         self.assertIn("an upload paced at it, 62500000 bytes in 10012 ms (49.9 Mbit/s): 820 ms of CPU, 8.2 % of one core", text)
         summary = m10_performance.row(found)
         self.assertTrue(summary.startswith("row: connect_p50_socks5=812 connect_p90_socks5=1050 setup_p50_socks5=9 direct_p50_socks5=2 "), summary)
         self.assertIn(" down_http=111.4 down_proxy_only_http=222.8 cpu50_down_http=23.5 ", summary)
         self.assertIn(" cpu50_paced_http=9.0 fail_closed_ms=12 fail_closed_worst_ms=15 silent_ms=10015 connections=203 go_held_kib=30720 ", summary)
-        self.assertIn(" loaded_connections=201 loaded_go_held_kib=40960 loaded_rss_peak_kib=196000 ", summary)
+        self.assertIn(" loaded_connections=200 loaded_go_held_kib=40960 loaded_rss_peak_kib=196000 ", summary)
         self.assertTrue(summary.endswith(" idle_cpu_pct=0.140 idle_s=300"), summary)
         self.assertNotIn("=?", summary)
         self.assertIn("connect_p50_socks5=? ", m10_performance.row([]))
@@ -177,13 +177,34 @@ class M10PerformanceTest(unittest.TestCase):
             {False},
             {met for name, met in bars(found).items() if name != "Battery when idle-connected"},
         )
-        fewer = [line.replace("connections=201", "connections=150") for line in GOOD]
+        fewer = [line.replace("connections=200", "connections=150") for line in GOOD]
         self.assertIsNone(bars(m10_performance.measurements(run(fewer)))["Engine memory"], "fewer than 200 open is not the bar's case")
         # 50 MB is 10^6 bytes each: 48,828 KiB is within it, 48,829 past.
         at = [line.replace("go_held_kib=40960", "go_held_kib=48828") for line in GOOD]
         self.assertTrue(bars(m10_performance.measurements(run(at)))["Engine memory"])
         past = [line.replace("go_held_kib=40960", "go_held_kib=48829") for line in GOOD]
         self.assertFalse(bars(m10_performance.measurements(run(past)))["Engine memory"])
+
+    def test_a_paced_upload_counts_only_at_50_mbit_s(self):
+        # Paced at 20 Mbit/s (the path carried no more), its CPU would understate 50 Mbit/s': left out of the bar, and said.
+        slow = [
+            line.replace("bytes=62500000 ms=10020 mbit_s=49.9 cpu_ms=900 cpu_pct=9.0", "bytes=25000000 ms=10000 mbit_s=20.0 cpu_ms=300 cpu_pct=3.0")
+            for line in GOOD
+        ]
+        facts, found_bars, problems = m10_performance.report(m10_performance.measurements(run(slow)))
+        self.assertEqual([], problems)
+        value = {b["bar"]: b["value"] for b in found_bars}["CPU at 50 Mbit/s"]
+        self.assertEqual(
+            "23.5 % (the costliest: uploads paced at 50 Mbit/s 8.2 %, downloads by their rate 22.3/23.5 %; HTTP left out, not paced at 50 Mbit/s)",
+            value,
+        )
+        self.assertIn("(20.0 Mbit/s): 300 ms of CPU, 3.0 % of one core; left out of the bar: not within 5 % of 50 Mbit/s", "\n".join(facts))
+        # 47.5 and 52.5 Mbit/s are within 5 %; 47.4 is not.
+        for rate, counted in (("47.5", True), ("52.5", True), ("47.4", False)):
+            lines = [line.replace("cpu_pct=8.2 ", "cpu_pct=30.0 ").replace("mbit_s=49.9 cpu_ms=820", f"mbit_s={rate} cpu_ms=820") for line in GOOD]
+            found = m10_performance.measurements(run(lines))
+            value = {b["bar"]: b["value"] for b in m10_performance.report(found)[1]}["CPU at 50 Mbit/s"]
+            self.assertEqual(counted, value.startswith("30.0 % "), (rate, value))
 
     def test_main_writes_the_baseline_and_fails_only_on_problems(self):
         with tempfile.TemporaryDirectory() as out:

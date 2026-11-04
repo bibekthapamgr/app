@@ -316,7 +316,7 @@ kill "$LIVE_LOGCAT" 2>/dev/null || true
 # and their logcat, so the M5 to M7 evidence reads the tests alone; it has its own logcat (logcat-m8.txt). The captures
 # and the socket samples go on through it. Bounded, so the captures and samples pulled below are never lost to the
 # step's own time limit, and not run once the tests themselves ran out of time (m8_evidence.py then finds no steps).
-# What the parts after M8 need at least: M10's N (5 min with its kill), the pulls (about 10), M10's P and R (9, and 2 for
+# What the parts after M8 need at least: M10's N (5 min with its kill), the pulls (about 10), M10's R and P (9, and 2 for
 # their kill) and the end (1).
 AFTER_M8_S=$((27 * 60))
 M8_LIMIT_S="$(part_limit "${M8_TIMEOUT_S:-600}" $((AFTER_M8_S + 8 * 60)) 300)"
@@ -337,8 +337,10 @@ else
     if [ "$M8_STATUS" != 0 ] && [ "$STATUS" = 0 ]; then STATUS=$M8_STATUS; fi
 fi
 # M10's N: Android 13 and later without the notification permission (scripts/m10_scenarios.sh notifications), while the
-# phone's captures and socket samples still run, so they cover it; adbd is the shell user's here (the VPN covers the
-# shell, not root), which the script checks. Not run once the tests ran out of time.
+# phone's captures still run, so the checks over whole captures cover it (no packet to or from a lab address, no lookup
+# of a lab name) — not M6's account of each connection while connected, which reads the device tests' logcat and uid,
+# where N's ProxyFlow is a new install; adbd is the shell user's here (the VPN covers the shell, not root), which the
+# script checks. Not run once the tests ran out of time.
 m10_part() { # <part> <limit in seconds> <kill after>: runs it, its status merged into STATUS
     local part_status
     # Stopped at its limit, it cleans up first (power saving reset, Always-on VPN off, the device owner given up).
@@ -393,8 +395,8 @@ if [ "$GUEST_CAPTURE" = 1 ]; then
         fi
     done
 fi
-# M10's P and R: power saving with ProxyFlow started by Android for Always-on VPN, then a restart with it as Always-on VPN
-# and "Block connections without VPN" on (scripts/m10_scenarios.sh restart), last of all — the restart ends the captures,
+# M10's R and P: a restart with ProxyFlow as Always-on VPN and "Block connections without VPN" on, then power saving on
+# the connection Android started after it (scripts/m10_scenarios.sh restart), last of all — the restart ends the captures,
 # the socket samples (all pulled above) and logcat — while the lab's files are still on the phone. adbd as the shell user
 # again first: the VPN covers the shell, not root (the script checks it, before and after the restart). Bounded by what is
 # left, 2 minutes kept for the end; not run once the tests ran out of time, or with too little left for it.
@@ -404,7 +406,7 @@ else
     if [ "$GUEST_CAPTURE" = 1 ]; then restart_adbd unroot || true; fi
     R_LIMIT_S="$(part_limit "${M10_RESTART_TIMEOUT_S:-960}" $((4 * 60)) $((9 * 60)))"
     if [ "$R_LIMIT_S" = 0 ]; then
-        echo "::error title=M10 scenarios (API $API)::restart: not run: $(($(left_s) / 60)) minutes left of this script's ${SCRIPT_BUDGET_S} s, too few for power saving and a restart."
+        echo "::error title=M10 scenarios (API $API)::restart: not run: $(($(left_s) / 60)) minutes left of this script's ${SCRIPT_BUDGET_S} s, too few for a restart and power saving."
         STATUS=1
     else
         m10_part restart "$R_LIMIT_S" 2m

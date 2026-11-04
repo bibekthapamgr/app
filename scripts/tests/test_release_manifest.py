@@ -334,35 +334,60 @@ class PackagedResourcesTest(unittest.TestCase):
         self.assertTrue(any("xml-v31" in p and "read strictly" in p for p in problems), problems)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def uleb(value: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        out.append(byte | (0x80 if value else 0))
+        if not value:
+            return bytes(out)
 
 
-def dex(strings: list[str]) -> bytes:
-    """A minimal dex file: a header whose string table holds [strings] (ULEB128 length, MUTF-8, 0), nothing else."""
+def dex(classes: list[str], methods: list[tuple[str, str]] = (), fields: list[tuple[str, str]] = (), extra: list[str] = ()) -> bytes:
+    """A minimal dex file: the header's string, type, field, method and class tables — the classes [classes] defines, and
+    [methods] and [fields] as (class, name) ids — and nothing else (prototypes and class data are left out)."""
+    types = sorted({c for c in classes} | {c for c, _ in methods} | {c for c, _ in fields})
+    strings = sorted(set(types) | {n for _, n in methods} | {n for _, n in fields} | set(extra))
+    index = {text: i for i, text in enumerate(strings)}
+    type_index = {t: i for i, t in enumerate(types)}
     header = bytearray(0x70)
     header[:8] = b"dex\n035\0"
-    ids_off = 0x70
-    data_off = ids_off + 4 * len(strings)
-    ids, data = bytearray(), bytearray()
-    for text in strings:
-        ids += (data_off + len(data)).to_bytes(4, "little")
-        encoded = text.encode("utf-8")
-        length, uleb = len(text), bytearray()
-        while True:
-            byte = length & 0x7F
-            length >>= 7
-            uleb.append(byte | (0x80 if length else 0))
-            if not length:
-                break
-        data += uleb + encoded + b"\0"
-    header[56:60] = len(strings).to_bytes(4, "little")
-    header[60:64] = ids_off.to_bytes(4, "little")
-    return bytes(header + ids + data)
+    tables = bytearray()
+    at = 0x70
+
+    def table(count_at: int, rows: list[bytes]) -> None:
+        nonlocal at
+        header[count_at : count_at + 4] = len(rows).to_bytes(4, "little")
+        header[count_at + 4 : count_at + 8] = at.to_bytes(4, "little")
+        for row in rows:
+            tables.extend(row)
+        at += sum(len(row) for row in rows)
+
+    string_ids_at = at
+    table(56, [b"\0\0\0\0"] * len(strings))  # filled below, once the data's place is known
+    table(64, [index[t].to_bytes(4, "little") for t in types])
+    table(80, [type_index[c].to_bytes(2, "little") + b"\0\0" + index[n].to_bytes(4, "little") for c, n in fields])
+    table(88, [type_index[c].to_bytes(2, "little") + b"\0\0" + index[n].to_bytes(4, "little") for c, n in methods])
+    table(96, [type_index[c].to_bytes(4, "little") + bytes(28) for c in classes])
+    data = bytearray()
+    for i, text in enumerate(strings):
+        offset = at + len(data)
+        tables[string_ids_at - 0x70 + 4 * i : string_ids_at - 0x70 + 4 * i + 4] = offset.to_bytes(4, "little")
+        data += uleb(len(text)) + text.encode("utf-8") + b"\0"
+    return bytes(header + tables + data)
+
+
+def engine_dex(leave_out: str = "") -> bytes:
+    """What the engine's JNI layer needs, as R8 keeps it, but for [leave_out] (a class, "Class.method" or "Class.field")."""
+    classes = [c for c in check_release_manifest.ENGINE_CLASSES if c != leave_out]
+    methods = [(c, m) for c, names in check_release_manifest.ENGINE_METHODS.items() for m in names if f"{c}.{m}" != leave_out]
+    fields = [(c, f) for c, names in check_release_manifest.ENGINE_FIELDS.items() for f in names if f"{c}.{f}" != leave_out]
+    return dex(classes, methods, fields)
 
 
 class EngineNamesTest(unittest.TestCase):
-    """M10: the release APK's dex files must still name what the engine's JNI layer finds by name, after R8."""
+    """M10: the release APK's dex files must still define what the engine's JNI layer finds by name, after R8."""
 
     def apk(self, dexes: dict[str, bytes]) -> str:
         import zipfile
@@ -374,22 +399,33 @@ class EngineNamesTest(unittest.TestCase):
             archive.writestr("AndroidManifest.xml", b"binary")
         return path
 
-    def test_every_name_kept_passes_across_dex_files(self):
-        names = list(check_release_manifest.ENGINE_CLASSES + check_release_manifest.ENGINE_METHODS)
-        long_name = "x" * 200  # a two-byte ULEB128 length
-        path = self.apk({"classes.dex": dex(names[:3] + [long_name, ""]), "classes2.dex": dex(names[3:])})
-        problems, facts = check_release_manifest.check_engine_names(path)
+    def test_everything_kept_passes_across_dex_files(self):
+        other = dex(["La/b;"], [("La/b;", "a")], extra=["x" * 200])  # a class R8 renamed; a two-byte ULEB128 length
+        problems, facts = check_release_manifest.check_engine_names(self.apk({"classes.dex": other, "classes2.dex": engine_dex()}))
         self.assertEqual([], problems)
-        self.assertIn("2", facts[0])
-        self.assertIn(long_name, check_release_manifest.dex_strings(dex([long_name, "a"])))
+        self.assertIn("(2)", facts[0])
+        classes, methods, fields = check_release_manifest.dex_tables(engine_dex())
+        self.assertIn("Lgo/Seq$Ref;", classes)
+        self.assertIn(("Lgo/Seq;", "getRef"), methods)
+        self.assertEqual({("Lgo/Seq$Ref;", "obj")}, fields)
 
-    def test_a_renamed_class_or_method_fails(self):
-        names = [n for n in check_release_manifest.ENGINE_CLASSES + check_release_manifest.ENGINE_METHODS if n not in ("Lgo/Seq;", "verifyChain")]
-        problems, _ = check_release_manifest.check_engine_names(self.apk({"classes.dex": dex(names + ["La/a;", "a"])}))
-        self.assertEqual(1, len(problems))
-        self.assertIn("'Lgo/Seq;'", problems[0])
-        self.assertIn("'verifyChain'", problems[0])
+    def test_a_renamed_class_method_or_field_fails(self):
+        for leave_out in ["Lgo/Seq;", "Lgo/Seq;.incGoObjectRef", "Lapp/proxyflow/engine/go/pfengine/Platform;.verifyChain", "Lgo/Seq$Ref;.obj"]:
+            problems, _ = check_release_manifest.check_engine_names(self.apk({"classes.dex": engine_dex(leave_out)}))
+            self.assertEqual(1, len(problems), leave_out)
+            name = leave_out if leave_out.endswith(";") else leave_out.split(";.")[1]  # a class, or a member's name
+            self.assertIn(name, problems[0])
+
+    def test_a_name_only_in_the_string_table_is_not_enough(self):
+        # "protect" is in every dex that calls VpnService.protect: a name used anywhere is not the method defined on the class.
+        crippled = dex([c for c in check_release_manifest.ENGINE_CLASSES], [], [], extra=["protect", "getRef", "obj", "start"])
+        problems, _ = check_release_manifest.check_engine_names(self.apk({"classes.dex": crippled}))
+        self.assertIn("Lgo/Seq;.getRef()", problems[0])
 
     def test_no_dex_fails(self):
         problems, _ = check_release_manifest.check_engine_names(self.apk({}))
         self.assertIn("no dex file", problems[0])
+
+
+if __name__ == "__main__":
+    unittest.main()

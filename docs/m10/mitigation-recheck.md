@@ -42,7 +42,7 @@ Every line holds on the release candidate, or is a residual risk M8 accepted, or
 | Tile only behind `BIND_QUICK_SETTINGS_TILE` | Holds (was ⏳ for M9) | `check_release_manifest.py`, `ManifestTest` |
 | The engine's JNI names survive R8 (M10) | Holds | `check_release_manifest.py` on the release APK |
 | Engine bounds, malformed packets, fuzzed parsers | Holds | Engine job |
-| Reconnects bounded | Holds; a sign-in page that comes and goes adds no attempts (M10-14) | `ReconnectTest` |
+| Reconnects bounded | Holds; a sign-in page that comes and goes adds no attempts to a reconnection; from a block, each time it goes starts one round of them, kept by design (M10-14) | `ReconnectTest` |
 | ⚠️ R4 | Accepted | Told in E2 |
 | ⏳ Memory and battery on physical phones | Open, the owner's; the emulators' baseline is recorded | `docs/m10/performance-baseline.md` |
 | Go modules verified; govulncheck; OSV; wrapper; pinned actions | Holds | Engine and build jobs |
