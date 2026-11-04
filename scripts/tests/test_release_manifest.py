@@ -410,7 +410,14 @@ class EngineNamesTest(unittest.TestCase):
         self.assertEqual({("Lgo/Seq$Ref;", "obj")}, fields)
 
     def test_a_renamed_class_method_or_field_fails(self):
-        for leave_out in ["Lgo/Seq;", "Lgo/Seq;.incGoObjectRef", "Lapp/proxyflow/engine/go/pfengine/Platform;.verifyChain", "Lgo/Seq$Ref;.obj"]:
+        for leave_out in [
+            "Lgo/Seq;",
+            "Lgo/Seq;.incGoObjectRef",
+            "Lapp/proxyflow/engine/go/pfengine/Platform;.verifyChain",
+            "Lgo/Seq$Ref;.obj",
+            "Lapp/proxyflow/engine/go/pfengine/Pfengine$proxyPlatform;",
+            "Lapp/proxyflow/engine/go/pfengine/Pfengine$proxyPlatform;.<init>",
+        ]:
             problems, _ = check_release_manifest.check_engine_names(self.apk({"classes.dex": engine_dex(leave_out)}))
             self.assertEqual(1, len(problems), leave_out)
             name = leave_out if leave_out.endswith(";") else leave_out.split(";.")[1]  # a class, or a member's name

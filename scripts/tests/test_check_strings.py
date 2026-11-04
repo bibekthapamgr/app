@@ -33,6 +33,8 @@ VALUES = """<?xml version="1.0" encoding="utf-8"?>
         <item>it's typed</item>
     </array>
     <string name="quoted_markup">"Tap <b>Connect</b>, it's quick"</string>
+    <string name="quoted_xliff">"It's <xliff:g id="count">%1$d</xliff:g> left"</string>
+    <string name="quoted_span_in_xliff">"It's <xliff:g id="count"><b>%1$d</b></xliff:g> left"</string>
 </resources>
 """
 
@@ -87,6 +89,10 @@ class CheckTest(unittest.TestCase):
                 f"{where}:18: quoted_markup: a double quote without its backslash (write \\\")",
                 f"{where}:18: quoted_markup: an apostrophe without its backslash (write \\')",
                 f"{where}:18: quoted_markup: a double quote without its backslash (write \\\")",
+                # An <xliff:g> is no span: quoting goes on across it (aapt2 resets it at spans only). A span inside one is.
+                f"{where}:20: quoted_span_in_xliff: a double quote without its backslash (write \\\")",
+                f"{where}:20: quoted_span_in_xliff: an apostrophe without its backslash (write \\')",
+                f"{where}:20: quoted_span_in_xliff: a double quote without its backslash (write \\\")",
             ],
             report,
         )

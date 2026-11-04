@@ -104,7 +104,7 @@ class M10PerformanceTest(unittest.TestCase):
         self.assertIn("SOCKS5 121.5 Mbit/s through ProxyFlow (each 119.4,121.5,122.7; set-up 35 ms), 243.1 straight through the proxy", text)
         self.assertIn("(50 % of it)", text)
         self.assertIn("0 of 5 opened", text)
-        self.assertIn("the worst of the 2 made while the session was still connected after 15 ms", text)
+        self.assertIn("the worst of the 2 made while the session stayed connected after 15 ms", text)
         self.assertIn("SOCKS5 p50 9 ms, p90 14 ms, max 30 ms (n=20), a TCP connection straight to the proxy p50 2 ms, p90 3 ms", text)
         self.assertIn("throughput down (16 MiB each, the median of 3, timed without its set-up)", text)
         self.assertIn("each with 262144 bytes in flight (ProxyFlow had handed each at least 98304 bytes on when read)", text)
@@ -194,11 +194,21 @@ class M10PerformanceTest(unittest.TestCase):
         facts, found_bars, problems = m10_performance.report(m10_performance.measurements(run(slow)))
         self.assertEqual([], problems)
         value = {b["bar"]: b["value"] for b in found_bars}["CPU at 50 Mbit/s"]
+        # HTTP's uploads stand in for it, by their rate: a CPU-bound upload that never reached 50 Mbit/s still counts.
         self.assertEqual(
-            "23.5 % (the costliest: uploads paced at 50 Mbit/s 8.2 %, downloads by their rate 22.3/23.5 %; HTTP left out, not paced at 50 Mbit/s)",
+            "27.1 % (the costliest: uploads paced at 50 Mbit/s 8.2 %, uploads by their rate 27.1 % (HTTP: not paced at 50 Mbit/s), "
+            "downloads by their rate 22.3/23.5 %)",
             value,
         )
+        bound = [line.replace("cpu_s_per_gb=43.39 cpu_pct_at_50mbit=27.1", "cpu_s_per_gb=120.00 cpu_pct_at_50mbit=75.0") for line in slow]
+        bound = [line.replace("cpu_ms=2200 engine_bytes=50700000", "cpu_ms=6084 engine_bytes=50700000") for line in bound]
+        self.assertFalse(bars(m10_performance.measurements(run(bound)))["CPU at 50 Mbit/s"])
         self.assertIn("(20.0 Mbit/s): 300 ms of CPU, 3.0 % of one core; left out of the bar: not within 5 % of 50 Mbit/s", "\n".join(facts))
+        # A paced upload that ran on its second try says so.
+        retried = [line.replace("cpu_pct=9.0 engine_bytes=62501000", "cpu_pct=9.0 engine_bytes=62501000 tries=2") for line in GOOD]
+        facts = m10_performance.report(m10_performance.measurements(run(retried)))[0]
+        self.assertIn("9.0 % of one core; 2 tries, the first 1 did not run (the test's log says why)", "\n".join(facts))
+        self.assertNotIn("tries", "\n".join(m10_performance.report(m10_performance.measurements(run(GOOD)))[0]))
         # 47.5 and 52.5 Mbit/s are within 5 %; 47.4 is not.
         for rate, counted in (("47.5", True), ("52.5", True), ("47.4", False)):
             lines = [line.replace("cpu_pct=8.2 ", "cpu_pct=30.0 ").replace("mbit_s=49.9 cpu_ms=820", f"mbit_s={rate} cpu_ms=820") for line in GOOD]

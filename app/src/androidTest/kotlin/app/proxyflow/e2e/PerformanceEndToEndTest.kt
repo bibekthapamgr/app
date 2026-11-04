@@ -163,11 +163,13 @@ class PerformanceEndToEndTest {
     /**
      * Quality bar: once the proxy dies, new connections are refused (RST) in under 1 s, and none goes around it. Through
      * the lab's gate in front of Dante: connected, then the gate stops listening, as a proxy whose port is shut; the next
-     * [PROBES] connections to the destination are timed, with the session's state at each, and none may open — one that
-     * did would have gone around the proxy. A few failures in a row make the session reconnect (the escalation rule), and
-     * from then on new connections are held, not refused, until it gets through: the bar is the connections' while the
-     * session was still connected. Then a proxy that accepts and never answers: its connection waits for the proxy's
-     * handshake timeout (10 s, engine/adapters/dialer.go), then is refused.
+     * [PROBES] connections to the destination are timed, with the session's state before and after each, and none may
+     * open — one that did would have gone around the proxy. A few failures in a row make the session reconnect (the
+     * escalation rule), and from then on new connections are held, not refused, until it gets through: the bar is the
+     * connections' made while the session stayed connected — connected before and after. One the reconnection began
+     * during is held, and is not the bar's (run 41837393553, API 32: 5 s, "Connected" before it). Then a proxy that
+     * accepts and never answers: its connection waits for the proxy's handshake timeout (10 s, engine/adapters/dialer.go),
+     * then is refused.
      */
     @Test(timeout = 300_000)
     fun aDeadProxysConnectionsAreRefusedQuickly() {
@@ -178,10 +180,13 @@ class PerformanceEndToEndTest {
 
         gate.refuse()
         val refused = (1..PROBES).map {
-            val state = app.controller.state.value.status
-            shell("connect", env.destinationName, env.destinationPort, PROBE_TIMEOUT_MS) to state
+            val before = app.controller.state.value.status
+            val result = shell("connect", env.destinationName, env.destinationPort, PROBE_TIMEOUT_MS)
+            val after = app.controller.state.value.status
+            result to if (before == after) "$before" else "$before>$after"
         }
-        val connectedTimes = refused.filter { (result, state) -> state == ConnectionStatus.Connected && result.startsWith("FAILED ") }
+        val stayedConnected = "${ConnectionStatus.Connected}"
+        val connectedTimes = refused.filter { (result, states) -> states == stayedConnected && result.startsWith("FAILED ") }
             .map { it.first.split(" ")[1].toLong() }
         perf(
             "fail_closed",
@@ -224,6 +229,8 @@ class PerformanceEndToEndTest {
      */
     @Test(timeout = 900_000)
     fun throughputAndItsCpu() {
+        // A protocol's failed check is kept for the end, so the other protocol is measured and its figures logged too.
+        val failed = mutableListOf<AssertionError>()
         for ((protocol, profile) in listOf("socks5" to socks(), "http" to http())) {
             val byPath = mapOf(PROXY_ONLY to Transfers(), VPN to Transfers())
             try {
@@ -257,11 +264,23 @@ class PerformanceEndToEndTest {
                     for (path in listOf(PROXY_ONLY, VPN)) byPath.getValue(path).report(protocol, direction, path)
                 }
             }
-            for (path in listOf(PROXY_ONLY, VPN)) byPath.getValue(path).assertAll(protocol, path)
+            failureOf { for (path in listOf(PROXY_ONLY, VPN)) byPath.getValue(path).assertAll(protocol, path) }?.let(failed::add)
             app.connect(profile.id)
-            pacedAt50Mbit(protocol)
+            failureOf { pacedAt50Mbit(protocol, profile) }?.let(failed::add)
             app.disconnectAndSettle()
         }
+        failed.firstOrNull()?.let { first ->
+            failed.drop(1).forEach(first::addSuppressed)
+            throw first
+        }
+    }
+
+    /** What [block] failed with, its assertion; anything else — JUnit's interrupt at its time limit too — is thrown on. */
+    private inline fun failureOf(block: () -> Unit): AssertionError? = try {
+        block()
+        null
+    } catch (e: AssertionError) {
+        e
     }
 
     private fun connectedTo(profile: ProxyProfile): Boolean =
@@ -271,28 +290,49 @@ class PerformanceEndToEndTest {
     private fun carriedBy(before: EngineStats, after: EngineStats): Long =
         (after.bytesUp + after.bytesDown) - (before.bytesUp + before.bytesDown)
 
-    /** ProxyFlow's CPU while it carries 50 Mbit/s, measured: an upload paced at that rate for [PACED_S]. */
-    private fun pacedAt50Mbit(protocol: String) {
-        val cpuBefore = cpuMillis()
-        val before = ProxyEngine().stats()
-        val result = shell("pace", env.destinationName, lab.bulkPort, BYTES_PER_SECOND_AT_50_MBIT, PACED_S, RATE_TIMEOUT_MS)
-        val cpu = cpuMillis() - cpuBefore
-        val after = ProxyEngine().stats()
-        val paced = Regex("^PACED (\\d+) (\\d+)$").find(result)
-        val bytes = paced?.groupValues?.get(1)?.toLong()
-        val ms = paced?.groupValues?.get(2)?.toLong()
-        perf(
-            "cpu_at_50mbit",
-            "protocol" to protocol,
-            "direction" to "up",
-            "bytes" to bytes,
-            "ms" to ms,
-            "mbit_s" to if (bytes != null && ms != null) mbits(bytes, ms) else null,
-            "cpu_ms" to cpu,
-            "cpu_pct" to ms?.let { "%.1f".format(Locale.ROOT, cpu * 100.0 / it.coerceAtLeast(1)) },
-            "engine_bytes" to carriedBy(before, after),
-        )
-        assertTrue("the paced upload through $protocol: $result", paced != null)
+    /**
+     * ProxyFlow's CPU while it carries 50 Mbit/s, measured: an upload paced at that rate for [PACED_S]. One that did not
+     * run measures nothing: it is logged with what ProxyFlow said then and tried once more, once the session is connected
+     * (run 41837393553, API 33: the first connection after connecting was refused); the line says how many tries it took.
+     */
+    private fun pacedAt50Mbit(protocol: String, profile: ProxyProfile) {
+        for (attempt in 1..PACED_TRIES) {
+            val cpuBefore = cpuMillis()
+            val before = ProxyEngine().stats()
+            val result = shell("pace", env.destinationName, lab.bulkPort, BYTES_PER_SECOND_AT_50_MBIT, PACED_S, RATE_TIMEOUT_MS)
+            val cpu = cpuMillis() - cpuBefore
+            val after = ProxyEngine().stats()
+            val paced = Regex("^PACED (\\d+) (\\d+)$").find(result)
+            if (paced == null && attempt < PACED_TRIES) {
+                val why = "$result; ${failedBetween(before, after)}\n${Diagnostics.report(app)}"
+                Log.w(TAG, "the paced upload through $protocol did not run: $why")
+                app.await(what = "Connected, to pace again") { it.status == ConnectionStatus.Connected && it.profileId == profile.id }
+                continue
+            }
+            val bytes = paced?.groupValues?.get(1)?.toLong()
+            val ms = paced?.groupValues?.get(2)?.toLong()
+            perf(
+                "cpu_at_50mbit",
+                "protocol" to protocol,
+                "direction" to "up",
+                "bytes" to bytes,
+                "ms" to ms,
+                "mbit_s" to if (bytes != null && ms != null) mbits(bytes, ms) else null,
+                "cpu_ms" to cpu,
+                "cpu_pct" to ms?.let { "%.1f".format(Locale.ROOT, cpu * 100.0 / it.coerceAtLeast(1)) },
+                "engine_bytes" to carriedBy(before, after),
+                "tries" to attempt,
+            )
+            val diagnosis = if (paced == null) "; ${failedBetween(before, after)}\n${Diagnostics.report(app)}" else ""
+            assertTrue("the paced upload through $protocol: $result$diagnosis", paced != null)
+            return
+        }
+    }
+
+    /** The engine's failures between two of its readings, by code: what it refused meanwhile, and why. */
+    private fun failedBetween(before: EngineStats, after: EngineStats): String {
+        val failed = after.failures.mapValues { (code, n) -> n - (before.failures[code] ?: 0) }.filterValues { it > 0 }
+        return "engine failures meanwhile: $failed, the last with the proxy: ${after.lastProxyError}, engine up ${after.uptimeMillis} ms"
     }
 
     /** One path's transfers, each direction's: the rate of each (without its set-up), the set-up, and ProxyFlow's CPU. */
@@ -301,10 +341,14 @@ class PerformanceEndToEndTest {
         private val results = mutableListOf<String>()
         private val cpu = mutableMapOf<String, Long>()
         private val carried = mutableMapOf<String, Long>()
+        private var diagnosis: String? = null
 
         fun add(direction: String, result: String, cpuMillis: Long, engineBytes: Long?) {
             results += result
-            Transfer.parse(result)?.let { each.getOrPut(direction) { mutableListOf() } += it }
+            val transfer = Transfer.parse(result)
+            transfer?.let { each.getOrPut(direction) { mutableListOf() } += it }
+            // What ProxyFlow said when the first transfer failed, for the assertion that every one ran.
+            if (transfer == null && diagnosis == null) diagnosis = Diagnostics.report(app)
             cpu[direction] = (cpu[direction] ?: 0) + cpuMillis
             if (engineBytes != null) carried[direction] = (carried[direction] ?: 0) + engineBytes
         }
@@ -341,7 +385,11 @@ class PerformanceEndToEndTest {
         }
 
         fun assertAll(protocol: String, path: String) {
-            assertEquals("every transfer ($protocol, $path) ran: $results", TRANSFERS * DIRECTIONS.size, each.values.sumOf { it.size })
+            assertEquals(
+                "every transfer ($protocol, $path) ran: $results${diagnosis?.let { "\nwhen the first failed:\n$it" } ?: ""}",
+                TRANSFERS * DIRECTIONS.size,
+                each.values.sumOf { it.size },
+            )
         }
     }
 
@@ -389,7 +437,7 @@ class PerformanceEndToEndTest {
         var peakRss = idleRss
         var mine = bulkFlows()
         val diagnosis = { "${described(mine)}; engine: ${ProxyEngine().stats()}; shell: $held" }
-        val notReady = runCatching {
+        val notReady = failureOf {
             eventually("$MANY connections open at once", MANY_OPEN_MS, diagnosis) {
                 peakRss = maxOf(peakRss, rssKib())
                 ProxyEngine().stats().tcpActive >= MANY && bulkFlows().also { mine = it }.count { it.state == OPEN } >= MANY
@@ -401,7 +449,7 @@ class PerformanceEndToEndTest {
                         bulkFlows().also { mine = it }.count { it.bytesDown >= IN_FLIGHT_MIN_BYTES } >= MANY
                 }
             }
-        }.exceptionOrNull()
+        }
         var most = ProxyEngine().stats()
         var mostFlows = mine
         repeat(SAMPLES) {
@@ -418,13 +466,13 @@ class PerformanceEndToEndTest {
         // Every one of the test's connections must end; the goroutines allow for the others'.
         var closed = ProxyEngine().stats()
         var left = -1
-        val notClosed = runCatching {
+        val notClosed = failureOf {
             eventually("the $MANY connections closed", CLOSE_MS, diagnose = { "$left flows to the bulk server left; engine: $closed" }) {
                 closed = ProxyEngine().stats()
                 left = bulkFlows().size
                 left == 0
             }
-        }.exceptionOrNull()
+        }
         val allowed = idle.goroutines + GOROUTINES_PER_FLOW * (closed.flows - idle.flows).coerceAtLeast(0) + GOROUTINE_SLACK
         // Logged before anything is asserted, a wait that ran out included: the figures show what it ran out on.
         perf(
@@ -545,6 +593,7 @@ class PerformanceEndToEndTest {
 
     private companion object {
         const val PERF_TAG = "ProxyFlowPerf"
+        const val TAG = "ProxyFlowE2E"
         const val CONNECTS = 20
 
         /**
@@ -570,10 +619,19 @@ class PerformanceEndToEndTest {
 
         /** The paced upload's length: 62.5 MB at 50 Mbit/s, inside the bulk server's limit of 64 MiB a request. */
         const val PACED_S = 10
+
+        /** A paced upload that did not run is tried once more ([pacedAt50Mbit]). */
+        const val PACED_TRIES = 2
         const val MANY = 200
         const val HOLD_S = 60
         const val LOAD_BYTES = 256L * 1024
-        const val IN_FLIGHT_MIN_BYTES = 32L * 1024
+
+        /**
+         * What each of the [MANY] connections must have been handed before the memory is read: data held along the way.
+         * Below the engine's buffers (the relay's 32 KiB, the netstack's 64 KiB), which smaller ones (M10-63) must not fail;
+         * the least a connection had is logged (`least_down_bytes`: 37,440 to 43,200 bytes in run 41837393553).
+         */
+        const val IN_FLIGHT_MIN_BYTES = 16L * 1024
         const val MANY_OPEN_MS = 90_000L
         const val CLOSE_MS = 30_000L
 

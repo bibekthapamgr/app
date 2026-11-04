@@ -418,13 +418,15 @@ def check_apk(references: list[tuple[str, str]], apk: str | None = None, aapt2: 
 # M10: what the engine's native code finds by name, which core/engine/consumer-rules.pro keeps: gomobile's JNI glue
 # (golang.org/x/mobile bind/java/seq_android.c: go.Seq's static methods and Seq.Ref's field, looked up in Seq's init)
 # and the bindings it generated for the engine (Pfengine's natives; the Platform interface, whose methods Go calls back,
-# and the app's implementation of it). Each must be defined in a dex file under its own name: R8 renaming or removing one
-# crashes the engine at its first call.
+# and the app's implementation of it; and Pfengine's proxy of that interface, a Go object Java holds, whose constructor
+# Pfengine's init looks up — bind/genjava.go). Each must be defined in a dex file under its own name: R8 renaming or
+# removing one crashes the engine at its first call.
 ENGINE_CLASSES = (
     "Lgo/Seq;",
     "Lgo/Seq$Ref;",
     "Lgo/Seq$GoObject;",
     "Lapp/proxyflow/engine/go/pfengine/Pfengine;",
+    "Lapp/proxyflow/engine/go/pfengine/Pfengine$proxyPlatform;",
     "Lapp/proxyflow/engine/go/pfengine/Platform;",
     "Lapp/proxyflow/core/engine/AndroidEnginePlatform;",
 )
@@ -434,6 +436,7 @@ ENGINE_METHODS = {
     "Lapp/proxyflow/engine/go/pfengine/Pfengine;": (
         "start", "stop", "status", "stats", "flows", "resetFlows", "probe", "selfTest", "networkPlan", "version",
     ),
+    "Lapp/proxyflow/engine/go/pfengine/Pfengine$proxyPlatform;": ("<init>",),
     "Lapp/proxyflow/engine/go/pfengine/Platform;": PLATFORM_METHODS,
     "Lapp/proxyflow/core/engine/AndroidEnginePlatform;": PLATFORM_METHODS,
 }

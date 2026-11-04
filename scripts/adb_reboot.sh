@@ -35,6 +35,9 @@ reboot_and_wait() { # <seconds>
     done
     local completed=""
     while [ "$SECONDS" -lt "$deadline" ]; do
+        # What this round reads, or nothing: an earlier round's, or the old boot's, would say a phone gone is still there.
+        new=""
+        completed=""
         if timeout 10 adb wait-for-device >/dev/null 2>&1; then
             new="$(boot_id)"
             completed="$(timeout 10 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"

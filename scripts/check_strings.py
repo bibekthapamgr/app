@@ -5,8 +5,8 @@ apostrophe or a double quote without its backslash, and a backslash before anyth
 One such string fails the whole build at resource merging, every device job's too, minutes in and with a message that
 names no string ("Can not extract resource from ParsedResource": M10-6). This finds it in a second, with the file, the
 line and the string's name. A string wholly in double quotes may hold an apostrophe as it is (Android's own rule), but
-not one with markup in it (<b>, <xliff:g>): the resource compiler starts its quoting afresh at each span, so this script
-asks for the backslash there.
+not one with style spans in it (<b>, <i>, <a>): the resource compiler starts its quoting afresh at each span, so this
+script asks for the backslash there. An <xliff:g>, a part kept from translation, is no span: quoting goes on across it.
 
 Usage: check_strings.py [ROOT]  (default: the repository; every src/<set>/res/values*/*.xml under it, build output left out)
 Exit status: 0 when nothing is found, 1 otherwise.
@@ -20,6 +20,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 ESCAPABLE = set("'\"\\nt@?#")
+XLIFF_G = "{urn:oasis:names:tc:xliff:document:1.2}g"
 HEX4 = re.compile(r"[0-9a-fA-F]{4}")
 
 
@@ -52,19 +53,24 @@ def problems_in(text: str, markup: bool = False) -> list[str]:
     return found
 
 
+def has_spans(element: ET.Element) -> bool:
+    """Whether a string holds a style span, an element other than <xliff:g> (or inside one)."""
+    return any(child.tag != XLIFF_G for child in element.iter() if child is not element)
+
+
 def strings_of(path: pathlib.Path) -> list[tuple[str, str, bool]]:
-    """(name, text, whether it has markup) of every string, plural item and array item in a values file."""
+    """(name, text, whether it has style spans) of every string, plural item and array item in a values file."""
     root = ET.parse(path).getroot()
     out: list[tuple[str, str, bool]] = []
     for element in root:
         tag = element.tag
         name = element.get("name", "?")
         if tag == "string":
-            out.append((name, "".join(element.itertext()), len(element) > 0))
+            out.append((name, "".join(element.itertext()), has_spans(element)))
         elif tag in ("plurals", "string-array", "array"):
             for index, item in enumerate(element.iter("item")):
                 label = f"{name}[{item.get('quantity', index)}]"
-                out.append((label, "".join(item.itertext()), len(item) > 0))
+                out.append((label, "".join(item.itertext()), has_spans(item)))
     return out
 
 

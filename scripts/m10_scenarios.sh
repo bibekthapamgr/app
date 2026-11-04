@@ -166,10 +166,11 @@ reset_power() {
     timeout 10 adb shell wm dismiss-keyguard >/dev/null 2>&1
 }
 
-# A clean-up step the lab's device owner answers: no answer, or an error, fails the part (the phone may still have it).
-cleaned_up() { # <step> <answer>
+# A clean-up step the lab's device owner answers: only the answer asked for passes; no answer, an error or another
+# state fails the part (the phone may still have it).
+cleaned_up() { # <step> <answer> <the answer asked for>
     case "$2" in
-        "result 1: "*) note "$1: $2" ;;
+        "$3") note "$1: $2" ;;
         "") fail "$1: no answer from the phone" ;;
         *) fail "$1: $2" ;;
     esac
@@ -181,12 +182,12 @@ on_exit() {
     reset_power
     if [ -n "$ALWAYS_ON_SET" ]; then
         ALWAYS_ON_SET=""
-        cleaned_up "Always-on VPN off" "$(admin ALWAYS_ON --es package "''")"
+        cleaned_up "Always-on VPN off" "$(admin ALWAYS_ON --es package "''")" "result 1: always-on none"
     fi
     timeout 30 adb shell am force-stop "$APP_ID" >/dev/null 2>&1
     if [ -n "$OWNER_SET" ]; then
         OWNER_SET=""
-        cleaned_up "device owner released" "$(admin RELEASE)"
+        cleaned_up "device owner released" "$(admin RELEASE)" "result 1: released, device owner false"
     fi
     timeout 60 adb uninstall "$TEST_ID" >/dev/null 2>&1 || true
     timeout 60 adb uninstall "$APP_ID" >/dev/null 2>&1 || true
@@ -427,9 +428,10 @@ part_restart() {
 
     note "R: restarting the phone"
     stop_logcat
-    # An emulator's restart takes a minute or two, its first boot up to fifteen: ten minutes at most.
-    if ! reboot_and_wait 600; then
-        fail "R: the phone did not start again within 10 minutes (a new boot, its boot completed): $REBOOT_SEEN"
+    # The emulators restarted in 23 to 32 s (runs 41826918038 and 41837393553): five minutes is ten times that, and leaves
+    # R's shortest limit (9 minutes, scripts/e2e_device.sh) the time to say what it saw.
+    if ! reboot_and_wait 300; then
+        fail "R: the phone did not start again within 5 minutes (a new boot, its boot completed): $REBOOT_SEEN"
         exit 1
     fi
     local up=$SECONDS
@@ -443,6 +445,7 @@ part_restart() {
     # connection around it. The destination by name is tried once a VPN network is there.
     local probes=0 refused=0 answered=0 with_vpn=0 unknown=0 connected="" vpn uplink toggled="" reply=""
     uplink="$(uplink_iface)"
+    LAST_REPLY="" # the line before the restart says nothing of after it
     while [ $((SECONDS - up)) -lt 240 ]; do
         vpn="$(vpn_networks)"
         probes=$((probes + 1))
@@ -493,7 +496,7 @@ part_restart() {
         note "R: VPN: $(vpn_networks | cut -c1-160)"
         note "R: ProxyFlow's session: $(timeout 30 adb logcat -d -v brief -s ProxyFlowVpn 2>/dev/null | tr -d '\r' | grep -m6 -E 'always-on start|connected |reconnect|blocked' | paste -sd ';' | cut -c1-600)"
     else
-        fail "R: after the restart, no line went through the proxy within 240 s: VPN $(vpn_networks | cut -c1-120); the last reply: ${LAST_REPLY:-none}"
+        fail "R: after the restart, no line went through the proxy within 240 s: VPN $(vpn_networks | cut -c1-120); the last reply: ${LAST_REPLY:-none sent since the restart}"
         return
     fi
 

@@ -175,8 +175,8 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
         opened = int(number(refusing.get("opened")) or 0)
         facts.append(
             f"fail closed, the proxy refusing: the first new connection failed after {refusing.get('first_ms')} ms, the worst of the "
-            f"{refusing.get('connected_probes', '?')} made while the session was still connected after {refusing.get('worst_connected_ms')} ms; "
-            f"{opened} of {len(refusing.get('results', '').split(','))} opened; each (result:ms:exception:the session's state): "
+            f"{refusing.get('connected_probes', '?')} made while the session stayed connected after {refusing.get('worst_connected_ms')} ms; "
+            f"{opened} of {len(refusing.get('results', '').split(','))} opened; each (result:ms:exception:the session's state, before>after where it changed): "
             f"{refusing.get('results')}; the session then: {refusing.get('status')}"
         )
         if opened:
@@ -194,6 +194,7 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
 
     # Throughput, and the CPU it costs.
     down, extrapolated_down = [], []
+    extrapolated_up: dict[str, float] = {}
     for direction in ("down", "up"):
         parts = []
         for protocol in PROTOCOLS:
@@ -213,12 +214,16 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
                 down.append(rate)
             if direction == "down" and number(vpn.get("cpu_pct_at_50mbit")) is not None:
                 extrapolated_down.append(number(vpn.get("cpu_pct_at_50mbit")))
+            if direction == "up" and number(vpn.get("cpu_pct_at_50mbit")) is not None:
+                extrapolated_up[protocol] = number(vpn.get("cpu_pct_at_50mbit"))
         if parts:
             facts.append(f"throughput {direction} ({vpn_bytes(found)}, timed without its set-up): " + "; ".join(parts))
     slowest = min(down, default=None)
     bars.append(bar("Throughput down through a local test proxy", f"≥ {DOWN_MBIT_S:.0f} Mbit/s", "?" if slowest is None else f"{slowest:.1f} Mbit/s (the slower protocol)",
                     None if slowest is None else slowest >= DOWN_MBIT_S))
-    measured, off_rate = [], []
+    # A paced upload that missed 50 Mbit/s cost less CPU than one there would: the protocol's uploads stand in for it, by
+    # their rate, so a CPU-bound upload that never reached 50 Mbit/s cannot pass the bar on the downloads alone.
+    measured, off_rate, stand_ins = [], [], []
     for protocol in PROTOCOLS:
         paced = find(found, "cpu_at_50mbit", protocol=protocol)
         if paced and number(paced.get("cpu_pct")) is not None:
@@ -228,15 +233,20 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
                 measured.append(number(paced["cpu_pct"]))
             else:
                 off_rate.append(NAMES[protocol])
+                if protocol in extrapolated_up:
+                    stand_ins.append(extrapolated_up[protocol])
+            tries = int(number(paced.get("tries")) or 1)
             facts.append(f"CPU at 50 Mbit/s, measured, {NAMES[protocol]}: an upload paced at it, {paced.get('bytes')} bytes in {paced.get('ms')} ms "
                          f"({paced.get('mbit_s')} Mbit/s): {paced.get('cpu_ms')} ms of CPU, {paced.get('cpu_pct')} % of one core"
-                         + ("" if at_rate else f"; left out of the bar: not within {PACED_BAND * 100:.0f} % of {PACED_MBIT_S:.0f} Mbit/s"))
-    costliest = max(measured + extrapolated_down, default=None)
-    left_out = f"; {'/'.join(off_rate)} left out, not paced at 50 Mbit/s" if off_rate else ""
+                         + ("" if at_rate else f"; left out of the bar: not within {PACED_BAND * 100:.0f} % of {PACED_MBIT_S:.0f} Mbit/s")
+                         + ("" if tries == 1 else f"; {tries} tries, the first {tries - 1} did not run (the test's log says why)"))
+    costliest = max(measured + stand_ins + extrapolated_down, default=None)
+    instead = (f", uploads by their rate {'/'.join(f'{v:.1f}' for v in stand_ins) or '?'} % ({'/'.join(off_rate)}: not paced at 50 Mbit/s)"
+               if off_rate else "")
     bars.append(bar("CPU at 50 Mbit/s", f"< {CPU_PCT_AT_50_MBIT:.0f} % of one core",
                     "?" if costliest is None else f"{costliest:.1f} % (the costliest: uploads paced at 50 Mbit/s "
-                    f"{'/'.join(f'{v:.1f}' for v in measured) or '?'} %, downloads by their rate {'/'.join(f'{v:.1f}' for v in extrapolated_down) or '?'} %"
-                    f"{left_out})",
+                    f"{'/'.join(f'{v:.1f}' for v in measured) or '?'} %{instead}, downloads by their rate "
+                    f"{'/'.join(f'{v:.1f}' for v in extrapolated_down) or '?'} %)",
                     None if costliest is None else costliest < CPU_PCT_AT_50_MBIT))
 
     # Memory with 200 connections open: idle, then with data in flight on each (the bar's case: buffers in use).
