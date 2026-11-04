@@ -12,7 +12,7 @@ Legend: ✅ in place and checked automatically on every CI run · 🔁 in place,
 | ✅ | While the VPN interface exists, every failure holds traffic: engine failure, proxy refusing or hanging, certificate change, reconnecting, offline, switch, restart (I-5) | Device tests M5–M7 with captures |
 | ✅ | An Always-on VPN start holds traffic before the proxy check and retries with traffic held (I-5, ADR-0013 §3) | `KillSwitchTest`; device scenario B |
 | ✅ | Always-on VPN connects only the profile the user chose; none chosen → nothing connects, the user is told | `KillSwitchTest`, `HomeViewModelTest`, `HomeScreenTest` |
-| ✅ | Process death while connected: measured on devices with and without Android's kill switch; found and explained on the next start (I-6) | `scripts/m8_failure_injection.sh` + `scripts/m8_evidence.py`, API 29/34/35/36, on every CI run (the verified run: `docs/m8/failure-injection.md` §3) |
+| ✅ | Process death while connected: measured on devices with and without Android's kill switch; found and explained on the next start (I-6) | `scripts/m8_failure_injection.sh` + `scripts/m8_evidence.py`, API 29/34/35/36, on every CI run (the verified run: `docs/m8/failure-injection.md` §3); Home's notice: `HomeScreenTest`, screenshot B2 |
 | ✅ | The marker names the profile whose traffic the interface carries or holds, and since when — a switch writes the new profile's as it begins, a switch back the first one's afresh, a session's first connection its start; the interruption reaches Home even when Home begins to read just as it is written (ADR-0013 §4) | `KillSwitchTest`, `ProtectionStoreTest` (DataStore 1.3.0, and the store's own read again after each write) |
 | ⚠️ | Without Android's kill switch, apps use the normal network when the VPN goes away (R1) | Told in E1/E1b, E2, B2, B6d and after an interruption |
 | ✅ | DNS never leaves the phone except the proxy's own name (I-4) | `m6_evidence.py` |
@@ -81,5 +81,7 @@ Legend: ✅ in place and checked automatically on every CI run · 🔁 in place,
 |---|---|---|
 | ✅ | No "all traffic", "every app", "full VPN", "anonymous", "protection", "100 %"… in any string | `CopyClaimsTest` |
 | ✅ | Android's kill switch never presented as guaranteed by an app toggle: no switch, status "as Android said", "ProxyFlow can't turn this on for you" | `SettingsScreenTest`, `HomeScreenTest`, screenshots E1, E1b, E2 |
+| ✅ | No line states an older reading of Android's kill switch as current: Home and Settings say when Android said it; where ProxyFlow isn't connected, Home and the active profile's delete confirmation say apps "use your normal network unless Android's system kill switch is on" (F12) | `HomeScreenTest`, `SettingsScreenTest`, `ProfilesScreenTest`, screenshots B2, B6b, E1, E1b |
+| 🔁 | The disconnected notification says the same | Read per release (`core/vpn` strings; no test reads the notification's text) |
 | ✅ | The limitations the user must be told are stated (About, routing doc) | `CopyClaimsTest.theLimitationsAreStated` |
 | 🔁 | The store listing and support texts say no more than `docs/m6/routing-and-limitations.md` | M11 review |
