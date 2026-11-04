@@ -33,8 +33,11 @@ data class ProxyProfile(
 ) {
     val useTls: Boolean get() = tlsMode == TlsMode.Tls
 
-    /** What the UI shows: the name, or the server when no name was given. */
-    val displayName: String get() = name.ifBlank { host }
+    /**
+     * What the UI shows: the name, or the server when no name was given — or one of spaces and directional formatting
+     * alone, which would show as nothing (M10-123).
+     */
+    val displayName: String get() = name.takeUnless { it.all { c -> c.isWhitespace() || isDirectionalFormatting(c) } } ?: host
 
     /** "host:port", with brackets around IPv6 literals. */
     val endpoint: String get() = if (':' in host) "[$host]:$port" else "$host:$port"

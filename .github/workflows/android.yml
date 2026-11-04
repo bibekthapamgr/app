@@ -447,10 +447,12 @@ jobs:
                 echo "$package: installed (try $try)"
                 break
               fi
-              failed="$(grep -i -m1 'error' <<<"$out" | cut -c1-200)"
-              echo "$package: try $try failed: $failed"
+              # Under -e and pipefail, a grep with no match would end the step here: hence || true (M10-122).
+              failed="$(grep -i 'error' <<<"$out" | tail -1 | cut -c1-200)" || true
+              echo "$package: try $try failed; sdkmanager's last lines:"
+              tail -5 <<<"$out" | cut -c1-200
               if [ "$try" = 3 ]; then
-                echo "::error title=Android SDK (API ${{ matrix.api-level }})::$package did not install in three tries; the last: ${failed:-no error line}"
+                echo "::error title=Android SDK (API ${{ matrix.api-level }})::$package did not install in three tries; the last error line: ${failed:-none, its last line: $(tail -1 <<<"$out" | cut -c1-200)}"
                 exit 1
               fi
               sleep 15
