@@ -316,6 +316,7 @@ func newEngine(fd int, cfg config, dialer tunnel.TunnelDialer, p Platform) (*tun
 	tc := tunnel.Config{
 		FD: fd, MTU: uint32(cfg.MTU), Dialer: dialer, FakeDNS: &fakedns.Responder{Pool: pool, TTL: fakeDNSTTL},
 		MaxConns: cfg.MaxConns, IdleTimeout: ms(cfg.IdleTimeoutMs), LogDestinations: cfg.LogDestinations,
+		LocalAddrs: []netip.Addr{netip.MustParseAddr(TunAddress6)},
 	}
 	if p != nil {
 		tc.Events = func(ev tunnel.Event) { p.OnEvent(toJSON(ev)) }

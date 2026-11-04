@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -47,6 +48,40 @@ func (e *Engine) handleTCP(r *tcp.ForwarderRequest) {
 
 	id := r.ID()
 	dst := toNetip(id.LocalAddress)
+	if id.LocalPort == dnsPort {
+		// DNS over TCP, to any address, is answered here like DNS over UDP (ADR-0011):
+		// the query never leaves the phone, and the name still reaches the proxy as a name.
+		select {
+		case e.tcpDNS <- struct{}{}:
+			defer func() { <-e.tcpDNS }()
+		default:
+			completed = true
+			e.stats.dnsDropped.Add(1) // too many DNS-over-TCP clients at once: refused, the app retries
+			r.Complete(true)
+			return
+		}
+		var wq waiter.Queue
+		ep, terr := r.CreateEndpoint(&wq)
+		completed = true
+		if terr != nil {
+			r.Complete(true)
+			return
+		}
+		r.Complete(false)
+		conn := gonet.NewTCPConn(&wq, ep)
+		cleanup = func() { ep.Abort(); conn.Close() }
+		e.serveDNSOverTCP(conn, cleanup)
+		return
+	}
+	if e.cfg.FakeDNS.Pool.Reserved(dst) || e.isLocal(dst) {
+		// ProxyFlow's own addresses (the TUN's, the DNS server's): there is nothing to
+		// proxy. Android's opportunistic DNS-over-TLS probe to the VPN's DNS server (port
+		// 853) ends here, and then uses plain DNS. Not a failure of any app's connection.
+		completed = true
+		e.stats.localRefused.Add(1)
+		r.Complete(true)
+		return
+	}
 	target := adapters.Target{Addr: dst, Port: id.LocalPort}
 	f := &flow{kind: FlowTCP, port: id.LocalPort, dstKind: "ip"}
 	if e.cfg.FakeDNS.Pool.Contains(dst) {
@@ -91,6 +126,9 @@ func (e *Engine) handleTCP(r *tcp.ForwarderRequest) {
 		completed = true
 		code := adapters.CodeOf(err)
 		e.stats.proxyResult(code)
+		if adapters.IsTimeout(err) {
+			e.stats.proxyTimeouts.Add(1)
+		}
 		e.refuse(r, f, code, adapters.DetailOf(err))
 		return
 	}
@@ -144,14 +182,14 @@ func (e *Engine) refuse(r *tcp.ForwarderRequest, f *flow, code adapters.Code, de
 		return
 	}
 	e.stats.tcpFailed.Add(1)
-	e.stats.failure(code, detail)
+	e.stats.failure(code, detail, f.dstKind == "hostname")
 	e.emit(Event{Type: EvConnFail, ConnID: f.id, Proto: FlowTCP, DstKind: f.dstKind, Dst: f.dst, Port: f.port,
 		Code: string(code), Detail: detail})
 }
 
 func (e *Engine) recovered() {
 	e.stats.panics.Add(1)
-	e.stats.failure(adapters.CodeInternal, "recovered panic")
+	e.stats.failure(adapters.CodeInternal, "recovered panic", false)
 	e.emit(Event{Type: EvConnFail, Proto: FlowTCP, Code: string(adapters.CodeInternal), Detail: "recovered panic"})
 }
 
@@ -232,4 +270,14 @@ func setKeepalive(ep tcpip.Endpoint) {
 	intvl := tcpip.KeepaliveIntervalOption(30 * time.Second)
 	_ = ep.SetSockOpt(&intvl)
 	_ = ep.SetSockOptInt(tcpip.KeepaliveCountOption, 9)
+}
+
+// isLocal reports whether dst is one of the TUN's own addresses outside the placeholder pool.
+func (e *Engine) isLocal(dst netip.Addr) bool {
+	for _, a := range e.cfg.LocalAddrs {
+		if a == dst {
+			return true
+		}
+	}
+	return false
 }

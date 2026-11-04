@@ -2,9 +2,12 @@ package app.proxyflow.core.data
 
 import android.content.Intent
 import app.proxyflow.core.model.ConnectionState
+import app.proxyflow.core.model.RoutingDiagnostics
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * The seam between the UI and the VPN layer (core/vpn, ADR-0010). Screens
@@ -37,6 +40,12 @@ interface ConnectionController {
 
     /** Forgets why the last attempt ended, once the user has seen it; a blocked connection keeps its reason. */
     fun clearError() = Unit
+
+    /**
+     * What the connection did since it connected (M6, ADR-0011), read from the engine about once
+     * a second for as long as it is collected; null whenever it isn't connected.
+     */
+    val diagnostics: Flow<RoutingDiagnostics?> get() = flowOf(null)
 }
 
 /** For builds and tests without a VPN service: always disconnected, connecting is not available. */

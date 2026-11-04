@@ -57,7 +57,7 @@ fun AboutScreen(version: String, onBack: () -> Unit, modifier: Modifier = Modifi
                     )
                 }
             }
-            PfBanner(text = stringResource(R.string.about_build_scope), tone = BannerTone.Info)
+            PfBanner(text = stringResource(R.string.about_summary), tone = BannerTone.Info)
             PfSectionHeader(stringResource(R.string.about_section_privacy))
             Bullet(R.string.about_privacy_no_account)
             Bullet(R.string.about_privacy_on_phone)
@@ -66,6 +66,8 @@ fun AboutScreen(version: String, onBack: () -> Unit, modifier: Modifier = Modifi
             Bullet(R.string.about_carry_tcp)
             Bullet(R.string.about_carry_blocked)
             Bullet(R.string.about_carry_ipv6)
+            Bullet(R.string.about_carry_outside)
+            Bullet(R.string.about_carry_tls)
             Text(
                 stringResource(R.string.about_independent),
                 style = MaterialTheme.typography.bodyMedium,

@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.PluralsRes
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +33,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -58,6 +60,7 @@ import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfile
+import app.proxyflow.core.model.RoutingDiagnostics
 import java.util.Locale
 import kotlinx.coroutines.delay
 
@@ -304,7 +307,10 @@ private fun ReconnectingContent(state: HomeUiState.Ready, actions: HomeActions) 
     )
 }
 
-/** Board B4 (traffic counters and active connections arrive with statistics in M7). */
+/**
+ * Board B4: what goes through the proxy, and the diagnostics since connecting (ADR-0011).
+ * Traffic counters and active connections arrive with statistics in M7.
+ */
 @Composable
 private fun ConnectedContent(state: HomeUiState.Ready, actions: HomeActions, nowMillis: Long) {
     StatusHeader(stringResource(R.string.home_status_connected), StatusTone.Connected, null)
@@ -330,11 +336,9 @@ private fun ConnectedContent(state: HomeUiState.Ready, actions: HomeActions, now
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth(),
     )
-    PfCard(modifier = Modifier.fillMaxWidth()) {
-        ProtectionRow(stringResource(R.string.home_protection_apps), stringResource(R.string.home_protection_via_proxy))
-        ProtectionRow(stringResource(R.string.home_protection_dns), stringResource(R.string.home_protection_by_proxy))
-        ProtectionRow(stringResource(R.string.home_protection_udp), stringResource(R.string.home_protection_blocked))
-    }
+    RoutingCard(state.diagnostics)
+    DiagnosticsCard(state.profile, state.diagnostics)
+    Note(stringResource(R.string.home_https_note))
     PfSecondaryButton(
         text = stringResource(R.string.home_disconnect),
         onClick = actions.onDisconnect,
@@ -491,13 +495,128 @@ private fun Step(text: String, step: StepState) {
     }
 }
 
+/** What goes through the proxy and what doesn't (docs/m6), with what the connection carried so far. */
 @Composable
-private fun ProtectionRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun RoutingCard(diagnostics: RoutingDiagnostics?) {
+    PfCard(modifier = Modifier.fillMaxWidth()) {
+        CardLabel(stringResource(R.string.home_route_title))
+        InfoRow(
+            stringResource(R.string.home_route_apps),
+            diagnostics?.let { count(R.plurals.home_route_connections, it.connectionsOpened) }
+                ?: stringResource(R.string.home_route_via_proxy),
+        )
+        InfoRow(
+            stringResource(R.string.home_route_dns),
+            diagnostics?.let { count(R.plurals.home_route_names, it.namesForProxy) } ?: stringResource(R.string.home_route_by_proxy),
+        )
+        InfoRow(stringResource(R.string.home_route_udp), stringResource(R.string.home_route_blocked))
     }
 }
+
+/**
+ * The four kinds of problems M6 tells apart (ADR-0011): TLS to the proxy, DNS, unsupported
+ * traffic and proxy timeouts, and the last failed connection's code. Counts only.
+ */
+@Composable
+private fun DiagnosticsCard(profile: ProxyProfile, diagnostics: RoutingDiagnostics?) {
+    val waiting = stringResource(R.string.home_diag_waiting)
+    PfCard(modifier = Modifier.fillMaxWidth()) {
+        CardLabel(stringResource(R.string.home_diag_title))
+        val tls = diagnostics?.tls
+        InfoRow(
+            stringResource(R.string.home_diag_tls),
+            when {
+                !profile.useTls -> stringResource(R.string.home_diag_tls_off)
+                tls == null -> waiting
+                tls.failures == 0L -> stringResource(R.string.home_diag_no_failures)
+                else -> count(R.plurals.home_diag_failed, tls.failures)
+            },
+            detail = tls?.lastCode?.takeIf { profile.useTls && tls.failures > 0 }?.let { errorTitle(ConnectionError(it), profile) },
+        )
+        val dns = diagnostics?.dns
+        InfoRow(
+            stringResource(R.string.home_diag_dns),
+            when {
+                dns == null -> waiting
+                dns.total == 0L -> stringResource(R.string.home_diag_no_failures)
+                else -> count(R.plurals.home_diag_failed, dns.total)
+            },
+            detail = dns?.let {
+                listOfNotNull(
+                    countOrNull(R.plurals.home_diag_dns_names, it.namesNotReached),
+                    countOrNull(R.plurals.home_diag_dns_proxy_name, it.proxyNameLookups),
+                    countOrNull(R.plurals.home_diag_dns_refused, it.queriesRefused),
+                    countOrNull(R.plurals.home_diag_dns_dropped, it.lookupsDropped),
+                    countOrNull(R.plurals.home_diag_dns_stale, it.staleAddresses),
+                ).joinToString("\n").ifEmpty { null }
+            },
+        )
+        val unsupported = diagnostics?.unsupported
+        val blocked = unsupported?.let { it.udpBlocked + it.pingsDropped }
+        InfoRow(
+            stringResource(R.string.home_diag_unsupported),
+            when {
+                blocked == null -> waiting
+                blocked == 0L -> stringResource(R.string.home_diag_none_blocked)
+                else -> count(R.plurals.home_diag_blocked, blocked)
+            },
+            detail = unsupported?.takeIf { blocked != null && blocked > 0 }?.let {
+                val ports = it.udpTopPorts.takeIf { list -> list.isNotEmpty() }?.joinToString(", ")
+                val portsText = ports?.let { list -> pluralStringResource(R.plurals.home_diag_udp_ports, it.udpTopPorts.size, list) }
+                val udp = countOrNull(R.plurals.home_diag_udp, it.udpBlocked)?.let { text -> portsText?.let { p -> "$text ($p)" } ?: text }
+                listOfNotNull(udp, countOrNull(R.plurals.home_diag_pings, it.pingsDropped)).joinToString(" · ") + "\n" +
+                    stringResource(R.string.home_diag_unsupported_note)
+            },
+        )
+        InfoRow(
+            stringResource(R.string.home_diag_timeouts),
+            when {
+                diagnostics == null -> waiting
+                diagnostics.proxyTimeouts == 0L -> stringResource(R.string.home_diag_none)
+                else -> count(R.plurals.home_diag_timed_out, diagnostics.proxyTimeouts)
+            },
+        )
+        diagnostics?.lastProblem?.let { problem ->
+            Text(
+                stringResource(R.string.home_diag_last, listOfNotNull(problem.code, problem.detail).joinToString(" · ")),
+                style = MonoSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CardLabel(text: String) {
+    Text(text.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun InfoRow(label: String, value: String, detail: String? = null) {
+    // One node for screen readers: label, value and detail are read together.
+    Column(
+        modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true, properties = {}),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Text(value, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (detail != null) {
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** A count in words; counts beyond Int still show (as the largest Int, which never happens in practice). */
+@Composable
+private fun count(@PluralsRes plural: Int, value: Long): String {
+    val n = value.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    return pluralStringResource(plural, n, n)
+}
+
+@Composable
+private fun countOrNull(@PluralsRes plural: Int, value: Long): String? = if (value > 0) count(plural, value) else null
 
 @Composable
 private fun ProfileCard(profile: ProxyProfile, onChangeProfile: () -> Unit) {

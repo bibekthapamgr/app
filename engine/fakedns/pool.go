@@ -120,6 +120,18 @@ func NewPool(prefix netip.Prefix, reserved int, maxEntries int, opts ...PoolOpti
 // Contains reports whether ip lies in the pool prefix.
 func (p *Pool) Contains(ip netip.Addr) bool { return p.prefix.Contains(ip.Unmap()) }
 
+// Reserved reports whether ip lies in the pool prefix but is never handed out:
+// the reserved addresses at its start (the TUN's and the DNS server's own) and
+// the last address. No name maps to them, ever.
+func (p *Pool) Reserved(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	if !ip.Is4() || !p.prefix.Contains(ip) {
+		return false
+	}
+	v := u32(ip)
+	return v < p.first || v > p.last
+}
+
 // Lookup returns the address for name, allocating one if needed. It reports
 // false when every mapping was used within ReuseAfter or has a connection
 // open. name must already be validated and normalised by the caller.

@@ -73,7 +73,7 @@ func (e *Engine) serveDNS(c *gonet.UDPConn) {
 		}
 		f.up.Add(int64(n))
 		resp, outcome, name := e.cfg.FakeDNS.Handle(buf[:n])
-		e.stats.dnsOutcome(string(outcome))
+		e.stats.dnsAnswered(outcome, name)
 		ev := Event{Type: EvDNS, Proto: "udp", Port: 53, Detail: string(outcome)}
 		if e.cfg.LogDestinations {
 			ev.Dst = name

@@ -28,6 +28,7 @@ import app.proxyflow.feature.logs.LogsViewModel
 import app.proxyflow.feature.profiles.AddEditProxyViewModel
 import app.proxyflow.feature.profiles.ProfilesViewModel
 import app.proxyflow.feature.settings.SettingsViewModel
+import javax.net.ssl.X509TrustManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,8 +42,15 @@ import kotlinx.coroutines.launch
  *
  * @param credentialKeys where the per-profile credential keys live: the Android
  *   Keystore in the app; JVM tests, where it does not exist, pass software keys.
+ * @param proxyTrust replaces the platform trust manager that checks TLS proxies' certificates;
+ *   only the device tests pass one, which also trusts their run's test CA (ADR-0011). The app
+ *   never does: [ProxyFlowApplication] builds this container with the default.
  */
-class AppContainer(context: Context, credentialKeys: SecretKeyStore = AndroidKeystoreSecretKeyStore()) {
+class AppContainer(
+    context: Context,
+    credentialKeys: SecretKeyStore = AndroidKeystoreSecretKeyStore(),
+    proxyTrust: (() -> X509TrustManager)? = null,
+) {
     private val appContext = context.applicationContext
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -59,7 +67,7 @@ class AppContainer(context: Context, credentialKeys: SecretKeyStore = AndroidKey
     val logRepository: LogRepository = InMemoryLogRepository()
 
     /** The VPN layer: the session, and the service's way back to it (ProxyFlowApplication is its provider). */
-    val vpnRuntime = VpnRuntime(appContext, profiles, appScope)
+    val vpnRuntime = VpnRuntime(appContext, profiles, appScope, proxyTrust)
     val connectionController: ConnectionController = vpnRuntime.controller
     val connectionTester: ConnectionTester = UnavailableConnectionTester()
 

@@ -2,10 +2,11 @@
 
 ProxyFlow is a free, original Android app that routes your apps' TCP traffic through your own proxy — HTTP CONNECT or SOCKS5, optionally over TLS — using Android's `VpnService`. It needs no account and has no backend.
 
-What it promises, and where that ends (the single source for these claims is `docs/m1/02-traffic-support-matrix.md`):
+What it promises, and where that ends (the single source for these claims is `docs/m6/routing-and-limitations.md`, which supersedes the device rows of `docs/m1/02-traffic-support-matrix.md`):
 
-- **While connected**, if the proxy stops working, traffic is blocked instead of being sent around the proxy. DNS lookups are resolved by the proxy.
+- **While connected**, if the proxy stops working, traffic is blocked instead of being sent around the proxy. Site names are resolved by the proxy, not looked up by the phone; an app's own encrypted DNS (or Android's Private DNS set to a provider) goes through the proxy too, which then sees addresses instead of names.
 - **Not carried:** UDP (QUIC, calls, games — refused so apps fall back to TCP), ping and other ICMP, and devices on the local network (printers, casting). IPv6 destinations work only if the proxy has IPv6.
+- **Outside the VPN:** ProxyFlow's own connection to the proxy (by design) and, by Android's rules, some of Android's own traffic and that of privileged preinstalled apps (on Android 15, Google Play services opened connections around the VPN), apps in a work profile, Private space or another user, and tethered devices.
 - **When ProxyFlow is not connected** — before it starts, after the user disconnects, or when Android removes the VPN — apps use the normal network, unless Android's Always-on VPN with "Block connections without VPN" is turned on. The app will guide users to that setting (M8).
 
 **Status**
@@ -32,9 +33,9 @@ What it promises, and where that ends (the single source for these claims is `do
 | `feature/{home,profiles,settings,logs,about}/` | One module per area: stateless screens, ViewModels, navigation entry points, tests |
 | `config/lint/` | Android Lint configuration |
 | `gradle/libs.versions.toml` | Every dependency and plugin version |
-| `scripts/` | `check-secrets.sh` (keys, signing files and credentials in the files or anywhere in the history; rules in `check_secrets.py`), `check_release_manifest.py` (permissions, backups, the VPN service and exported components of the release build), `ci_error_digest.py` and `ci_build_facts.py` (CI summaries), and the M5 end-to-end setup: `m5_device_env.sh` (proxies, destination and sink on the CI runner), `m5_e2e_servers.py`, `m5_device_e2e.sh` (inside the emulator job), `m5_evidence.py` (logs and packet captures checked) |
-| `docs/m1/` … `docs/m5/` | Milestone deliverables and acceptance reports |
-| `docs/adr/` | Architecture decision records 0001–0010 |
+| `scripts/` | `check-secrets.sh` (keys, signing files and credentials in the files or anywhere in the history; rules in `check_secrets.py`), `check_release_manifest.py` (permissions, backups, the VPN service and exported components of the release build), `ci_error_digest.py` and `ci_build_facts.py` (CI summaries), and the end-to-end lab (M5, M6): `e2e_env.sh` (proxies, TLS fronts, DNS servers, destinations and sinks on the CI runner), `e2e_pki.py` (the run's test CA and certificates), `e2e_servers.py`, `e2e_lab_check.py` (the lab checked from the runner), `e2e_device.sh` (inside the emulator job), `m5_evidence.py` and `m6_evidence.py` (logs and packet captures checked) |
+| `docs/m1/` … `docs/m6/` | Milestone deliverables and acceptance reports |
+| `docs/adr/` | Architecture decision records 0001–0011 |
 | `design/` | Screen boards, design tokens, contrast checker, Compose colour generator |
 | `spike/` | M1 feasibility spike (Go engine prototype, lab harness, evidence runs) |
 | `.github/workflows/` | `android.yml` (app checks and builds), `secrets.yml` (secrets scan on every push and pull request), `spike.yml` (M1 spike) |
@@ -73,7 +74,7 @@ scripts/check-secrets.sh                # files you would commit; --history scan
 
 `scripts/check-secrets.sh` also works as a pre-commit hook: `ln -s ../../scripts/check-secrets.sh .git/hooks/pre-commit`.
 
-The same checks run in CI (`.github/workflows/android.yml`). Most tests run on the JVM with Robolectric. What needs Android itself runs on emulators in CI (API 29, 34, 35 and 36): the Android Keystore (`core/data`), the engine (`core/engine`), and since M5 the VPN end to end (`app/src/androidTest`), against real proxies on the runner, with the emulator's uplink captured and checked afterwards (`scripts/m5_evidence.py`).
+The same checks run in CI (`.github/workflows/android.yml`). Most tests run on the JVM with Robolectric. What needs Android itself runs on emulators in CI (API 29, 34, 35 and 36): the Android Keystore (`core/data`), the engine (`core/engine`), and since M5 the VPN end to end (`app/src/androidTest`), against real proxies on the runner, with the emulator's uplink captured and checked afterwards (`scripts/m5_evidence.py`; since M6 also DNS, TLS to the proxy, IPv6, UDP and ping, `scripts/m6_evidence.py`).
 
 After changing a Room entity, build `core/data` (any of the commands above) and commit the regenerated file in `core/data/schemas/` together with a migration and its test (ADR-0009).
 

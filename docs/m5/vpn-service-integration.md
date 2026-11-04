@@ -115,13 +115,16 @@ What goes through the VPN once connected is unchanged from M4 and the traffic su
 
 ### Running the device tests yourself
 
-The end-to-end tests need the proxies and the destination that CI sets up (`scripts/m5_device_env.sh`, for an Ubuntu host whose loopback the emulator reaches as `10.0.2.2`, with Internet access for the pre-flight target), and the file it writes on the emulator:
+The end-to-end tests need the lab that CI sets up (`scripts/e2e_env.sh`, called `m5_device_env.sh` until M6, for an Ubuntu host with IPv6 whose loopback the emulator reaches as `10.0.2.2`, with Internet access for the pre-flight target), and the files it writes on the emulator:
 
 ```bash
-bash scripts/m5_device_env.sh                       # Dante, Squid, destination (sudo; Ubuntu)
+bash scripts/e2e_env.sh                             # proxies, TLS fronts, DNS servers, destinations (sudo; Ubuntu)
 adb push /tmp/pf/e2e.properties /data/local/tmp/proxyflow-e2e.properties
+adb push /tmp/pf/pki/ca.crt /data/local/tmp/proxyflow-ca.pem
 ./gradlew :app:connectedDebugAndroidTest            # without the file, the end-to-end tests are skipped
 ```
+
+Start the emulator with `-dns-server 10.99.0.54` so that its uplink resolver is the lab's (M6).
 
 ## 6. Known limits of M5
 

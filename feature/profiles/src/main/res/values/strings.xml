@@ -6,8 +6,9 @@
     <string name="profiles_empty_body">Save each proxy you use as a profile. Passwords are only ever sent to that proxy.</string>
     <string name="profiles_add">Add proxy</string>
     <string name="profiles_active">Active</string>
-    <string name="profiles_tls">TLS</string>
-    <string name="profiles_not_encrypted">Not encrypted</string>
+    <!-- TLS between this phone and the proxy, never HTTPS to sites (ADR-0005, ADR-0011). -->
+    <string name="profiles_tls">TLS to proxy</string>
+    <string name="profiles_not_encrypted">No TLS to proxy</string>
     <string name="profiles_sign_in">Sign-in</string>
     <string name="profiles_more_actions">More actions for %1$s</string>
     <string name="profiles_use">Use this proxy</string>
@@ -56,12 +57,12 @@
     <string name="edit_test_failed_title">Test failed</string>
     <string name="edit_test_failed_body">The test stopped with %1$s.</string>
     <string name="edit_password_reenter">Enter the password again: the server, port, protocol, username or TLS setting changed</string>
-    <string name="edit_tls">Encrypt connection (TLS)</string>
-    <string name="edit_tls_hint">Recommended. Your proxy must support TLS on this port.</string>
+    <string name="edit_tls">TLS to the proxy</string>
+    <string name="edit_tls_hint">Recommended. Encrypts the connection between this phone and your proxy, which must support TLS on this port. HTTPS sites stay encrypted end to end either way.</string>
     <string name="edit_tls_server_name">TLS server name (optional)</string>
     <string name="edit_tls_server_name_hint">Only if the certificate names a different host</string>
-    <string name="edit_plaintext_title">Not encrypted</string>
-    <string name="edit_plaintext_body">Without TLS, your username, password and the names of sites you open can be seen by anyone on the network between this phone and the proxy.</string>
+    <string name="edit_plaintext_title">No TLS to the proxy</string>
+    <string name="edit_plaintext_body">Without TLS to the proxy, anyone on the network between this phone and your proxy can see your proxy username and password, the names of the sites you open, and pages that don\'t use HTTPS. HTTPS pages stay encrypted end to end.</string>
     <plurals name="edit_fix_fields">
         <item quantity="one">Fix %d field to save this proxy</item>
         <item quantity="other">Fix %d fields to save this proxy</item>

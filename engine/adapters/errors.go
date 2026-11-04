@@ -71,6 +71,8 @@ type Error struct {
 	Code   Code
 	Detail string
 	Err    error
+	// timeout marks a PROXY_UNREACHABLE that is a timeout (see IsTimeout).
+	timeout bool
 }
 
 func (e *Error) Error() string {
@@ -84,6 +86,24 @@ func (e *Error) Unwrap() error { return e.Err }
 
 func newErr(code Code, detail string, cause error) *Error {
 	return &Error{Code: code, Detail: detail, Err: cause}
+}
+
+// newTimeoutErr is a PROXY_UNREACHABLE that IsTimeout recognises.
+func newTimeoutErr(detail string, cause error) *Error {
+	return &Error{Code: CodeProxyUnreachable, Detail: detail, Err: cause, timeout: true}
+}
+
+// IsTimeout reports whether err is a timeout of the proxy itself: connecting to
+// it took too long (PROXY_UNREACHABLE) or it did not finish its handshake — TLS,
+// SOCKS5 or HTTP CONNECT — in time (HANDSHAKE_TIMEOUT). The app's diagnostics
+// count these as proxy timeouts. A slow lookup of the proxy's own name is a
+// DNS failure (PROXY_DNS_FAILED), not one of these.
+func IsTimeout(err error) bool {
+	var e *Error
+	if !errors.As(err, &e) {
+		return false
+	}
+	return e.Code == CodeTimeout || e.timeout
 }
 
 // CodeOf extracts the Code from an error chain, or CodeInternal.

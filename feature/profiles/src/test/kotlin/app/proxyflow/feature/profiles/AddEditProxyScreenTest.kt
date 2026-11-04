@@ -55,12 +55,14 @@ class AddEditProxyScreenTest {
     @Test
     fun plaintextWarningShowsUntilTlsIsTurnedOn() {
         showForm()
-        compose.onNodeWithText("Not encrypted").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("No TLS to the proxy").performScrollTo().assertIsDisplayed()
+        // TLS to the proxy is told apart from HTTPS to sites, which stays end to end either way (ADR-0011).
+        compose.onNodeWithText("HTTPS pages stay encrypted end to end.", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("TLS server name (optional)").assertDoesNotExist()
 
-        compose.onNodeWithText("Encrypt connection (TLS)").performScrollTo().performClick()
+        compose.onNodeWithText("TLS to the proxy").performScrollTo().performClick()
 
-        compose.onNodeWithText("Not encrypted").assertDoesNotExist()
+        compose.onNodeWithText("No TLS to the proxy").assertDoesNotExist()
         compose.onNodeWithText("TLS server name (optional)").performScrollTo().assertIsDisplayed()
     }
 

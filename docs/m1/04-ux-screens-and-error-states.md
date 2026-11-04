@@ -25,7 +25,7 @@ Bottom navigation with four destinations — **Home · Profiles · Logs · Setti
 | B1 | Home — no profile | Empty state with "Add proxy" |
 | B2 | Home — disconnected | Selected profile card, big Connect button |
 | B3 | Home — connecting | Progress ring, step text, Cancel |
-| B4 | Home — connected | Timer, ↑/↓ counters, active connections, protection summary, Disconnect |
+| B4 | Home — connected | Timer, ↑/↓ counters and active connections (M7), routing summary and diagnostics since connecting (M6: TLS to proxy, DNS, unsupported traffic, proxy timeouts, last problem), HTTPS note, Disconnect |
 | B5 | Home — reconnecting | Amber state, "traffic paused", attempt counter |
 | B6a–B6d | Home — errors | B6a sign-in failed while connected (blocked) · B6b proxy unreachable at connect, also the layout for every pre-flight failure (not connected, not blocked) · B6c certificate not trusted while connected (blocked) · B6d VPN removed by Android (not blocked) |
 | B7 | Home — offline | Waiting for network (still blocking) |
@@ -53,10 +53,10 @@ Dark theme is designed for B2, B4, B6a and C2 (all other screens follow the same
 | `PROXY_DNS_FAILED` | Proxy | Proxy address not found | {host} couldn't be found. Check the spelling or use the proxy's IP address. | Edit profile | Retry | Reconnecting, blocked |
 | `AUTH_REQUIRED` | Proxy | Sign-in required | This proxy needs a username and password. | Add credentials | — | Error (B6), blocked |
 | `AUTH_FAILED` | Proxy | Username or password rejected | The proxy didn't accept your credentials. Check them with your proxy provider. *(HTTP Digest-only proxies: "This proxy only supports Digest sign-in, which V1 doesn't support.")* | Edit credentials | — | Error, blocked |
-| `TLS_UNTRUSTED` | Proxy | Certificate not trusted | The proxy's certificate isn't from a trusted authority. ProxyFlow only connects to proxies with a valid certificate. | Edit profile | Learn more | Error, blocked |
+| `TLS_UNTRUSTED` | Proxy | Certificate not trusted | The proxy's certificate isn't from an authority this phone trusts. ProxyFlow only connects to proxies with a valid certificate, and can't be told to skip the check. | Edit profile | Learn more | Error, blocked |
 | `TLS_HOSTNAME` | Proxy | Certificate doesn't match | The certificate isn't valid for {sni}. Check the server name in the profile. | Edit profile | — | Error, blocked |
 | `TLS_EXPIRED` | Proxy | Certificate expired | The proxy's certificate is expired or not yet valid. Check your phone's date and time, or contact your provider. | Retry | Date & time settings | Error, blocked |
-| `TLS_HANDSHAKE` | Proxy | Secure connection failed | The proxy didn't answer with TLS. It may not support TLS on this port. | Edit profile | — | Error, blocked |
+| `TLS_HANDSHAKE` | Proxy | TLS to proxy failed | The proxy didn't answer with TLS. It may not support TLS on this port. ProxyFlow never falls back to an unencrypted connection. | Edit profile | — | Error, blocked |
 | `PROTOCOL_ERROR` | Proxy | This doesn't look like a {SOCKS5/HTTP} proxy | The server answered in an unexpected way. Check the protocol and port. *(405/501: "This HTTP proxy doesn't allow tunnels (CONNECT).")* | Edit profile | — | Error, blocked |
 | `HANDSHAKE_TIMEOUT` | Proxy | Proxy isn't responding | The proxy accepted the connection but didn't respond in time. | Retry | Edit profile | Reconnecting, blocked |
 | `TARGET_NOT_ALLOWED` | Target | Blocked by your proxy | {proxy} refused a connection to {destination or "a site"} (port {port}). | — | — | Logs only |
@@ -73,7 +73,7 @@ Dark theme is designed for B2, B4, B6a and C2 (all other screens follow the same
 | `ALWAYS_ON_OTHER_APP` | System | Another app is your Always-on VPN | Turn off Always-on VPN for that app in Android settings, then try again. | Open VPN settings | — | n/a |
 | `OFFLINE` | System | You're offline | ProxyFlow will connect when a network is available. Traffic stays blocked meanwhile. | — | Disconnect | Waiting (B7), blocked |
 | `CREDENTIAL_UNREADABLE` | System | Re-enter your password | The saved password can't be read on this phone any more, so it isn't used. Enter it again. | Edit profile | — | n/a |
-| `ENGINE_STOPPED` | System | Protection stopped unexpectedly | The packet engine stopped while connected. Traffic stays blocked until you restart it or disconnect. | Restart | Copy diagnostics | Error, blocked |
+| `ENGINE_STOPPED` | System | ProxyFlow stopped unexpectedly | The packet engine stopped while connected. Traffic stays blocked until you restart it or disconnect. | Restart | Copy diagnostics | Error, blocked |
 | `PROFILE_DELETED` | System | Profile deleted | The profile this connection used was deleted, so its proxy isn't used any more. Traffic stays blocked until you stop the connection. *(M5: only if the profile disappears other than through "Disconnect and delete", which disconnects first.)* | Stop and use normal network | — | Blocked |
 
 *Codes not emitted by the engine (`VPN_*`, `ALWAYS_ON_OTHER_APP`, `OFFLINE`, `CREDENTIAL_UNREADABLE`, `PROFILE_DELETED`) are produced by the VPN service / storage layers in M3/M5; `ENGINE_STOPPED` is reported by the engine when its packet loop ends without being stopped (the TUN closed or failed, M4) and acted on by the VPN service. The engine's own split is `IsProxyLevel()` in `engine/adapters/errors.go`: 10 proxy-level codes, 10 others; only proxy-level codes count towards the escalation rule. One of the others, `CANCELED` (M4), is internal: a connection still being set up when the engine stops or resets its flows; it is counted, never shown and never logged as a failure.*

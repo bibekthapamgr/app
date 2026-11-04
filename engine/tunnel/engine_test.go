@@ -43,8 +43,9 @@ import (
 // fakeDialer stands in for the proxy. By destination name:
 // "fail.test" → AUTH_FAILED, "block.test" → waits until the context ends,
 // "panic.test" → panics, "stream.test" → a destination that keeps sending,
-// "quiet.test" → one that never sends or reads; anything else → an echo
-// server behind the "proxy".
+// "quiet.test" → one that never sends or reads, "unreach.test" and the
+// address 203.0.113.99 → TARGET_UNREACHABLE; anything else → an echo server
+// behind the "proxy".
 type fakeDialer struct {
 	mu      sync.Mutex
 	targets []adapters.Target
@@ -62,9 +63,14 @@ func (d *fakeDialer) Dial(ctx context.Context, t adapters.Target) (net.Conn, err
 		default:
 		}
 	}
+	if t.Host == "" && t.Addr == netip.MustParseAddr("203.0.113.99") {
+		return nil, &adapters.Error{Code: adapters.CodeTargetUnreachable, Detail: "test"}
+	}
 	switch t.Host {
 	case "fail.test":
 		return nil, &adapters.Error{Code: adapters.CodeAuthFailed, Detail: "test"}
+	case "unreach.test":
+		return nil, &adapters.Error{Code: adapters.CodeTargetUnreachable, Detail: "test"}
 	case "block.test":
 		<-ctx.Done()
 		if errors.Is(ctx.Err(), context.Canceled) {
