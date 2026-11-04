@@ -85,7 +85,7 @@
     <string name="help_logs_title">Logs and diagnostics</string>
     <string name="help_logs_body">Logs list connection events and errors on this phone only, without passwords, server or site names, or addresses. Copy or Export passes them on when you ask your proxy provider for help. Settings has how long they are kept.</string>
     <string name="help_background_title">When Android stops ProxyFlow</string>
-    <string name="help_background_body">To free memory, Android can stop ProxyFlow while it is connected; apps then use your normal network unless Android\'s system kill switch is on. ProxyFlow tells you on Home the next time it starts. It doesn\'t reconnect by itself; if it is your Always-on VPN, Android may start it again, or may not.</string>
+    <string name="help_background_body">To free memory, Android can stop ProxyFlow while it is connected; apps then use your normal network unless Android\'s system kill switch is on. ProxyFlow tells you on Home the next time it starts. It doesn\'t reconnect by itself; if it is your Always-on VPN, Android may start it again, or may not. Some phones stop apps in the background more than Android itself does: if it happens often, allowing ProxyFlow unrestricted battery use in Android\'s settings for the app can help.</string>
     <string name="help_feedback_title">Getting help</string>
     <string name="help_feedback_body">ProxyFlow has no servers and collects nothing itself: what went wrong is in Logs, on this phone. Copy the log in Logs and include it when you contact your proxy provider, or ProxyFlow\'s developer through the contact details on its Google Play page.</string>
     <!-- The open-source notices (M9): generated from what the release build ships (scripts/licences.py). -->

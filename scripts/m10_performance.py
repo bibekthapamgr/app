@@ -205,6 +205,34 @@ def vpn_bytes(found: list[dict[str, str]]) -> str:
     return "?" if size is None else f"{size / 1024 / 1024:.0f} MiB each, the median of {count}"
 
 
+def row(found: list[dict[str, str]]) -> str:
+    """The figures docs/m10/performance-baseline.md tabulates, as one "key=value" line ("?" for one not measured)."""
+    def get(name: str, field: str, **keys: str) -> str:
+        m = find(found, name, **keys)
+        return m.get(field, "?") if m else "?"
+
+    values = {}
+    for p in PROTOCOLS:
+        values[f"connect_p50_{p}"] = get("connect", "p50_ms", protocol=p)
+        values[f"connect_p90_{p}"] = get("connect", "p90_ms", protocol=p)
+        values[f"setup_p50_{p}"] = get("setup", "p50_ms", protocol=p, path="vpn")
+        values[f"direct_p50_{p}"] = get("setup", "p50_ms", protocol=p, path="direct_to_proxy")
+        for d in ("down", "up"):
+            values[f"{d}_{p}"] = get("throughput", "mbit_s", protocol=p, direction=d, path="vpn")
+            values[f"{d}_proxy_only_{p}"] = get("throughput", "mbit_s", protocol=p, direction=d, path="proxy_only")
+            values[f"cpu50_{d}_{p}"] = get("throughput", "cpu_pct_at_50mbit", protocol=p, direction=d, path="vpn")
+    values["fail_closed_ms"] = get("fail_closed", "first_ms", proxy="refusing")
+    values["silent_ms"] = get("fail_closed", "first_ms", proxy="silent")
+    values["connections"] = get("memory", "connections")
+    values["go_held_kib"] = get("memory", "go_held_kib")
+    values["go_held_idle_kib"] = get("memory", "go_held_idle_kib")
+    values["rss_peak_kib"] = get("memory", "rss_peak_kib")
+    values["rss_idle_kib"] = get("memory", "rss_idle_kib")
+    values["idle_cpu_pct"] = get("idle", "cpu_pct")
+    values["idle_s"] = get("idle", "seconds")
+    return "row: " + " ".join(f"{k}={v}" for k, v in values.items())
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", required=True)
@@ -218,7 +246,7 @@ def main(argv: list[str]) -> int:
     logcat = dumped if len(dumped) >= len(streamed) else streamed
     found = measurements(logcat)
     facts, bars, problems = report(found)
-    lines = [f"API {args.api}"] + facts + [f"bar: {b['bar']}: {b['value']} — {b['target']}: {verdict(b['met'])}" for b in bars]
+    lines = [f"API {args.api}"] + facts + [f"bar: {b['bar']}: {b['value']} — {b['target']}: {verdict(b['met'])}" for b in bars] + [row(found)]
 
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, "m10-performance.json"), "w", encoding="utf-8") as f:

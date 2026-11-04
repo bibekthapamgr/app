@@ -81,6 +81,13 @@ class M10PerformanceTest(unittest.TestCase):
         self.assertIn("SOCKS5 p50 9 ms, p90 14 ms, max 30 ms (n=20), a TCP connection straight to the proxy p50 2 ms, p90 3 ms", text)
         self.assertIn("throughput down (16 MiB each, the median of 3)", text)
         self.assertIn("so 11.7 MiB more for the connections", text)
+        summary = m10_performance.row(found)
+        self.assertTrue(summary.startswith("row: connect_p50_socks5=812 connect_p90_socks5=1050 setup_p50_socks5=9 direct_p50_socks5=2 "), summary)
+        self.assertIn(" down_http=111.8 down_proxy_only_http=223.7 cpu50_down_http=35.4 ", summary)
+        self.assertIn(" fail_closed_ms=12 silent_ms=10015 connections=203 go_held_kib=30720 ", summary)
+        self.assertTrue(summary.endswith(" idle_cpu_pct=0.140 idle_s=300"), summary)
+        self.assertNotIn("=?", summary)
+        self.assertIn("connect_p50_socks5=? ", m10_performance.row([]))
 
     def test_a_missing_measurement_fails(self):
         without = [line for line in GOOD if not line.startswith("memory ") and "direction=up path=vpn" not in line]

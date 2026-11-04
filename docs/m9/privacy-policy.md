@@ -2,7 +2,7 @@
 
 The privacy policy the app shows (About & privacy, then Privacy policy), for the public address Google Play asks for (owner decision D9: where it is published, and the support contact). Written from the app's own text by `scripts/privacy_policy.py`; CI fails if the two differ. Do not edit by hand.
 
-*This policy describes ProxyFlow version 0.9.0 (9).*
+*This policy describes ProxyFlow version 0.10.0 (10).*
 
 ProxyFlow has no servers, no account, no ads and no analytics. What you enter stays on this phone, and ProxyFlow sends your traffic only to the proxy you choose. Your proxy provider, not ProxyFlow, can see the sites you open.
 

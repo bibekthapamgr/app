@@ -132,13 +132,20 @@ ALWAYS_ON_SET=1
 out="$(admin ALWAYS_ON --es package "$APP_ID" --ez lockdown true)"
 note "R: Always-on VPN with Block connections without VPN: $out"
 case "$out" in *"lockdown true"*) ;; *) fail "R: Android did not take the setting: $out"; exit 1 ;; esac
-for _ in $(seq 1 45); do
-    [ "$(vpn_networks)" != none ] && break
+# Android starts ProxyFlow, which holds traffic on its interface until the proxy is checked (M8): the line is tried once
+# Android has the VPN network, again until it gets through.
+reply=""
+started=$SECONDS
+while [ $((SECONDS - started)) -lt 120 ]; do
+    vpn="$(vpn_networks)"
+    if [ "$vpn" != none ] && [ "$vpn" != unknown ]; then
+        reply="$(client tcp "$DESTINATION_NAME" "$DESTINATION_PORT" "PF10-reboot-before" 10000)"
+        [ "$reply" = "REPLY PROXYFLOW-DEST PF10-reboot-before" ] && break
+    fi
     sleep 2
 done
-reply="$(client tcp "$DESTINATION_NAME" "$DESTINATION_PORT" "PF10-reboot-before" 10000)"
-note "R: before the restart: VPN $(vpn_networks | cut -c1-120); a line through the proxy: $reply"
-case "$reply" in "REPLY PROXYFLOW-DEST PF10-reboot-before") ;; *) fail "R: before the restart, Always-on VPN did not carry a line through the proxy: $reply"; exit 1 ;; esac
+note "R: before the restart: VPN $(vpn_networks | cut -c1-120); a line through the proxy: ${reply:-none}"
+case "$reply" in "REPLY PROXYFLOW-DEST PF10-reboot-before") ;; *) fail "R: before the restart, Always-on VPN did not carry a line through the proxy: ${reply:-none}"; exit 1 ;; esac
 
 # --- R: the restart -------------------------------------------------------------------------------------------------
 note "R: restarting the phone"

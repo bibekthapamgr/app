@@ -178,6 +178,25 @@ class VpnEndToEndTest {
         assertNeverConnected()
     }
 
+    /**
+     * M10, the brief's task 2: a profile of the other kind — SOCKS5 at the lab's HTTP proxy, HTTP at its SOCKS5 proxy —
+     * never connects, and says the server is not that kind of proxy (`PROTOCOL_ERROR`), with nothing changed on the phone.
+     */
+    @Test(timeout = TEST_TIMEOUT_MS)
+    fun aProfileOfTheOtherKindNeverConnects() {
+        val profiles = listOf(
+            app.save("SOCKS at Squid", ProxyProtocol.SOCKS5, env.proxyHost, env.httpPort, env.socksUser, env.socksPassword),
+            app.save("HTTP at Dante", ProxyProtocol.HTTP, env.proxyHost, env.socksPort, env.httpUser, env.httpPassword),
+        )
+
+        for (profile in profiles) {
+            val ended = app.connectExpectingFailure(profile.id)
+            assertEquals("${profile.protocol} at the other kind of proxy: $ended", "PROTOCOL_ERROR", ended.error?.code)
+        }
+
+        assertNeverConnected()
+    }
+
     @Test(timeout = TEST_TIMEOUT_MS)
     fun anUnreachableProxyNeverConnects() {
         val closed = app.save("Closed port", ProxyProtocol.SOCKS5, env.proxyHost, env.closedPort)
