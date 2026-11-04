@@ -234,7 +234,7 @@ fun LogsScreen(
                 PfEmptyState(
                     icon = PfIcons.Logs,
                     title = stringResource(R.string.logs_empty_title),
-                    body = stringResource(R.string.logs_empty_body),
+                    body = stringResource(R.string.logs_empty_body, retentionText(state.retentionMillis)),
                 )
             }
             else -> Column(content) {
@@ -305,7 +305,7 @@ private fun Controls(state: LogsUiState, searchText: String, actions: LogsAction
             },
         )
         Text(
-            stringResource(R.string.logs_kept),
+            stringResource(R.string.logs_kept, retentionText(state.retentionMillis)),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -432,6 +432,19 @@ private fun filterLabelRes(filter: LogFilter): Int = when (filter) {
 
 @Composable
 private fun filterLabel(filter: LogFilter): String = stringResource(filterLabelRes(filter))
+
+/** How long the log keeps an entry, as the screen says it: whole days from two days on, hours below ("24 hours"). */
+@Composable
+internal fun retentionText(millis: Long): String {
+    val hours = (millis / MILLIS_PER_HOUR).toInt().coerceAtLeast(1)
+    return if (hours >= 48 && hours % 24 == 0) {
+        pluralStringResource(R.plurals.logs_retention_days, hours / 24, hours / 24)
+    } else {
+        pluralStringResource(R.plurals.logs_retention_hours, hours, hours)
+    }
+}
+
+private const val MILLIS_PER_HOUR = 60L * 60 * 1_000
 
 @Composable
 internal fun stageLabel(stage: ConnectionStage): String = stringResource(

@@ -27,6 +27,7 @@ import app.proxyflow.core.model.LogDetail
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
 import app.proxyflow.core.model.LogFilter
+import app.proxyflow.core.model.LogRetention
 import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
@@ -41,12 +42,16 @@ import app.proxyflow.core.model.TlsProblems
 import app.proxyflow.core.model.TrafficStats
 import app.proxyflow.core.model.UnsupportedTraffic
 import app.proxyflow.feature.about.AboutScreen
+import app.proxyflow.feature.about.HelpScreen
+import app.proxyflow.feature.about.HelpTopics
+import app.proxyflow.feature.about.PrivacyPolicyScreen
 import app.proxyflow.feature.home.HomeActions
 import app.proxyflow.feature.home.HomeDialog
 import app.proxyflow.feature.home.HomeScreen
 import app.proxyflow.feature.home.HomeUiState
 import app.proxyflow.feature.logs.LogsScreen
 import app.proxyflow.feature.logs.LogsUiState
+import app.proxyflow.feature.onboarding.OnboardingScreen
 import app.proxyflow.feature.profiles.AddEditActions
 import app.proxyflow.feature.profiles.AddEditProxyScreen
 import app.proxyflow.feature.profiles.AddEditUiState
@@ -384,13 +389,34 @@ class ScreenshotTest {
 
     @Test
     fun settings() = captureBothThemes("E1_settings") {
-        SettingsScreen(SettingsUiState(loading = false, theme = ThemePreference.System), onThemeChange = {}, onOpenAbout = {})
+        SettingsScreen(
+            SettingsUiState(loading = false, theme = ThemePreference.System),
+            onThemeChange = {},
+            onOpenAbout = {},
+            notificationsOn = true,
+        )
     }
 
-    /** E1 with Android's kill switch on, as Android said while ProxyFlow was last connected (M8). */
+    /** E1 with Android's kill switch on, as Android said while ProxyFlow was last connected (M8), and notifications off (E1b). */
     @Test
     fun settingsKillSwitchOn() = captureBothThemes("E1b_settings_kill_switch_on") {
-        SettingsScreen(SettingsUiState(loading = false, killSwitch = killSwitchOn), onThemeChange = {}, onOpenAbout = {})
+        SettingsScreen(
+            SettingsUiState(loading = false, killSwitch = killSwitchOn),
+            onThemeChange = {},
+            onOpenAbout = {},
+            notificationsOn = false,
+        )
+    }
+
+    /** The rows below the kill switches (M9): the log's settings, notifications, theme, help and About. */
+    @Test
+    fun settingsBelowTheKillSwitches() = captureBothThemes("E1c_settings_logs_app", scrollTo = "About & privacy") {
+        SettingsScreen(
+            SettingsUiState(loading = false, logRetention = LogRetention.Week),
+            onThemeChange = {},
+            onOpenAbout = {},
+            notificationsOn = false,
+        )
     }
 
     /** E2: how to turn on Android's kill switch, which only the user can (M8). */
@@ -456,7 +482,40 @@ class ScreenshotTest {
     }
 
     @Test
-    fun about() = captureBothThemes("G1_about") { AboutScreen(version = "0.2.0 (2)", onBack = {}) }
+    fun about() = captureBothThemes("G1_about") { AboutScreen(version = "0.2.0 (2)", onBack = {}, onOpenLicences = {}) }
+
+    /** About's links (M9): how it works, the privacy policy, help and the licences. */
+    @Test
+    fun aboutLinks() = captureBothThemes("G1_about_links", scrollTo = "Open-source licences") {
+        AboutScreen(version = "0.2.0 (2)", onBack = {}, onOpenLicences = {})
+    }
+
+    @Test
+    fun privacyPolicy() = captureBothThemes("G2_privacy_policy") { PrivacyPolicyScreen(version = "0.2.0 (2)", onBack = {}) }
+
+    @Test
+    fun help() = captureBothThemes("G3_help") { HelpScreen(onBack = {}) }
+
+    /** "Learn more" on Home for a certificate the phone doesn't trust opens Help at this topic (M9). */
+    @Test
+    fun helpCertificates() = captureBothThemes("G3_help_certificates") { HelpScreen(onBack = {}, topic = HelpTopics.CERTIFICATES) }
+
+    /** First launch (M9, docs/m1/03 J1): what ProxyFlow is and what the user needs. */
+    @Test
+    fun onboardingWelcome() = captureBothThemes("A1_onboarding_welcome") {
+        OnboardingScreen(showNotificationsPage = true, onAllowNotifications = {}, onFinish = {}, startPage = 0)
+    }
+
+    /** How it works, the limits and the VPN permission, before anything can connect. */
+    @Test
+    fun onboardingHowItWorks() = captureBothThemes("A2_onboarding_how_it_works") {
+        OnboardingScreen(showNotificationsPage = true, onAllowNotifications = {}, onFinish = {}, startPage = 1)
+    }
+
+    @Test
+    fun onboardingNotifications() = captureBothThemes("A3_onboarding_notifications") {
+        OnboardingScreen(showNotificationsPage = true, onAllowNotifications = {}, onFinish = {}, startPage = 2)
+    }
 
     private fun home(
         connection: ConnectionState,

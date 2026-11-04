@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.model.LogRetention
 import app.proxyflow.core.model.SystemKillSwitch
 import app.proxyflow.core.model.ThemePreference
 import org.junit.Assert.assertEquals
@@ -143,6 +144,91 @@ class SettingsScreenTest {
         }
         compose.onNodeWithText("About & privacy").performScrollTo().performClick()
         assertEquals(1, opened)
+    }
+
+    /** M9 (board E1): how long the log keeps entries, chosen from a dialog; the current one is selected. */
+    @Test
+    fun logRetentionIsChosenFromADialog() {
+        val chosen = mutableListOf<LogRetention>()
+        compose.setContent {
+            ProxyFlowTheme {
+                SettingsScreen(
+                    SettingsUiState(loading = false, logRetention = LogRetention.Day),
+                    onThemeChange = {},
+                    onOpenAbout = {},
+                    onLogRetentionChange = { chosen += it },
+                )
+            }
+        }
+        shown("24 hours")
+        compose.onNodeWithText("Keep logs for").performScrollTo().performClick()
+        compose.onNode(hasText("24 hours") and isSelectable()).assertIsSelected()
+        compose.onNode(hasText("1 hour") and isSelectable()).assertIsNotSelected()
+        compose.onNode(hasText("7 days") and isSelectable()).performClick()
+        assertEquals(listOf(LogRetention.Week), chosen)
+        compose.onNode(hasText("7 days") and isSelectable()).assertDoesNotExist()
+    }
+
+    /** M9: "Clear logs now" asks first, and only Clear empties the log. */
+    @Test
+    fun clearingTheLogsAsksFirst() {
+        var cleared = 0
+        compose.setContent {
+            ProxyFlowTheme {
+                SettingsScreen(SettingsUiState(loading = false), onThemeChange = {}, onOpenAbout = {}, onClearLogs = { cleared++ })
+            }
+        }
+        compose.onNodeWithText("Clear logs now").performScrollTo().performClick()
+        compose.onNodeWithText("Clear the log?").assertIsDisplayed()
+        compose.onNodeWithText("Cancel").performClick()
+        assertEquals(0, cleared)
+        compose.onNodeWithText("Clear logs now").performScrollTo().performClick()
+        compose.onNodeWithText("Clear").performClick()
+        assertEquals(1, cleared)
+        compose.onNodeWithText("Clear the log?").assertDoesNotExist()
+    }
+
+    /** Board E1b (M9): whether Android lets ProxyFlow show its status notification, and the way to Android's setting. */
+    @Test
+    fun statusNotificationsSayWhetherTheyAreOnAndOpenAndroidsSetting() {
+        var opened = 0
+        var on by mutableStateOf<Boolean?>(false)
+        compose.setContent {
+            ProxyFlowTheme {
+                SettingsScreen(
+                    SettingsUiState(loading = false),
+                    onThemeChange = {},
+                    onOpenAbout = {},
+                    notificationsOn = on,
+                    onOpenNotificationSettings = { opened++ },
+                )
+            }
+        }
+        shown("Off · Android still shows its VPN key icon · Turn on")
+        compose.onNodeWithText("Status notifications").performScrollTo().performClick()
+        assertEquals(1, opened)
+        on = true
+        shown("On · Connection status, with Disconnect")
+    }
+
+    @Test
+    fun helpOpensFromSettings() {
+        var opened = 0
+        compose.setContent {
+            ProxyFlowTheme {
+                SettingsScreen(SettingsUiState(loading = false), onThemeChange = {}, onOpenAbout = {}, onOpenHelp = { opened++ })
+            }
+        }
+        compose.onNodeWithText("Help").performScrollTo().performClick()
+        assertEquals(1, opened)
+    }
+
+    /** M9: no promise of settings to come, and no switch for what ProxyFlow always does or never does (ADR-0014). */
+    @Test
+    fun nothingIsPromisedForLaterAndNothingIsASwitch() {
+        compose.setContent { ProxyFlowTheme { SettingsScreen(SettingsUiState(loading = false), onThemeChange = {}, onOpenAbout = {}) } }
+        compose.onNodeWithText("later version", substring = true).assertDoesNotExist()
+        compose.onNode(isToggleable()).assertDoesNotExist()
     }
 
     private fun shown(text: String, substring: Boolean = false) =

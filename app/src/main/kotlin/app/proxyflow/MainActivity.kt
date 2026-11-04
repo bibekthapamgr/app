@@ -11,12 +11,16 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ThemePreference
 import app.proxyflow.core.model.UserSettings
+import app.proxyflow.feature.onboarding.OnboardingFlow
 import app.proxyflow.ui.ProxyFlowApp
 import kotlinx.coroutines.Dispatchers
 
@@ -41,7 +45,8 @@ class MainActivity : ComponentActivity() {
             )
             // Until the saved theme is read (a few ms) only the window background shows,
             // so a dark-theme user never sees a light frame.
-            val theme = settings?.theme ?: return@setContent
+            val current = settings ?: return@setContent
+            val theme = current.theme
             val darkTheme = when (theme) {
                 ThemePreference.System -> isSystemInDarkTheme()
                 ThemePreference.Light -> false
@@ -55,14 +60,22 @@ class MainActivity : ComponentActivity() {
                 )
                 onDispose {}
             }
-            val navController = rememberNavController()
-            SideEffect { this@MainActivity.navController = navController }
+            // The first-launch pages (A1–A3) until they were gone through once (docs/m1/03 J1); a setting that couldn't be
+            // saved still lets the user in, and the pages come back at the next start.
+            var onboardingLeft by rememberSaveable { mutableStateOf(false) }
+            val onboarding = !current.onboardingCompleted && !onboardingLeft
             ProxyFlowTheme(darkTheme = darkTheme) {
-                ProxyFlowApp(
-                    viewModelFactory = container.viewModelFactory,
-                    version = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                    navController = navController,
-                )
+                if (onboarding) {
+                    OnboardingFlow(viewModelFactory = container.viewModelFactory, onFinished = { onboardingLeft = true })
+                } else {
+                    val navController = rememberNavController()
+                    SideEffect { this@MainActivity.navController = navController }
+                    ProxyFlowApp(
+                        viewModelFactory = container.viewModelFactory,
+                        version = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                        navController = navController,
+                    )
+                }
             }
         }
     }

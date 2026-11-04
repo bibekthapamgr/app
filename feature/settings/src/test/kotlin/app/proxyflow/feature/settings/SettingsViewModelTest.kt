@@ -5,9 +5,13 @@ import app.proxyflow.core.data.InMemoryProtectionStore
 import app.proxyflow.core.data.UnavailableConnectionController
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.LogEntry
+import app.proxyflow.core.model.LogEvent
+import app.proxyflow.core.model.LogRetention
 import app.proxyflow.core.model.SystemKillSwitch
 import app.proxyflow.core.model.ThemePreference
 import app.proxyflow.core.model.UserSettings
+import app.proxyflow.core.testing.FakeLogRepository
 import app.proxyflow.core.testing.FakeSettingsRepository
 import app.proxyflow.core.testing.MainDispatcherRule
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,6 +68,30 @@ class SettingsViewModelTest {
 
         controller.current.value = ConnectionState(ConnectionStatus.Reconnecting, "p1")
         assertFalse("only Connected means Android's answer is current", vm.uiState.value.connected)
+    }
+
+    @Test
+    fun showsAndChangesHowLongTheLogKeepsEntries() = runTest {
+        val repository = FakeSettingsRepository(UserSettings(logRetention = LogRetention.Hour))
+        val vm = SettingsViewModel(repository, InMemoryProtectionStore(), UnavailableConnectionController())
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
+        assertEquals(LogRetention.Hour, vm.uiState.value.logRetention)
+
+        vm.setLogRetention(LogRetention.Week)
+
+        assertEquals(LogRetention.Week, repository.state.value.logRetention)
+        assertEquals(LogRetention.Week, vm.uiState.value.logRetention)
+    }
+
+    @Test
+    fun clearingTheLogsEmptiesTheLog() = runTest {
+        val logs = FakeLogRepository(listOf(LogEntry(timeMillis = 1, level = LogEntry.Level.Info, event = LogEvent.Connected)))
+        val vm = SettingsViewModel(FakeSettingsRepository(), InMemoryProtectionStore(), UnavailableConnectionController(), logs)
+
+        vm.clearLogs()
+
+        assertTrue(logs.state.value.isEmpty())
+        assertEquals("a Clear starts a new generation", 1L, logs.generation)
     }
 
     @Test

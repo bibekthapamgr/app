@@ -58,12 +58,31 @@ class NavigationTest {
         // Below the kill switch section (M8) on the test's small screen: scrolled to, as a user would.
         compose.onNodeWithText("Theme").performScrollTo().assertIsDisplayed()
 
-        // Settings → About (full screen, no bottom bar) → Back.
+        // Settings → About (full screen, no bottom bar) → each page it opens → Back, and Back again.
         compose.onNodeWithText("About & privacy").performScrollTo().performClick()
         compose.onNodeWithText("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · free, no account").assertIsDisplayed()
         compose.tab("Home").assertDoesNotExist()
+        for ((row, title) in listOf(
+            "How ProxyFlow works" to "Websites and most apps (TCP)",
+            "Privacy policy" to "Kept on this phone",
+            "Help" to "Getting started",
+        )) {
+            compose.onNodeWithText(row).performScrollTo().performClick()
+            compose.waitForText(title).assertIsDisplayed()
+            compose.tab("Home").assertDoesNotExist()
+            compose.onNodeWithContentDescription("Back").performClick()
+            compose.waitForText("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · free, no account")
+        }
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Theme").performScrollTo().assertIsDisplayed()
+
+        // Settings → Help → Back (M9), and how long logs are kept, chosen from a dialog.
+        compose.onNodeWithText("Help").performScrollTo().performClick()
+        compose.waitForText("Getting started").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Keep logs for").performScrollTo().performClick()
+        compose.onNodeWithText("7 days").performClick()
+        compose.waitForText("7 days").assertIsDisplayed()
 
         // Home → Add proxy → save a profile → Home shows it.
         compose.tab("Home").performClick()

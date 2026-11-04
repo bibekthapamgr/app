@@ -108,6 +108,29 @@ class LogRepositoryTest {
         }
     }
 
+    /** M9 (board E1, "Keep logs for"): a shorter time hides and deletes at once what it no longer allows; a longer one keeps more. */
+    @Test
+    fun theRetentionFollowsTheUsersSettingAndAShorterOneDeletesAtOnce() = runTest {
+        for (repository in repositories()) {
+            assertEquals(LogRepository.RETENTION_MILLIS, repository.retentionMillis.value)
+            repository.setRetention(7 * DAY)
+            repository.append(listOf(entry(now - 3 * DAY), entry(now - 2 * HOUR), entry(now - HOUR / 2)))
+            assertEquals("a week keeps all three", 3, repository.entries.first().size)
+
+            repository.setRetention(HOUR)
+
+            assertEquals(HOUR, repository.retentionMillis.value)
+            assertEquals("an hour keeps the last", listOf(now - HOUR / 2), repository.entries.first().map { it.timeMillis })
+            if (repository is RoomLogRepository) {
+                assertEquals("deleted, not only hidden", 1, opened.last().logEventDao().count())
+            }
+            repository.setRetention(7 * DAY)
+            assertEquals("nothing deleted comes back", 1, repository.entries.first().size)
+            repository.append(listOf(entry(now - 5 * DAY)))
+            assertEquals("a week keeps a five-day-old entry again", 2, repository.entries.first().size)
+        }
+    }
+
     @Test
     fun entriesDatedFarAheadOfTheClockAreHiddenWhenReadAndDroppedByThePurge() = runTest {
         for (repository in repositories()) {
@@ -301,6 +324,7 @@ class LogRepositoryTest {
 
     private companion object {
         const val DAY = 24L * 60 * 60 * 1_000
+        const val HOUR = 60L * 60 * 1_000
         const val MARKER = "marker-zebra-quokka"
     }
 }

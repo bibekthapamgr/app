@@ -189,6 +189,8 @@
     <string name="home_error_tls_expired_title">Certificate expired</string>
     <string name="home_error_tls_expired_message">The proxy\'s certificate is expired or not yet valid. Check your phone\'s date and time, or contact your provider.</string>
     <string name="home_date_settings">Date &amp; time settings</string>
+    <!-- M9: Help's topic on certificates (TLS_UNTRUSTED, TLS_HOSTNAME). -->
+    <string name="home_learn_more">Learn more about certificates</string>
     <string name="home_error_tls_handshake_title">TLS to proxy failed</string>
     <string name="home_error_tls_handshake_message">The proxy didn\'t answer with TLS. It may not support TLS on this port. ProxyFlow never falls back to an unencrypted connection.</string>
     <string name="home_error_protocol_title">This doesn\'t look like a %1$s proxy</string>

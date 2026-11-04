@@ -87,6 +87,18 @@ class LogsScreenTest {
         assertEquals(listOf("select 7", "filter ${LogFilter.Errors}", "query auth", "copy", "export", "clear"), calls)
     }
 
+    /** M9: the screen says how long entries are kept as the user set it in Settings (1 hour, 24 hours, 7 days). */
+    @Test
+    fun theRetentionSaidIsTheOneSet() {
+        var state by mutableStateOf(LogsUiState(loading = false, entries = listOf(failed), total = 1, retentionMillis = 7 * DAY))
+        compose.setContent { ProxyFlowTheme { LogsScreen(state, actions = LogsActions(), zone = utc, today = LocalDate.of(2026, 11, 3)) } }
+        compose.onNodeWithText("Kept on this phone for 7 days", substring = true).assertIsDisplayed()
+        state = state.copy(retentionMillis = HOUR)
+        compose.onNodeWithText("Kept on this phone for 1 hour,", substring = true).assertIsDisplayed()
+        state = LogsUiState(loading = false, retentionMillis = HOUR)
+        compose.onNodeWithText("Logs stay on this phone for 1 hour and never include", substring = true).assertIsDisplayed()
+    }
+
     @Test
     fun aFilterOrSearchWithoutMatchesSaysSo() {
         show(LogsUiState(loading = false, entries = emptyList(), total = 3, filter = LogFilter.Blocked, query = "tls"))
@@ -208,5 +220,7 @@ class LogsScreenTest {
     private companion object {
         /** 2026-11-03 10:15:30.250 UTC. */
         const val TIME = 1_793_700_000_000L + 930_250L
+        const val HOUR = 60L * 60 * 1_000
+        const val DAY = 24 * HOUR
     }
 }

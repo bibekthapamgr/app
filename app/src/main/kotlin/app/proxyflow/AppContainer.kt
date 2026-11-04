@@ -28,6 +28,7 @@ import app.proxyflow.core.vpn.RetryPolicy
 import app.proxyflow.core.vpn.VpnRuntime
 import app.proxyflow.feature.home.HomeViewModel
 import app.proxyflow.feature.logs.LogsViewModel
+import app.proxyflow.feature.onboarding.OnboardingViewModel
 import app.proxyflow.feature.profiles.AddEditProxyViewModel
 import app.proxyflow.feature.profiles.ProfilesViewModel
 import app.proxyflow.feature.settings.SettingsViewModel
@@ -36,6 +37,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -103,6 +107,15 @@ class AppContainer(
                 delay(LOG_PURGE_INTERVAL_MS)
             }
         }
+        // How long the log keeps entries, as the user set it (board E1, ADR-0014): at start and on each change, which
+        // deletes at once what a shorter time no longer allows. A settings file that can't be read keeps the default.
+        appScope.launch(Dispatchers.IO) {
+            settingsRepository.settings
+                .map { it.logRetention }
+                .distinctUntilChanged()
+                .catch {}
+                .collect { runCatching { logRepository.setRetention(it.millis) } }
+        }
     }
 
     /** Creates every screen's ViewModel; navigation passes it to each destination. */
@@ -110,8 +123,9 @@ class AppContainer(
         initializer { HomeViewModel(profileRepository, connectionController, protectionStore) }
         initializer { ProfilesViewModel(profileRepository, connectionController) }
         initializer { AddEditProxyViewModel(createSavedStateHandle(), profileRepository, connectionTester) }
-        initializer { SettingsViewModel(settingsRepository, protectionStore, connectionController) }
+        initializer { SettingsViewModel(settingsRepository, protectionStore, connectionController, logRepository) }
         initializer { LogsViewModel(logRepository, profileRepository) }
+        initializer { OnboardingViewModel(settingsRepository) }
     }
 
     private companion object {

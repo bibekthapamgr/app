@@ -333,13 +333,6 @@ class HomeViewModelTest {
         assertEquals(listOf("retryNow"), controller.calls)
     }
 
-    @Test
-    fun theNotificationPermissionIsRequestedOncePerRun() {
-        val viewModel = HomeViewModel(profiles, RecordingController())
-        assertTrue(viewModel.takeNotificationRequest())
-        assertFalse(viewModel.takeNotificationRequest())
-    }
-
     private fun TestScope.observe(viewModel: HomeViewModel) {
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect() }
     }

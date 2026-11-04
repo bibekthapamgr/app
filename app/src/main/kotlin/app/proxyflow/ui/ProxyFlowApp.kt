@@ -16,11 +16,18 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import app.proxyflow.feature.about.HelpTopics
 import app.proxyflow.feature.about.aboutScreen
+import app.proxyflow.feature.about.helpScreen
 import app.proxyflow.feature.about.navigateToAbout
+import app.proxyflow.feature.about.navigateToHelp
+import app.proxyflow.feature.about.navigateToPrivacyPolicy
+import app.proxyflow.feature.about.privacyPolicyScreen
 import app.proxyflow.feature.home.HomeDestination
 import app.proxyflow.feature.home.homeScreen
 import app.proxyflow.feature.logs.logsScreen
+import app.proxyflow.feature.onboarding.howItWorksScreen
+import app.proxyflow.feature.onboarding.navigateToHowItWorks
 import app.proxyflow.feature.profiles.AddEditProxyDestination
 import app.proxyflow.feature.profiles.addEditProxyScreen
 import app.proxyflow.feature.profiles.navigateToAddEditProxy
@@ -34,8 +41,9 @@ import app.proxyflow.navigation.navigateToTopLevel
 
 /**
  * The app shell: bottom navigation for the four top-level screens and one
- * navigation graph. Add/Edit proxy, About and the system kill switch guide are
- * full screen, without the bar.
+ * navigation graph. Add/Edit proxy, About and the pages it opens (how ProxyFlow
+ * works, the privacy policy, Help) and the system kill switch guide are full
+ * screen, without the bar.
  */
 @Composable
 fun ProxyFlowApp(
@@ -77,6 +85,7 @@ fun ProxyFlowApp(
                 onEditProfile = { id -> navController.navigateToAddEditProxy(id) },
                 onOpenLogs = { navController.navigateToTopLevel(TopLevelDestination.Logs) },
                 onOpenKillSwitchGuide = { navController.navigateToKillSwitchGuide() },
+                onLearnAboutCertificates = { navController.navigateToHelp(HelpTopics.CERTIFICATES) },
             )
             profilesScreen(
                 viewModelFactory = viewModelFactory,
@@ -93,9 +102,22 @@ fun ProxyFlowApp(
                 viewModelFactory = viewModelFactory,
                 onOpenAbout = { navController.navigateToAbout() },
                 onOpenKillSwitchGuide = { navController.navigateToKillSwitchGuide() },
+                onOpenHelp = { navController.navigateToHelp() },
             )
             killSwitchGuideScreen(viewModelFactory = viewModelFactory, onBack = { navController.popBackStack() })
-            aboutScreen(version = version, onBack = { navController.popBackStack() })
+            aboutScreen(
+                version = version,
+                onBack = { navController.popBackStack() },
+                onOpenHowItWorks = { navController.navigateToHowItWorks() },
+                onOpenPrivacyPolicy = { navController.navigateToPrivacyPolicy() },
+                onOpenHelp = { navController.navigateToHelp() },
+            )
+            howItWorksScreen(onBack = { navController.popBackStack() })
+            privacyPolicyScreen(version = version, onBack = { navController.popBackStack() })
+            helpScreen(
+                onBack = { navController.popBackStack() },
+                onOpenKillSwitchGuide = { navController.navigateToKillSwitchGuide() },
+            )
         }
     }
 }

@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
  * @param profileNames the saved profiles' names by id, for the detail sheet; a deleted profile's entries show its short id.
  * @param selected the entry the detail sheet (F3) shows.
  * @param confirmingClear the Clear confirmation is open.
+ * @param retentionMillis how long the log keeps an entry now, as the user set it (ADR-0014): what the screen says.
  */
 data class LogsUiState(
     val loading: Boolean = true,
@@ -39,6 +40,7 @@ data class LogsUiState(
     val profileNames: Map<String, String> = emptyMap(),
     val selected: LogEntry? = null,
     val confirmingClear: Boolean = false,
+    val retentionMillis: Long = LogRepository.RETENTION_MILLIS,
 )
 
 /**
@@ -73,7 +75,8 @@ class LogsViewModel(private val logs: LogRepository, profiles: ProfileRepository
             },
             profiles.profiles.catch { emit(emptyList()) },
             choices,
-        ) { entries, profileList, choices ->
+            logs.retentionMillis,
+        ) { entries, profileList, choices, retention ->
             val names = profileList.associate { it.id to it.displayName }
             val newestFirst = entries.sortedWith(compareByDescending<LogEntry> { it.timeMillis }.thenByDescending { it.id })
             LogsUiState(
@@ -86,6 +89,7 @@ class LogsViewModel(private val logs: LogRepository, profiles: ProfileRepository
                 // An entry cleared or purged while its sheet is open closes the sheet.
                 selected = choices.selectedId?.let { id -> entries.firstOrNull { it.id == id } },
                 confirmingClear = choices.confirmingClear,
+                retentionMillis = retention,
             )
         }.flowOn(work).stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), LogsUiState())
 

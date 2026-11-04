@@ -82,7 +82,6 @@ class HomeViewModel(
     protection: ProtectionStore = InMemoryProtectionStore(),
 ) : ViewModel() {
     private val dialog = MutableStateFlow<HomeDialog?>(null)
-    private var notificationRequestTaken = false
 
     // The connection and, while connected, its diagnostics and traffic: read from the engine only while
     // Home is shown (and for STOP_TIMEOUT_MS after), never shown for a connection that is gone.
@@ -193,17 +192,6 @@ class HomeViewModel(
 
     /** The user acts on a shown error (Edit profile, Use another proxy), so it is not shown again. */
     fun dismissError() = connection.clearError()
-
-    /**
-     * Android 13+: true the first time per app run, when the screen should ask for the
-     * notification permission before connecting (until onboarding asks, M9). Android
-     * itself stops showing the request after two refusals.
-     */
-    fun takeNotificationRequest(): Boolean {
-        val take = !notificationRequestTaken
-        notificationRequestTaken = true
-        return take
-    }
 
     private data class Live(val connection: ConnectionState, val diagnostics: RoutingDiagnostics?, val traffic: TrafficStats?)
 

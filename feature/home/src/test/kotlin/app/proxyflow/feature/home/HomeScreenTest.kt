@@ -67,6 +67,7 @@ class HomeScreenTest {
         onOpenKillSwitchGuide = { calls += "kill switch guide" },
         onOpenVpnSettings = { calls += "vpn settings" },
         onDismissInterruption = { calls += "dismiss interruption" },
+        onLearnAboutCertificates = { calls += "learn certificates" },
     )
 
     @Test
@@ -207,7 +208,8 @@ class HomeScreenTest {
                 node.config.getOrNull(SemanticsProperties.Text)?.joinToString(" ").orEmpty()
             }
             val expected = setOf("Try again", "Edit profile", "Use another proxy", "Change", "View logs") +
-                (if (code == "TLS_EXPIRED") setOf("Date & time settings") else emptySet())
+                (if (code == "TLS_EXPIRED") setOf("Date & time settings") else emptySet()) +
+                (if (code == "TLS_UNTRUSTED" || code == "TLS_HOSTNAME") setOf("Learn more about certificates") else emptySet())
             assertEquals("$code: $buttons", expected, buttons.toSet())
             assertTrue(compose.onAllNodesWithText("anyway", substring = true, ignoreCase = true).fetchSemanticsNodes().isEmpty())
         }
@@ -574,6 +576,20 @@ class HomeScreenTest {
                 assertTrue("$code $status: $buttons", edit >= 0 && retry >= 0)
                 assertEquals("$code $status: $buttons", code in editFirst, edit < retry)
             }
+        }
+    }
+
+    /** The catalogue's "Learn more" (M9): Help's topic on certificates, for one the phone doesn't trust or that names another server. */
+    @Test
+    fun anUntrustedCertificateLinksToHelp() {
+        var state by mutableStateOf(ready(ConnectionState(profileId = "p1", error = ConnectionError("TLS_UNTRUSTED"))))
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
+        for (code in listOf("TLS_UNTRUSTED", "TLS_HOSTNAME")) {
+            calls.clear()
+            state = ready(ConnectionState(profileId = "p1", error = ConnectionError(code)))
+            compose.waitForIdle()
+            scrolledTo("Learn more about certificates").performClick()
+            assertEquals(code, listOf("learn certificates"), calls)
         }
     }
 

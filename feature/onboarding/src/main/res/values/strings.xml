@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- First launch (boards A1–A3, docs/m1/03 J1). Worded for what the app really does (CopyClaimsTest): no claim of
+         carrying all traffic, of anonymity or of blocking that Android doesn't do. -->
+    <string name="onboarding_page">Page %1$d of %2$d</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_continue">Continue</string>
+
+    <!-- A1: what ProxyFlow is, and what the user needs before it can do anything. -->
+    <string name="onboarding_welcome_title">Welcome to ProxyFlow</string>
+    <string name="onboarding_welcome_body">ProxyFlow sends your apps\' TCP connections through a proxy you already have: one from a provider you pay, or a server of your own.</string>
+    <string name="onboarding_need_title">What you need</string>
+    <string name="onboarding_need_protocol">An HTTP proxy that allows tunnels (CONNECT), or a SOCKS5 proxy</string>
+    <string name="onboarding_need_address">Its server address and port</string>
+    <string name="onboarding_need_sign_in">Its username and password, if it has one</string>
+    <string name="onboarding_no_proxies">ProxyFlow doesn\'t sell or provide proxies. It\'s free, needs no account and has no servers of its own: your profiles stay on this phone.</string>
+
+    <!-- A2: how it works, the limits, and the VPN permission Android asks for at the first connection. -->
+    <string name="how_title">How ProxyFlow works</string>
+    <string name="how_flow">Your apps → ProxyFlow → your proxy → the internet</string>
+    <string name="how_flow_description">Your apps\' connections go to ProxyFlow, then to your proxy, then to the internet.</string>
+    <string name="how_while_connected">While connected</string>
+    <string name="how_tcp">Websites and most apps (TCP)</string>
+    <string name="how_tcp_outcome">Through your proxy</string>
+    <string name="how_dns">Website names (DNS)</string>
+    <string name="how_dns_outcome">Looked up by your proxy</string>
+    <string name="how_udp">Calls, some games, ping (UDP, ICMP)</string>
+    <string name="how_udp_outcome">Blocked</string>
+    <string name="how_local">Printers, casting, local devices</string>
+    <string name="how_local_outcome">Not reachable</string>
+    <string name="how_never_around">Blocked traffic is never sent around your proxy. Video calls usually switch to TCP; apps that can\'t won\'t work while connected. Ping isn\'t answered.</string>
+    <string name="how_provider">Your proxy provider can see which sites you connect to and any unencrypted data. Choose one you trust.</string>
+    <string name="how_vpn_title">The VPN permission</string>
+    <string name="how_vpn_body">To send apps\' traffic to your proxy, ProxyFlow uses Android\'s VPN feature. The first time you connect, Android asks you to allow it. There is no VPN server: traffic goes from this phone to your proxy. While connected, Android shows a key icon, and only one VPN app can be on at a time.</string>
+    <string name="how_outside">Some of Android\'s own traffic, apps in a work profile and tethered devices don\'t use the VPN. About &amp; privacy has the details.</string>
+
+    <!-- A3 (Android 13+): the status notification. -->
+    <string name="onboarding_notifications_title">Show connection status?</string>
+    <string name="onboarding_notifications_body">A notification shows whether your traffic is going through your proxy and lets you disconnect in one tap. You can change this later in Settings.</string>
+    <string name="onboarding_notifications_allow">Allow notifications</string>
+    <string name="onboarding_notifications_not_now">Not now</string>
+</resources>

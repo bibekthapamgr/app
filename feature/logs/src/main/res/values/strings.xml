@@ -3,10 +3,19 @@
     <!-- Logs (boards F1–F3, ADR-0012). What the log keeps and never keeps is stated where it is read. -->
     <string name="logs_title">Logs</string>
     <string name="logs_empty_title">No events yet</string>
-    <string name="logs_empty_body">Connection events and errors will appear here. Logs stay on this phone for 24 hours and never include passwords, server or site names, or page content.</string>
+    <!-- %1$s: how long the log keeps an entry, as the user set it in Settings ("24 hours", logs_retention_*). -->
+    <string name="logs_empty_body">Connection events and errors will appear here. Logs stay on this phone for %1$s and never include passwords, server or site names, or page content.</string>
     <string name="logs_no_match_title">No matching events</string>
     <string name="logs_no_match_body">Try another filter, or search for something else.</string>
-    <string name="logs_kept">Kept on this phone for 24 hours, at most 5,000 events. Never includes passwords, server or site names, addresses or page content.</string>
+    <string name="logs_kept">Kept on this phone for %1$s, at most 5,000 events. Never includes passwords, server or site names, addresses or page content.</string>
+    <plurals name="logs_retention_hours">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
+    <plurals name="logs_retention_days">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
     <string name="logs_level_info">Info</string>
     <string name="logs_level_warning">Warning</string>
     <string name="logs_level_error">Error</string>

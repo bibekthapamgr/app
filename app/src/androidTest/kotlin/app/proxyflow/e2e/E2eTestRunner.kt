@@ -11,6 +11,7 @@ import java.security.KeyStore
 import java.security.cert.X509Certificate
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
+import kotlinx.coroutines.runBlocking
 
 /**
  * The app's instrumentation runner (app/build.gradle.kts). The app under test is the app as
@@ -26,6 +27,12 @@ class E2eTestRunner : AndroidJUnitRunner() {
 
 class TestProxyFlowApplication : ProxyFlowApplication() {
     override fun createContainer(): AppContainer = AppContainer(this, proxyTrust = TestTrust::trustManager, retry = { TestRetry.policy })
+
+    /** The end-to-end tests start at Home, as for a user who has used the app before: the first-launch pages are done. */
+    override fun onCreate() {
+        super.onCreate()
+        runBlocking { container.settingsRepository.setOnboardingCompleted() }
+    }
 }
 
 /** How the app reconnects on its own during a test (ADR-0012). */

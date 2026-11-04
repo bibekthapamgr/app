@@ -23,12 +23,14 @@ fun NavGraphBuilder.settingsScreen(
     viewModelFactory: ViewModelProvider.Factory,
     onOpenAbout: () -> Unit,
     onOpenKillSwitchGuide: () -> Unit = {},
+    onOpenHelp: () -> Unit = {},
 ) {
     composable<SettingsDestination> {
         SettingsRoute(
             viewModel = viewModel(factory = viewModelFactory),
             onOpenAbout = onOpenAbout,
             onOpenKillSwitchGuide = onOpenKillSwitchGuide,
+            onOpenHelp = onOpenHelp,
         )
     }
 }

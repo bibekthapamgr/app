@@ -1,11 +1,8 @@
 package app.proxyflow.feature.home
 
-import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,7 +40,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.proxyflow.core.designsystem.component.BannerTone
@@ -104,6 +100,8 @@ data class HomeActions(
     val onOpenVpnSettings: () -> Unit = {},
     /** The notice that ProxyFlow was stopped while connected, acknowledged (M8). */
     val onDismissInterruption: () -> Unit = {},
+    /** "Learn more" for a certificate the phone doesn't trust (catalogue: TLS_UNTRUSTED): Help's topic on certificates (M9). */
+    val onLearnAboutCertificates: () -> Unit = {},
 )
 
 @Composable
@@ -114,6 +112,7 @@ internal fun HomeRoute(
     onEditProfile: (String) -> Unit,
     onOpenLogs: () -> Unit,
     onOpenKillSwitchGuide: () -> Unit = {},
+    onLearnAboutCertificates: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -125,18 +124,9 @@ internal fun HomeRoute(
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         viewModel.onConsentResult(result.resultCode == Activity.RESULT_OK)
     }
-    // Asked once per app run at Connect on Android 13+; the VPN works without it (ADR-0010 §10).
-    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { viewModel.connect() }
-    val connect = {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-            viewModel.takeNotificationRequest()
-        ) {
-            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            viewModel.connect()
-        }
-    }
+    // The notification permission is asked once, at first launch (A3), and Settings turns it on later (M9, ADR-0014):
+    // Connect never asks again. The VPN works without it (ADR-0010 §10).
+    val connect = viewModel::connect
     val connection = (state as? HomeUiState.Ready)?.connection
     // The connected timer and the wait before the next attempt (B5) tick on whole seconds, only while shown.
     val ticking = connection?.status == ConnectionStatus.Connected || connection?.reconnect?.nextAttemptAtMillis != null
@@ -187,6 +177,7 @@ internal fun HomeRoute(
                 openVpnSettings(context)
             },
             onDismissInterruption = viewModel::dismissInterruption,
+            onLearnAboutCertificates = onLearnAboutCertificates,
         ),
     )
 }
@@ -646,7 +637,8 @@ private fun BlockedContent(state: HomeUiState.Ready, actions: HomeActions) {
 /**
  * The way out of [error] first (docs/m1/04 §4): the profile for a refused sign-in, a certificate,
  * the protocol or the proxy's name, otherwise trying again; a certificate that reads as expired also
- * offers the phone's date and time, which is often what is wrong.
+ * offers the phone's date and time, which is often what is wrong, and one the phone doesn't trust or that
+ * names another server, Help's topic on certificates (M9).
  */
 @Composable
 private fun FixActions(error: ConnectionError, profile: ProxyProfile, actions: HomeActions) {
@@ -664,6 +656,9 @@ private fun FixActions(error: ConnectionError, profile: ProxyProfile, actions: H
     }
     if (error.code == "TLS_EXPIRED") {
         PfTextButton(text = stringResource(R.string.home_date_settings), onClick = actions.onOpenDateSettings, modifier = wide)
+    }
+    if (error.code == "TLS_UNTRUSTED" || error.code == "TLS_HOSTNAME") {
+        PfTextButton(text = stringResource(R.string.home_learn_more), onClick = actions.onLearnAboutCertificates, modifier = wide)
     }
 }
 

@@ -60,7 +60,10 @@ class CopyClaimsTest {
     @Test
     fun everyModuleWithStringsIsRead() {
         val modules = strings.keys.map { it.substringBefore("/src/") }.toSet()
-        assertTrue("found $modules", modules.containsAll(listOf("app", "feature/home", "feature/profiles", "feature/about", "core/vpn")))
+        assertTrue(
+            "found $modules",
+            modules.containsAll(listOf("app", "feature/home", "feature/profiles", "feature/about", "feature/onboarding", "core/vpn")),
+        )
     }
 
     @Test
@@ -110,6 +113,18 @@ class CopyClaimsTest {
             "guide_not_restarted" to listOf("may not start it again", "stay offline"),
             "guide_system_traffic" to listOf("outside any VPN"),
             "settings_kill_switch_never" to listOf("only while it's connected"),
+            // M9: the first-launch pages say the limits before anything can connect (docs/m1/03 J1), and the privacy
+            // policy what is kept, what is sent where, and that nothing goes to the developer.
+            "how_udp" to listOf("UDP", "ping"),
+            "how_never_around" to listOf("never sent around your proxy", "Ping isn't answered"),
+            "how_provider" to listOf("can see which sites"),
+            "how_vpn_body" to listOf("no VPN server", "key icon", "only one VPN app"),
+            "onboarding_no_proxies" to listOf("doesn't sell or provide proxies"),
+            "privacy_stored_log" to listOf("never includes passwords, server or site names"),
+            "privacy_stored_backup" to listOf("backups"),
+            "privacy_sent_check" to listOf("connectivitycheck.gstatic.com"),
+            "privacy_sent_nothing" to listOf("Nothing is sent to ProxyFlow's developer"),
+            "privacy_android_outside" to listOf("doesn't use the VPN"),
         )
         val missing = required.flatMap { (name, needles) -> needles.filterNot { it in text(name) }.map { "$name lacks \"$it\"" } }
         assertEquals(missing.joinToString("\n"), emptyList<String>(), missing)
