@@ -11,6 +11,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -991,9 +993,10 @@ private fun countOrNull(@PluralsRes plural: Int, value: Long): String? = if (val
 
 /**
  * Board B8: the saved profiles, the one Home shows marked, each with its last test (board C2's line). Picking one makes it
- * Home's; while connected, the connection switches to it (J11), which the sheet says before anything is picked.
+ * Home's. Home offers it while disconnected; when a connection starts with the sheet open (Always-on VPN, the Quick
+ * Settings tile), picking switches the connection to it (J11), which the sheet then says before anything is picked.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ProfilePicker(state: HomeUiState.Ready, actions: HomeActions, nowMillis: Long) {
     ModalBottomSheet(onDismissRequest = actions.onDismissPicker, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
@@ -1028,7 +1031,8 @@ private fun ProfilePicker(state: HomeUiState.Ready, actions: HomeActions, nowMil
                     )
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            // Wraps at large font sizes on a narrow phone rather than squeezing either button.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 PfTextButton(text = stringResource(R.string.home_add_proxy), onClick = actions.onAddProxy)
                 PfTextButton(text = stringResource(R.string.home_picker_manage), onClick = actions.onManageProfiles)
             }

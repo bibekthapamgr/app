@@ -1,5 +1,6 @@
 package app.proxyflow.feature.about
 
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.navigation.NavController
 import androidx.navigation.NavGraphBuilder
@@ -75,8 +76,12 @@ fun NavGraphBuilder.helpScreen(onBack: () -> Unit, onOpenKillSwitchGuide: () -> 
 }
 
 fun NavGraphBuilder.licencesScreen(onBack: () -> Unit, onOpenLicence: (String) -> Unit) {
-    composable<LicencesDestination> {
-        LicencesRoute(onBack = dropUnlessResumed(block = onBack), onOpenLicence = onOpenLicence)
+    composable<LicencesDestination> { entry ->
+        LicencesRoute(
+            onBack = dropUnlessResumed(block = onBack),
+            // As dropUnlessResumed does, for a callback with an argument: a second tap while a licence opens does nothing.
+            onOpenLicence = { id -> if (entry.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) onOpenLicence(id) },
+        )
     }
 }
 

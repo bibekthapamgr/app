@@ -296,6 +296,61 @@ class VpnSessionTest {
         assertEquals("another profile's connection is left alone", 1, log.count("probe"))
     }
 
+    /**
+     * Board B8 and Profiles' "Use this proxy" (M9): picking another profile switches only a connection that exists when the
+     * session gets to it, and a Stop asked before the pick is never undone by it.
+     */
+    @Test
+    fun pickingAnotherProfileSwitchesOnlyAConnectionThatExists() {
+        val first = save(name = "Tokyo")
+        val second = save(name = "Office")
+        session.switchIfActive(second.id)
+        runBlocking { session.awaitIdle() }
+        assertEquals("nothing runs: picking connects nothing", ConnectionStatus.Disconnected, state.value.status)
+        assertEquals(0, log.count("probe"))
+
+        session.connect(first.id)
+        awaitStatus(ConnectionStatus.Connected)
+        session.switchIfActive(first.id)
+        runBlocking { session.awaitIdle() }
+        assertEquals("its own connection: nothing to switch", 1, log.count("probe"))
+
+        session.switchIfActive(second.id)
+        eventually("switched") { state.value.profileId == second.id && state.value.status == ConnectionStatus.Connected }
+        assertEquals("one interface for the whole connection", 1, log.count("establish"))
+
+        session.disconnect()
+        session.switchIfActive(first.id)
+        awaitStatus(ConnectionStatus.Disconnected)
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Disconnected, state.value.status)
+        assertEquals("the pick after the Stop started nothing", 2, log.count("probe"))
+    }
+
+    /**
+     * The Quick Settings tile (M9): its tap disconnects only a connection still Connected when the session gets to it;
+     * held or blocked traffic is left to Home's Stop, which asks first.
+     */
+    @Test
+    fun theTilesDisconnectEndsOnlyAConnectedConnection() {
+        val profile = save()
+        session.connect(profile.id)
+        awaitStatus(ConnectionStatus.Connected)
+        engine.failure!!(ConnectionError(ConnectionError.ENGINE_STOPPED, "reading the TUN interface failed"))
+        awaitStatus(ConnectionStatus.Blocked)
+
+        session.disconnectIfConnected()
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Blocked, state.value.status)
+        assertFalse("traffic stays held", host.tuns.single().closed)
+
+        session.restart()
+        awaitStatus(ConnectionStatus.Connected)
+        session.disconnectIfConnected()
+        awaitStatus(ConnectionStatus.Disconnected)
+        assertTrue(host.tuns.single().closed)
+    }
+
     @Test
     fun aFailedSwitchKeepsTrafficBlockedUntilRestartOrStop() {
         val first = save(name = "Tokyo")

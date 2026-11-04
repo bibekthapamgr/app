@@ -6,25 +6,31 @@ import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import android.util.Log
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ProxyProfile
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
 
 /**
- * The Quick Settings tile (board B11, M9, ADR-0014), only Android can bind it (BIND_QUICK_SETTINGS_TILE). On while a
- * connection exists, off while apps use the normal network ([QuickTile]). A tap connects the profile Home shows, as
+ * The Quick Settings tile (board B11, M9, ADR-0014), only Android can bind it (BIND_QUICK_SETTINGS_TILE). On while
+ * ProxyFlow connects or a connection exists, off otherwise ([QuickTile]). A tap connects the profile Home shows, as
  * Home's Connect does, or disconnects; anything that needs Android's consent screen or a confirmation opens Home
  * instead. On a locked phone the tile names no profile and a tap asks to unlock first, so nobody can turn the VPN off
  * from the lock screen. A long press opens Home (MainActivity's QS_TILE_PREFERENCES filter).
  */
 class ProxyFlowTileService : TileService() {
-    private val scope = MainScope()
+    // A failure reading the profiles (storage, the Keystore) must not take down the process the VPN runs in.
+    private val scope = MainScope() + CoroutineExceptionHandler { _, e -> Log.w(TAG, "tile: ${e.javaClass.simpleName}") }
     private var listening: Job? = null
+    private var shown: Pair<ConnectionState, ProxyProfile?>? = null
 
     private val runtime: VpnRuntime get() = (application as VpnRuntime.Provider).vpnRuntime
 
@@ -32,13 +38,20 @@ class ProxyFlowTileService : TileService() {
         super.onStartListening()
         listening?.cancel()
         listening = scope.launch {
-            combine(runtime.state, runtime.shownProfile) { state, shown -> state to shown }.collect { (state, shown) -> show(state, shown) }
+            combine(runtime.state, runtime.shownProfile) { state, profile -> state to profile }
+                .catch { e -> Log.w(TAG, "tile: the profile can't be read (${e.javaClass.simpleName})") }
+                .collect { (state, profile) ->
+                    shown = state to profile
+                    show(state, profile, isLocked)
+                }
         }
     }
 
     override fun onStopListening() {
         listening?.cancel()
         listening = null
+        // Android keeps showing the tile as last drawn, the lock screen too, until it listens again: drawn without a name.
+        shown?.let { (state, profile) -> show(state, profile, locked = true) }
         super.onStopListening()
     }
 
@@ -54,19 +67,21 @@ class ProxyFlowTileService : TileService() {
 
     private fun act() {
         scope.launch {
+            val profile = runtime.shownProfile.first()
+            // Read after the profile, which may wait on storage: what the tap acts on is the state as it is now.
             val state = runtime.state.value
-            val shown = runtime.shownProfile.first()
-            when (QuickTile.tap(state, hasProfile = shown != null, consentNeeded = runtime.consentIntent() != null)) {
-                QuickTile.Tap.Connect -> shown?.let { runtime.connectChosen(it.id) }
-                QuickTile.Tap.Disconnect -> runtime.controller.disconnect()
+            when (QuickTile.tap(state, hasProfile = profile != null, consentNeeded = runtime.consentIntent() != null)) {
+                QuickTile.Tap.Connect -> profile?.let { runtime.connectChosen(it.id) }
+                // Only while still Connected when the session gets to it: held traffic is left to Home's Stop.
+                QuickTile.Tap.Disconnect -> runtime.controller.disconnectIfConnected()
                 QuickTile.Tap.OpenApp -> openApp()
             }
         }
     }
 
-    private fun show(state: ConnectionState, shown: ProxyProfile?) {
+    private fun show(state: ConnectionState, profile: ProxyProfile?, locked: Boolean) {
         val tile = qsTile ?: return
-        val content = QuickTile.content(state, shown?.displayName, isLocked)
+        val content = QuickTile.content(state, profile, locked)
         val line = when (content.line) {
             QuickTile.Line.Profile -> content.profileName.orEmpty()
             QuickTile.Line.Connected -> getString(R.string.tile_connected)
@@ -79,8 +94,8 @@ class ProxyFlowTileService : TileService() {
         }
         tile.state = when (content.look) {
             QuickTile.Look.On -> Tile.STATE_ACTIVE
+            // Never unavailable: Android delivers no tap to an unavailable tile, and "Add a proxy first" opens Home.
             QuickTile.Look.Off -> Tile.STATE_INACTIVE
-            QuickTile.Look.Unavailable -> Tile.STATE_UNAVAILABLE
         }
         tile.label = getString(R.string.tile_label)
         tile.subtitle = line
@@ -110,4 +125,8 @@ class ProxyFlowTileService : TileService() {
     @Suppress("DEPRECATION")
     @SuppressLint("StartActivityAndCollapseDeprecated")
     private fun startWithIntent(intent: Intent) = startActivityAndCollapse(intent)
+
+    private companion object {
+        const val TAG = "ProxyFlowTile"
+    }
 }

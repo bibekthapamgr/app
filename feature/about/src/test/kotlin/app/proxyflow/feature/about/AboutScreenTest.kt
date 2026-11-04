@@ -74,7 +74,8 @@ class AboutScreenTest {
             "None of this is included in backups",
             "sent only to that profile's proxy",
             "connectivitycheck.gstatic.com on port 443",
-            "Nothing is sent to ProxyFlow's developer",
+            "ProxyFlow itself sends nothing to its developer",
+            "Google may show them to ProxyFlow's developer",
             "Profile names are hidden on the lock screen",
             "This policy describes ProxyFlow version 0.9.0 (9).",
         )) {

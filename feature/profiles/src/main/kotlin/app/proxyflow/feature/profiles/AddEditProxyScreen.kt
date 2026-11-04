@@ -31,6 +31,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.proxyflow.core.designsystem.component.BannerTone
@@ -106,14 +109,15 @@ data class AddEditActions(
 @Composable
 fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier: Modifier = Modifier) {
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    // While saving, Back waits: what is being saved, and a reconnect it was confirmed with (D9), goes through whole.
     val back: () -> Unit = {
-        if (state.dirty) {
-            confirmDiscard = true
-        } else {
-            actions.onBack()
+        when {
+            state.saving -> Unit
+            state.dirty -> confirmDiscard = true
+            else -> actions.onBack()
         }
     }
-    BackHandler(enabled = state.dirty, onBack = { confirmDiscard = true })
+    BackHandler(enabled = state.dirty || state.saving, onBack = { if (!state.saving) confirmDiscard = true })
 
     val title = stringResource(if (state.isEdit) R.string.edit_title_edit else R.string.edit_title_add)
     val scrollState = rememberScrollState()
@@ -342,49 +346,67 @@ private fun TestConnection(test: ConnectionTestState, onTest: () -> Unit, onCanc
             enabled = test != ConnectionTestState.Testing,
             modifier = Modifier.fillMaxWidth(),
         )
-        when (test) {
-            ConnectionTestState.Idle -> Unit
-            ConnectionTestState.Testing -> {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    PfLoadingIndicator(Modifier.size(Spacing.lg))
-                    Text(
-                        stringResource(R.string.edit_test_running),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    PfTextButton(text = stringResource(R.string.edit_test_cancel), onClick = onCancel)
-                }
+        // What the test found is announced (TalkBack) when it ends: it can take 15 s, and the user waits for it.
+        Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            TestOutcome(test, onCancel)
+        }
+    }
+}
+
+@Composable
+private fun TestOutcome(test: ConnectionTestState, onCancel: () -> Unit) {
+    when (test) {
+        ConnectionTestState.Idle -> Unit
+        ConnectionTestState.Testing -> {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PfLoadingIndicator(Modifier.size(Spacing.lg))
                 Text(
-                    stringResource(R.string.edit_test_running_note),
-                    style = MaterialTheme.typography.bodySmall,
+                    stringResource(R.string.edit_test_running),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                PfTextButton(text = stringResource(R.string.edit_test_cancel), onClick = onCancel)
+            }
+            Text(
+                stringResource(R.string.edit_test_running_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        is ConnectionTestState.Done -> when (val result = test.result) {
+            is ConnectionTestResult.Passed -> PfBanner(
+                title = stringResource(R.string.edit_test_passed_title),
+                text = stringResource(R.string.edit_test_passed_body, result.latencyMillis),
+                tone = BannerTone.Success,
+            )
+            is ConnectionTestResult.Failed -> if (!result.fromEngine && result.code == AUTH_REQUIRED) {
+                // Found before any proxy was asked (ADR-0014 §2): nothing was sent, so not worded as the proxy's answer.
+                PfBanner(
+                    title = stringResource(R.string.edit_test_needs_password_title),
+                    text = stringResource(R.string.edit_test_needs_password_body),
+                    tone = BannerTone.Warning,
+                )
+            } else {
+                PfBanner(
+                    title = stringResource(R.string.edit_test_failed_title, proxyCheckErrorTitle(result.error, test.tested)),
+                    text = proxyCheckErrorMessage(result.error, test.tested),
+                    tone = BannerTone.Error,
+                )
+                Text(
+                    stringResource(R.string.edit_test_code, listOfNotNull(result.code, result.error.detail).joinToString(" · ")),
+                    style = MonoSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-            is ConnectionTestState.Done -> when (val result = test.result) {
-                is ConnectionTestResult.Passed -> PfBanner(
-                    title = stringResource(R.string.edit_test_passed_title),
-                    text = stringResource(R.string.edit_test_passed_body, result.latencyMillis),
-                    tone = BannerTone.Success,
-                )
-                is ConnectionTestResult.Failed -> {
-                    PfBanner(
-                        title = stringResource(R.string.edit_test_failed_title, proxyCheckErrorTitle(result.error, test.tested)),
-                        text = proxyCheckErrorMessage(result.error, test.tested),
-                        tone = BannerTone.Error,
-                    )
-                    Text(
-                        stringResource(R.string.edit_test_code, listOfNotNull(result.code, result.error.detail).joinToString(" · ")),
-                        style = MonoSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
         }
     }
 }
+
+/** The catalogue's code for a sign-in the proxy needs; also what the tester says when it has no password to send. */
+private const val AUTH_REQUIRED = "AUTH_REQUIRED"
 
 /**
  * Keeps credentials out of screenshots, screen recordings and the recents

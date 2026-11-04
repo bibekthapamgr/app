@@ -20,6 +20,10 @@
     <string name="profiles_disconnect_delete_title">Disconnect and delete \"%1$s\"?</string>
     <string name="profiles_disconnect_delete_body">ProxyFlow is using this proxy. Deleting it ends the connection first: apps then use your normal network unless Android\'s system kill switch is on.</string>
     <string name="profiles_cancel">Cancel</string>
+    <string name="profiles_switch_title">Switch to \"%1$s\"?</string>
+    <!-- %1$s: the profile the connection uses now; %2$s: the one the user chose. -->
+    <string name="profiles_switch_body">ProxyFlow is using %1$s. Switching ends its open connections, and apps can\'t go online until ProxyFlow is connected through %2$s. Nothing is sent around a proxy meanwhile.</string>
+    <string name="profiles_switch_confirm">Switch</string>
     <string name="profiles_duplicate">Duplicate</string>
     <!-- Board C2's menu: tests the saved profile as connecting would (J3, ADR-0014). -->
     <string name="profiles_test">Test</string>
@@ -63,6 +67,9 @@
     <!-- Board D7. %1$s: the error catalogue's title, the one connecting shows for the same failure. -->
     <string name="edit_test_failed_title">Test failed: %1$s</string>
     <string name="edit_test_code">Code: %1$s</string>
+    <!-- Found before any proxy was asked (ADR-0014 §2): nothing was sent. -->
+    <string name="edit_test_needs_password_title">Enter the password to test</string>
+    <string name="edit_test_needs_password_body">Nothing was sent. A saved password goes only with its own username to its own server, so a new profile, or a changed server or username, needs the password typed in to be tested.</string>
     <string name="edit_password_reenter">Enter the password again: the server, port, protocol, username or TLS setting changed</string>
     <string name="edit_tls">TLS to the proxy</string>
     <string name="edit_tls_hint">Recommended. Encrypts the connection between this phone and your proxy, which must support TLS on this port. HTTPS sites stay encrypted end to end either way.</string>
@@ -96,6 +103,6 @@
     <string name="error_tls_server_name">Enter a valid server name or leave empty</string>
     <!-- Board D9 (J11): saving changes to the profile a connection runs on. %1$s: the profile's name. -->
     <string name="edit_reconnect_title">Reconnect with changes?</string>
-    <string name="edit_reconnect_body">You\'re connected through %1$s. Saving reconnects with the new settings: open connections close and apps wait until ProxyFlow is connected again. If the new settings don\'t work, apps stay offline until you fix them or disconnect. Nothing is sent around your proxy.</string>
+    <string name="edit_reconnect_body">ProxyFlow is using %1$s. Saving reconnects with the new settings: open connections close and apps wait until ProxyFlow is connected again. If the new settings don\'t work, apps stay offline until you fix them or disconnect. Nothing is sent around your proxy.</string>
     <string name="edit_reconnect_confirm">Save and reconnect</string>
 </resources>

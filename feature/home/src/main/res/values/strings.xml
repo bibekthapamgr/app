@@ -171,15 +171,14 @@
     <string name="home_error_vpn_permission_message">ProxyFlow can\'t send your apps\' traffic to your proxy without Android\'s VPN permission. Nothing was changed on your phone.</string>
     <string name="home_not_now">Not now</string>
 
-    <!-- Error catalogue (docs/m1/04-ux-screens-and-error-states.md §4) -->
-    <!-- The catalogue's Digest variant: an HTTP proxy offering only sign-in methods ProxyFlow lacks. -->
+    <!-- Error catalogue (docs/m1/04-ux-screens-and-error-states.md §4); the proxy's own errors are worded in
+         core/designsystem (ProxyErrors.kt), shared with the profile tests. -->
+    <!-- TLS_EXPIRED: the phone's date is often what is wrong. -->
     <string name="home_date_settings">Date &amp; time settings</string>
     <!-- M9: Help's topic on certificates (TLS_UNTRUSTED, TLS_HOSTNAME). -->
     <string name="home_learn_more">Learn more about certificates</string>
-    <!-- The catalogue's 405/501 variant. -->
     <string name="home_error_engine_stopped_title">ProxyFlow stopped unexpectedly</string>
     <string name="home_error_engine_stopped_message">The packet engine stopped while connected. Traffic stays blocked until you restart it or disconnect.</string>
-    <!-- The pre-flight check's destination-level failures (ADR-0010 §4): the proxy works, but refused or failed the test connection. -->
     <string name="home_error_profile_deleted_title">Profile deleted</string>
     <string name="home_error_profile_deleted_message">The profile this connection used was deleted, so its proxy isn\'t used any more. Traffic stays blocked until you stop the connection.</string>
 
@@ -232,8 +231,9 @@
     <!-- M8: Android started ProxyFlow as Always-on VPN, but no proxy is chosen. -->
     <string name="home_error_always_on_no_profile_title">Choose a proxy for Always-on VPN</string>
     <string name="home_error_always_on_no_profile_message">Android started ProxyFlow as your Always-on VPN, but no proxy was chosen, so ProxyFlow didn\'t connect. Connect once with the proxy Always-on VPN should use.</string>
-    <!-- Board B8, the profile picker; picking one while connected switches the connection to it (J11, ADR-0010 §5). -->
+    <!-- Board B8, the profile picker; picking one while a connection runs (one that started while the picker was open:
+         Always-on VPN, the Quick Settings tile) switches the connection to it (J11, ADR-0010 §5). -->
     <string name="home_picker_title">Choose proxy</string>
-    <string name="home_picker_switch_note">ProxyFlow is connected. Choosing another proxy reconnects through it: open connections end, and apps can\'t go online until it\'s connected. Nothing is sent around a proxy meanwhile.</string>
+    <string name="home_picker_switch_note">ProxyFlow is using a proxy now. Choosing another one reconnects through it: open connections end, and apps can\'t go online until it\'s connected. Nothing is sent around a proxy meanwhile.</string>
     <string name="home_picker_manage">Manage profiles</string>
 </resources>

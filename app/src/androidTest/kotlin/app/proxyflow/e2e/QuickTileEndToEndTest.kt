@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Test
@@ -20,9 +21,10 @@ import org.junit.runner.RunWith
 
 /**
  * The Quick Settings tile (board B11, M9) on a real Android, tapped through Android's own system UI
- * (`cmd statusbar click-tile`, what a tap on the tile does): a tap connects the active profile through the lab's SOCKS5
- * proxy and makes it the chosen one, as Home's Connect does; a second tap disconnects. Without the VPN consent a tap
- * connects nothing: it opens Home, where Connect asks for it behind the explainer (B9).
+ * (`cmd statusbar click-tile`, what a tap on the tile does) with the panel open, as a person taps it: a tap connects the
+ * profile Home shows through the lab's SOCKS5 proxy and makes it the chosen one, as Home's Connect does; a second tap
+ * disconnects. Without the VPN consent a tap connects nothing: it opens Home, where Connect asks for it behind the
+ * explainer (B9).
  */
 @RunWith(AndroidJUnit4::class)
 class QuickTileEndToEndTest {
@@ -49,8 +51,8 @@ class QuickTileEndToEndTest {
 
     @After
     fun tearDown() {
-        Shell.run("cmd statusbar remove-tile $tile")
         Shell.run("cmd statusbar collapse")
+        Shell.run("cmd statusbar remove-tile $tile")
         Shell.run("input keyevent KEYCODE_HOME")
         app.setVpnConsent(allowed = true)
         app.disconnectAndSettle()
@@ -60,7 +62,9 @@ class QuickTileEndToEndTest {
     @Test(timeout = TEST_TIMEOUT_MS)
     fun aTapConnectsTheActiveProfileAndAnotherDisconnects() {
         val profile = socks()
+        assertNull("saved, not chosen: Home shows it as the only one", runBlocking { app.profiles.chosenProfileId.first() })
 
+        openQuickSettings()
         Shell.run("cmd statusbar click-tile $tile")
         val connected = app.awaitStatus(ConnectionStatus.Connected)
         assertEquals(profile.id, connected.profileId)
@@ -79,6 +83,7 @@ class QuickTileEndToEndTest {
         socks()
         app.setVpnConsent(allowed = false)
 
+        openQuickSettings()
         Shell.run("cmd statusbar click-tile $tile")
         eventually("Home opened from the tile", diagnose = { Shell.run("dumpsys activity activities") }) {
             Shell.run("dumpsys activity activities").lines().any { "ResumedActivity" in it && "MainActivity" in it }
@@ -86,14 +91,31 @@ class QuickTileEndToEndTest {
         assertEquals(ConnectionStatus.Disconnected, app.controller.state.value.status)
     }
 
-    private fun socks(): ProxyProfile {
-        val profile = app.save("Tile", ProxyProtocol.SOCKS5, env.proxyHost, env.socksPort, env.socksUser, env.socksPassword)
-        runBlocking { app.profiles.setActive(profile.id) }
-        return profile
+    /** The only profile, saved and not chosen: the one Home shows, which the tile connects. */
+    private fun socks(): ProxyProfile =
+        app.save("Tile", ProxyProtocol.SOCKS5, env.proxyHost, env.socksPort, env.socksUser, env.socksPassword)
+
+    /**
+     * Opens Quick Settings and waits until Android has bound the tile to show it. Android delivers a tap only to a tile
+     * that is listening — on a phone the panel is open whenever its tiles can be tapped — and drops one sent to a tile
+     * that isn't. The bind Android makes only to tell the service it was added ends at once; the one for an open panel
+     * lasts while the panel is open, so the tile must stay bound for a while.
+     */
+    private fun openQuickSettings() {
+        Shell.run("cmd statusbar expand-settings")
+        val services = { Shell.run("dumpsys activity services $tile") }
+        eventually("Android bound the tile for the open panel", timeoutMillis = BIND_TIMEOUT_MS, diagnose = services) {
+            "ServiceRecord" in services() && run {
+                Thread.sleep(BOUND_FOR_MS)
+                "ServiceRecord" in services()
+            }
+        }
     }
 
     private companion object {
         const val TEST_TIMEOUT_MS = 120_000L
+        const val BIND_TIMEOUT_MS = 30_000L
+        const val BOUND_FOR_MS = 2_000L
         const val TAG = "ProxyFlowE2E"
     }
 }

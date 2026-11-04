@@ -188,6 +188,29 @@ class SettingsScreenTest {
         compose.onNodeWithText("Clear the log?").assertDoesNotExist()
     }
 
+    /** What Clear did is said once: done, or that the log stays as it was. */
+    @Test
+    fun aClearsOutcomeIsSaidOnce() {
+        var state by mutableStateOf(SettingsUiState(loading = false, cleared = LogsCleared.Done))
+        var shown = 0
+        compose.setContent {
+            ProxyFlowTheme {
+                SettingsScreen(state, onThemeChange = {}, onOpenAbout = {}, onClearShown = {
+                    shown++
+                    state = state.copy(cleared = null)
+                })
+            }
+        }
+        compose.onNodeWithText("Logs cleared").assertIsDisplayed()
+        assertEquals(0, shown)
+        compose.mainClock.advanceTimeBy(10_000) // past the message's display time
+        compose.waitForIdle()
+        assertEquals(1, shown)
+
+        state = state.copy(cleared = LogsCleared.Failed)
+        compose.onNodeWithText("Couldn't clear the logs. Try again.").assertIsDisplayed()
+    }
+
     /** Board E1b (M9): whether Android lets ProxyFlow show its status notification, and the way to Android's setting. */
     @Test
     fun statusNotificationsSayWhetherTheyAreOnAndOpenAndroidsSetting() {

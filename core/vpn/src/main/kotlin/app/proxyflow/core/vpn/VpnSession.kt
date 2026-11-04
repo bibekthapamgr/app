@@ -247,6 +247,19 @@ class VpnSession(
      */
     fun reconnect(profileId: String) = send(Event.Reconnect(profileId))
 
+    /**
+     * The user picked [profileId] (board B8, "Use this proxy"): while a connection exists for another profile it switches
+     * to [profileId] (J11, as [connect] does); without one, nothing starts. Decided in order with every other event, so a
+     * Disconnect sent before it is never undone.
+     */
+    fun switchIfActive(profileId: String) = send(Event.SwitchIfActive(profileId))
+
+    /**
+     * Disconnects only while Connected when the session gets to it (the Quick Settings tile): held or blocked traffic is
+     * left to Home's Stop, which asks first.
+     */
+    fun disconnectIfConnected() = send(Event.DisconnectIfConnected)
+
     /** Disconnects, cancels a connection being set up or a reconnection, or stops a blocked one. */
     fun disconnect() = send(Event.Disconnect)
 
@@ -323,6 +336,8 @@ class VpnSession(
                 is Event.Connect -> onConnect(event.profileId)
                 Event.Restart -> onRestart()
                 is Event.Reconnect -> onReconnect(event.profileId)
+                is Event.SwitchIfActive -> onSwitchIfActive(event.profileId)
+                Event.DisconnectIfConnected -> if (state.value.status == ConnectionStatus.Connected) onDisconnect()
                 Event.Disconnect -> onDisconnect()
                 Event.ClearError -> if (state.value.status == ConnectionStatus.Disconnected) publish(state.value.copy(error = null))
                 Event.RetryNow -> onRetryNow()
@@ -374,6 +389,11 @@ class VpnSession(
     private suspend fun onReconnect(profileId: String) {
         val current = state.value
         if (current.active && current.profileId == profileId) beginConnect(profileId)
+    }
+
+    private suspend fun onSwitchIfActive(profileId: String) {
+        val current = state.value
+        if (current.active && current.profileId != profileId) beginConnect(profileId)
     }
 
     private fun onDisconnect() {
@@ -1422,6 +1442,10 @@ class VpnSession(
         data object Restart : Event
 
         data class Reconnect(val profileId: String) : Event
+
+        data class SwitchIfActive(val profileId: String) : Event
+
+        data object DisconnectIfConnected : Event
 
         data object Disconnect : Event
 

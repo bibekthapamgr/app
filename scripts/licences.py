@@ -41,6 +41,8 @@ LICENCES = {
     "BSD-3-Clause-Go": {"title": "BSD 3-Clause License (The Go Authors)", "text": "licences/BSD-3-Clause-Go.txt"},
     # gVisor's LICENSE file as it is at the pinned commit: Apache 2.0, and the MIT and BSD licences some of its files carry.
     "gVisor": {"title": "gVisor licence (Apache License 2.0; some files MIT or BSD)", "text": "licences/gVisor.txt"},
+    # Protocol Buffers' LICENSE file, with Google's copyright line: the Java lite runtime DataStore repackages.
+    "BSD-3-Clause-Protobuf": {"title": "BSD 3-Clause License (Protocol Buffers, Google)", "text": "licences/BSD-3-Clause-Protobuf.txt"},
 }
 
 # How POMs name the licences above (compared lower-case, without punctuation runs), and their URLs.
@@ -72,8 +74,18 @@ GO_MODULES = {
     "gvisor.dev/gvisor": "gVisor",
 }
 
-# group:artifact -> (licence id, why the POM isn't taken as it is). Empty: every POM so far declares its own licence.
-OVERRIDES: dict[str, tuple[str, str]] = {}
+# group:artifact -> (licence id, why the POM isn't taken as it is).
+OVERRIDES: dict[str, tuple[str, str]] = {
+    "androidx.datastore:datastore-preferences-external-protobuf": (
+        "BSD-3-Clause-Protobuf",
+        "Protocol Buffers' Java lite runtime, repackaged inside DataStore: the POM names BSD-3-Clause without its copyright"
+        " holder, so the notice is protobuf's own LICENSE file",
+    ),
+}
+
+# The engine's own module: gomobile links it into libgojni.so as a dependency of the main package it generates, replaced
+# by the local directory ("=> /…/engine (devel)"). ProxyFlow's own code, not a third-party notice.
+OWN_GO_MODULE = "github.com/bibekthapamgr/app/engine"
 
 Fetch = Callable[[str], "bytes | None"]
 
@@ -183,6 +195,7 @@ def go_entries(facts: list[str]) -> tuple[list[dict], list[str]]:
         start = next(i for i, line in enumerate(facts) if line.startswith("MODULES linked into libgojni.so"))
     except StopIteration:
         return entries, problems + ["the engine facts list no modules linked into libgojni.so"]
+    previous: str | None = None
     for line in facts[start + 1:]:
         if not line.startswith("  "):
             break
@@ -191,6 +204,15 @@ def go_entries(facts: list[str]) -> tuple[list[dict], list[str]]:
             problems.append(f"an engine module line that can't be read: {line.strip()}")
             continue
         module, version = parts[0], parts[1]
+        # A "=>" line follows the module it replaces; build-aar.sh prints both the same way.
+        replaced, previous = previous, module
+        if module == OWN_GO_MODULE:
+            continue
+        if module.startswith(("/", ".")):
+            # A module built from a local directory: only the engine's own may be.
+            if replaced != OWN_GO_MODULE:
+                problems.append(f"the engine links {replaced} from the directory {module}, which docs/m4/dependency-review.md hasn't reviewed")
+            continue
         if module not in GO_MODULES:
             problems.append(f"the engine links {module} {version}, which docs/m4/dependency-review.md hasn't reviewed")
             continue

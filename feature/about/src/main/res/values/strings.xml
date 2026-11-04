@@ -43,11 +43,11 @@
     <string name="privacy_sent_traffic">While connected, apps\' TCP connections go to the proxy server in your profile, which connects them to the sites. Your proxy looks up the sites\' names and can see any data that isn\'t encrypted, such as pages that don\'t use HTTPS. Choose a provider you trust.</string>
     <string name="privacy_sent_credentials">A profile\'s username and password are sent only to that profile\'s proxy. With TLS to the proxy they are encrypted; without it, anyone on the network between this phone and the proxy can read them.</string>
     <string name="privacy_sent_lookup">If your proxy\'s address is a name, this phone looks it up through its usual DNS, outside the VPN.</string>
-    <string name="privacy_sent_check">When you connect, and when you test a profile, ProxyFlow asks your proxy to open one connection to connectivitycheck.gstatic.com on port 443, a Google service, and closes it without sending anything through it. Google then sees a connection from your proxy\'s address.</string>
-    <string name="privacy_sent_nothing">Nothing is sent to ProxyFlow\'s developer, who has no servers to receive it: no usage data, crash reports or logs.</string>
+    <string name="privacy_sent_check">Each time ProxyFlow connects or reconnects, including reconnecting by itself and switching to another proxy, and when you test a profile, ProxyFlow asks your proxy to open one connection to connectivitycheck.gstatic.com on port 443, a Google service, and closes it without sending anything through it. Google then sees a connection from your proxy\'s address.</string>
+    <string name="privacy_sent_nothing">ProxyFlow itself sends nothing to its developer, who has no servers to receive it: no usage data, crash reports or logs.</string>
     <string name="privacy_sent_shared">If you copy or export the log, you decide where it goes. It never includes passwords, server or site names, or addresses.</string>
     <string name="privacy_android_title">Android and Google</string>
-    <string name="privacy_android_crash">If your phone shares diagnostics with Google, Android may include ProxyFlow\'s crash reports. ProxyFlow removes sign-in details, server and site names and addresses from the error messages it hands to Android, though Android writes the original message to the phone\'s own log, which other apps can\'t read.</string>
+    <string name="privacy_android_crash">If your phone shares diagnostics with Google, Android may include ProxyFlow\'s crash reports, and Google may show them to ProxyFlow\'s developer, with the phone\'s model and Android version. ProxyFlow removes sign-in details, server and site names and addresses from the error messages it hands to Android, though Android writes the original message to the phone\'s own log, which other apps can\'t read.</string>
     <string name="privacy_android_outside">Some traffic of Android itself and of its built-in apps, such as Google Play services, doesn\'t use the VPN, so it doesn\'t go through your proxy.</string>
     <string name="privacy_permissions_title">Permissions</string>
     <string name="privacy_permission_vpn">VPN: Android asks you the first time you connect. It lets ProxyFlow send apps\' traffic to your proxy.</string>
@@ -72,11 +72,11 @@
     <string name="help_certificates_title">Certificates and TLS to your proxy</string>
     <string name="help_certificates_what">TLS to the proxy encrypts the connection between this phone and your proxy, including your username and password. HTTPS sites stay encrypted end to end with or without it.</string>
     <string name="help_certificates_trusted">With TLS on, the proxy must present a certificate for the name in the profile, issued by an authority that Android trusts. ProxyFlow doesn\'t accept self-signed certificates, certificates you installed yourself, or any way to skip the check.</string>
-    <string name="help_certificates_fix">Certificate not trusted or doesn\'t match: ask your provider which server name to use, and set it in the profile. Certificate expired: check your phone\'s date and time first.</string>
+    <string name="help_certificates_fix">Certificate doesn\'t match: ask your provider which server name its certificate is for, and set it in the profile. Certificate not trusted, such as a self-signed one: ask your provider for a TLS address whose certificate is issued by an authority Android trusts. Certificate expired: check your phone\'s date and time first.</string>
     <string name="help_carry_title">What goes through your proxy</string>
     <string name="help_carry_tcp">Websites and most apps use TCP, which goes through your proxy, and your proxy looks up site names.</string>
-    <string name="help_carry_blocked">UDP is blocked, so calls and some games switch to TCP or don\'t work, and ping isn\'t answered. Printers and other local devices aren\'t reachable while connected.</string>
-    <string name="help_carry_outside">Some of Android\'s own traffic, apps in a work profile, and devices tethered to this phone don\'t use the VPN.</string>
+    <string name="help_carry_blocked">UDP is blocked, so calls and some games switch to TCP or don\'t work, and ping isn\'t answered. Printers and other devices on your local network are reached through your proxy too, so usually not at all.</string>
+    <string name="help_carry_outside">ProxyFlow\'s own connection to your proxy, some of Android\'s own traffic, apps in a work profile, Private space or another user on this phone, and devices tethered to it don\'t use the VPN.</string>
     <string name="help_kill_switch_title">Kill switches</string>
     <string name="help_kill_switch_app">While connected, ProxyFlow holds traffic whenever your proxy isn\'t working: nothing goes around it. This is always on.</string>
     <string name="help_kill_switch_system">If Android stops ProxyFlow, or another VPN takes over, only Android\'s own setting keeps apps offline: Always-on VPN with Block connections without VPN. Only you can turn it on, in Android\'s VPN settings.</string>
@@ -86,7 +86,7 @@
     <string name="help_background_title">When Android stops ProxyFlow</string>
     <string name="help_background_body">To free memory, Android can stop ProxyFlow while it is connected; apps then use your normal network unless Android\'s system kill switch is on. ProxyFlow tells you on Home the next time it starts. It doesn\'t reconnect by itself; if it is your Always-on VPN, Android may start it again, or may not.</string>
     <string name="help_feedback_title">Getting help</string>
-    <string name="help_feedback_body">ProxyFlow has no servers and collects nothing, so problems can only be seen on this phone. Copy the log in Logs and include it when you contact your proxy provider, or ProxyFlow\'s developer through the contact details on its Google Play page.</string>
+    <string name="help_feedback_body">ProxyFlow has no servers and collects nothing itself: what went wrong is in Logs, on this phone. Copy the log in Logs and include it when you contact your proxy provider, or ProxyFlow\'s developer through the contact details on its Google Play page.</string>
     <!-- The open-source notices (M9): generated from what the release build ships (scripts/licences.py). -->
     <string name="licences_title">Open-source licences</string>
     <string name="licences_lead">ProxyFlow is built with these open-source libraries and uses each one under the licence shown. The list is made from the libraries this version of ProxyFlow contains.</string>

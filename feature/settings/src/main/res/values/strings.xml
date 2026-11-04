@@ -48,6 +48,8 @@
     <string name="settings_clear_logs_title">Clear the log?</string>
     <string name="settings_clear_logs_message">This removes every event kept on this phone. It can\'t be undone.</string>
     <string name="settings_clear_logs_confirm">Clear</string>
+    <string name="settings_clear_logs_done">Logs cleared</string>
+    <string name="settings_clear_logs_failed">Couldn\'t clear the logs. Try again.</string>
     <string name="settings_section_app">App</string>
     <!-- M9 (board E1b): Android's own setting, opened from here; the VPN works either way. -->
     <string name="settings_notifications">Status notifications</string>

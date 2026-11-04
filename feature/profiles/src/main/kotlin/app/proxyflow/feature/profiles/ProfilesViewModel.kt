@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.ConnectionTester
 import app.proxyflow.core.data.ProfileRepository
-import app.proxyflow.core.data.switchIfConnected
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileNames
@@ -65,11 +64,13 @@ class ProfilesViewModel(
 
     /**
      * "Use this proxy": [id] becomes the active profile. While a connection runs on another profile it switches to [id],
-     * as picking it on Home does (J11): traffic is held meanwhile, never sent around a proxy.
+     * as picking it on Home does (J11): traffic is held meanwhile, never sent around a proxy. The screen asks first while
+     * a connection runs ([ProfilesUiState.connectedProfileId]). The switch is asked of the session before the choice is
+     * saved, as Home's picker does, so the session decides it in order with what it was asked before.
      */
     fun setActive(id: String) = perform(ProfileAction.Use) {
-        repository.setActive(id)
         connection.switchIfConnected(id)
+        repository.setActive(id)
     }
 
     /**

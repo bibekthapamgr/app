@@ -2,6 +2,7 @@ package app.proxyflow.feature.settings
 
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.InMemoryProtectionStore
+import app.proxyflow.core.data.LogRepository
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.LogEntry
@@ -84,14 +85,33 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun clearingTheLogsEmptiesTheLog() = runTest {
+    fun clearingTheLogsEmptiesTheLogAndSaysSo() = runTest {
         val logs = FakeLogRepository(listOf(LogEntry(timeMillis = 1, level = LogEntry.Level.Info, event = LogEvent.Connected)))
         val vm = SettingsViewModel(FakeSettingsRepository(), InMemoryProtectionStore(), UnavailableConnectionController(), logs)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
 
         vm.clearLogs()
 
         assertTrue(logs.state.value.isEmpty())
         assertEquals("a Clear starts a new generation", 1L, logs.generation)
+        assertEquals(LogsCleared.Done, vm.uiState.value.cleared)
+        vm.onClearShown()
+        assertNull(vm.uiState.value.cleared)
+    }
+
+    /** A log that can't be cleared stays as it was, and the screen says so instead of nothing. */
+    @Test
+    fun aClearThatFailsIsReported() = runTest {
+        val kept = listOf(LogEntry(timeMillis = 1, level = LogEntry.Level.Info, event = LogEvent.Connected))
+        val failing = object : LogRepository by FakeLogRepository(kept) {
+            override suspend fun clear() = throw java.io.IOException("disk full")
+        }
+        val vm = SettingsViewModel(FakeSettingsRepository(), InMemoryProtectionStore(), UnavailableConnectionController(), failing)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
+
+        vm.clearLogs()
+
+        assertEquals(LogsCleared.Failed, vm.uiState.value.cleared)
     }
 
     @Test

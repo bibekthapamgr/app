@@ -28,14 +28,16 @@ import app.proxyflow.core.model.ProxyProfile
 /**
  * A profile's last connection test as boards C2 and B8 show it (M9, ADR-0014): "Works · 182 ms · tested 2 min ago", a
  * failure in the error catalogue's words with when it happened, "Not tested yet", or the test running now — an icon and
- * a colour as well as the words, never colour alone (docs/m1/04 §1). A change is announced (TalkBack), since a test
- * started from a list ends while the user waits.
+ * a colour as well as the words, never colour alone (docs/m1/04 §1). A test's end is announced (TalkBack), since a test
+ * started from a list ends while the user waits: the line is a live region only while a test runs and while its result
+ * reads "just now", never for the minutes that pass after it, which would read the whole card out again each minute.
  *
  * @param nowMillis the time "tested … ago" counts from; a test dated after it (the phone's clock moved) reads "just now".
  */
 @Composable
 fun PfProfileTestLine(profile: ProxyProfile, lastTest: ProfileTest?, testing: Boolean, nowMillis: Long, modifier: Modifier = Modifier) {
-    val announced = modifier.semantics { liveRegion = LiveRegionMode.Polite }
+    val justEnded = lastTest != null && nowMillis - lastTest.atMillis < MINUTE_MILLIS
+    val announced = if (testing || justEnded) modifier.semantics { liveRegion = LiveRegionMode.Polite } else modifier
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     val style = MaterialTheme.typography.bodySmall
     when {

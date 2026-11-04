@@ -28,7 +28,8 @@ class PrivacyPolicyTest(unittest.TestCase):
         for heading in ("## Kept on this phone", "## Sent from this phone", "## Android and Google", "## Permissions", "## Changes and contact"):
             self.assertIn(heading, text)
         self.assertIn("connectivitycheck.gstatic.com", text, "the pre-flight and test target")
-        self.assertIn("Nothing is sent to ProxyFlow's developer", text)
+        self.assertIn("ProxyFlow itself sends nothing to its developer", text)
+        self.assertIn("Google may show them to ProxyFlow's developer", text, "Google Play's crash reports")
         self.assertNotIn("\\'", text, "Android's escapes are decoded")
 
 

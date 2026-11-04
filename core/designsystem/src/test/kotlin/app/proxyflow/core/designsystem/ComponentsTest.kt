@@ -7,13 +7,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -28,8 +32,13 @@ import app.proxyflow.core.designsystem.component.PfConfirmDialog
 import app.proxyflow.core.designsystem.component.PfListRow
 import app.proxyflow.core.designsystem.component.PfPasswordField
 import app.proxyflow.core.designsystem.component.PfPrimaryButton
+import app.proxyflow.core.designsystem.component.PfProfileTestLine
+import app.proxyflow.core.designsystem.component.PfSectionHeader
 import app.proxyflow.core.designsystem.component.PfTextField
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.model.ProfileTest
+import app.proxyflow.core.model.ProxyProfile
+import app.proxyflow.core.model.ProxyProtocol
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Rule
@@ -40,6 +49,34 @@ import org.junit.runner.RunWith
 class ComponentsTest {
     @get:Rule
     val compose = createComposeRule()
+
+    /**
+     * TalkBack announces a test's end, not each minute after it: the line is a live region while the test runs and while
+     * its result reads "just now", then not.
+     */
+    @Test
+    fun aTestLineAnnouncesTheTestsEndOnly() {
+        val profile = ProxyProfile("p1", "Tokyo", ProxyProtocol.SOCKS5, "tokyo.example.com", 1080)
+        var testing by mutableStateOf(true)
+        var lastTest by mutableStateOf<ProfileTest?>(null)
+        var now by mutableStateOf(1_000_000L)
+        compose.setContent { ProxyFlowTheme { PfProfileTestLine(profile, lastTest, testing, now) } }
+        val live = SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite)
+
+        compose.onNode(live and hasAnyDescendant(hasText("Testing…")), useUnmergedTree = true).assertExists()
+        testing = false
+        lastTest = ProfileTest(atMillis = now, code = null, latencyMillis = 182)
+        compose.onNode(live and hasAnyDescendant(hasText("tested just now", substring = true)), useUnmergedTree = true).assertExists()
+        now += 60_000
+        compose.onNode(hasText("tested 1 min ago", substring = true), useUnmergedTree = true).assertExists()
+        compose.onNode(live, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun aSectionHeaderIsAHeading() {
+        compose.setContent { ProxyFlowTheme { PfSectionHeader("Connection") } }
+        compose.onNode(hasText("CONNECTION") and isHeading()).assertExists()
+    }
 
     @Test
     fun passwordFieldTogglesBetweenHiddenAndShown() {

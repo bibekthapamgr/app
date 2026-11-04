@@ -122,8 +122,12 @@ class CopyClaimsTest {
             "onboarding_no_proxies" to listOf("doesn't sell or provide proxies"),
             "privacy_stored_log" to listOf("never includes passwords, server or site names"),
             "privacy_stored_backup" to listOf("backups"),
-            "privacy_sent_check" to listOf("connectivitycheck.gstatic.com"),
-            "privacy_sent_nothing" to listOf("Nothing is sent to ProxyFlow's developer"),
+            "privacy_sent_check" to listOf("connectivitycheck.gstatic.com", "Each time ProxyFlow connects or reconnects"),
+            "privacy_sent_nothing" to listOf("ProxyFlow itself sends nothing to its developer"),
+            // Google Play shows developers the crash reports phones share with Google: never "nothing reaches the developer".
+            "privacy_android_crash" to listOf("Google may show them to ProxyFlow's developer"),
+            "help_feedback_body" to listOf("collects nothing itself"),
+            "help_carry_outside" to listOf("don't use the VPN", "work profile", "Private space", "another user", "tethered"),
             "privacy_android_outside" to listOf("doesn't use the VPN"),
             // M9 (ADR-0014): what a connection test sends and where, what a pass leaves blocked, and what switching does.
             "edit_test_running_note" to listOf("connectivitycheck.gstatic.com", "without sending anything", "go only to this proxy"),

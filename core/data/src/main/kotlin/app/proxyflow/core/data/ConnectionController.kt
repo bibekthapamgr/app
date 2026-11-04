@@ -44,6 +44,17 @@ interface ConnectionController {
      */
     fun reconnect(profileId: String) = Unit
 
+    /**
+     * The user picked [profileId] (board B8, "Use this proxy"): while a connection exists for another profile, it switches
+     * to [profileId] (J11) — the old proxy's flows end and apps' traffic is held until the new proxy is checked, never sent
+     * around a proxy (ADR-0010 §5). Without one, nothing starts: connecting stays the user's own step. The session decides,
+     * in order with what it was asked before.
+     */
+    fun switchIfConnected(profileId: String) = Unit
+
+    /** Disconnects only a connection that is Connected when the session gets to it (the Quick Settings tile, B11). */
+    fun disconnectIfConnected() = Unit
+
     /** Forgets why the last attempt ended, once the user has seen it; a blocked connection keeps its reason. */
     fun clearError() = Unit
 
@@ -75,14 +86,4 @@ interface ConnectionController {
      * starts, which Home has not shown yet, is never cleared unseen.
      */
     fun dismissInterruption(shown: Interruption) = Unit
-}
-
-/**
- * The user picked [profileId] (board B8, or "Use this proxy"): while a connection runs on another profile, it switches to
- * [profileId] (J11) — the old proxy's flows end and apps' traffic is held until the new proxy is checked, never sent
- * around a proxy (ADR-0010 §5). Without a connection nothing starts: connecting stays the user's own step.
- */
-fun ConnectionController.switchIfConnected(profileId: String) {
-    val current = state.value
-    if (current.active && current.profileId != profileId) connect(profileId)
 }

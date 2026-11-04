@@ -75,6 +75,7 @@ class EngineConnectionTesterTest {
         engine.probeHook = { throw LinkageError("no libpfengine.so") }
         val broken = tester.testSaved(saved.id)
         assertEquals(ConnectionError.INTERNAL, (broken as ConnectionTestResult.Failed).code)
+        assertTrue("the engine was asked", broken.fromEngine)
         engine.probeHook = { throw IllegalStateException("unexpected") }
         assertEquals(ConnectionError.INTERNAL, (tester.testSaved(saved.id) as ConnectionTestResult.Failed).code)
         assertEquals("the proxy's answer stays", "AUTH_FAILED", repository.lastTests.first()[saved.id]?.code)
@@ -102,7 +103,8 @@ class EngineConnectionTesterTest {
     @Test
     fun aSavedPasswordGoesOnlyWithItsOwnUsernameToItsOwnServer() = runBlocking {
         val saved = repository.save(null, withSignIn)
-        val required = ConnectionTestResult.Failed(ConnectionError("AUTH_REQUIRED"))
+        // Found here, before any proxy was asked: never worded or kept as the proxy's answer (ADR-0014 §2).
+        val required = ConnectionTestResult.Failed(ConnectionError("AUTH_REQUIRED"), fromEngine = false)
 
         assertEquals(required, tester.test(saved.id, withSignIn.copy(username = "someone else", password = "")))
         assertEquals(required, tester.test(saved.id, withSignIn.copy(server = "other.example.com", password = "")))

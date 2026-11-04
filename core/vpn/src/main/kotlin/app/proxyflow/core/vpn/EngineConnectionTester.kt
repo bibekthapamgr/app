@@ -25,8 +25,9 @@ import kotlinx.coroutines.withContext
  * test made while connected reaches the tested proxy directly, never through the connected one. Credentials go only to
  * the proxy tested: typed ones, or the saved ones under the rule of saving, never to another server.
  *
- * @param guards one per test, so a test that is cancelled (the form was edited, the screen left) ends at once instead of
- *   after its timeout; the app's shuts the test's sockets down ([ShutdownGuard]).
+ * @param guards one per test, so a test that is cancelled (the form was edited, the screen left) stops its connection to
+ *   the proxy at once instead of running to its timeout; the app's shuts the test's sockets down ([ShutdownGuard]). Only
+ *   a lookup of the proxy's name the engine is still making can't be cut short: it ends by itself.
  */
 class EngineConnectionTester(
     private val profiles: ProfileRepository,
@@ -55,7 +56,7 @@ class EngineConnectionTester(
             else -> when (val read = profiles.readCredentials(profileId, profile)) {
                 is CredentialsRead.Available -> {
                     // The rule of saving: a saved password goes only with its own username, to the server it was saved for.
-                    if (String(read.username) != input.username) {
+                    if (!read.username.holds(input.username)) {
                         read.wipe()
                         return failed(AUTH_REQUIRED)
                     }
@@ -104,8 +105,9 @@ class EngineConnectionTester(
     }
 
     /**
-     * The probe, off the caller's thread. Cancelled, the test's sockets are shut down so the engine returns at once (as a
-     * cancelled pre-flight check does, VpnSession); the secret is consumed or closed either way.
+     * The probe, off the caller's thread. Cancelled, the test's sockets are shut down so the engine returns as soon as it
+     * is using one (as a cancelled pre-flight check does, VpnSession) — a lookup of the proxy's name it is still making
+     * ends by itself first; the secret is consumed or closed either way.
      */
     private suspend fun probe(profile: ProxyProfile, secret: EngineSecret?): ConnectionTestResult {
         val guard = guards()
@@ -161,7 +163,12 @@ class EngineConnectionTester(
         password.fill('\u0000')
     }
 
-    private fun failed(code: String, detail: String? = null) = ConnectionTestResult.Failed(ConnectionError(code, detail))
+    /** A failure found before the engine was asked ([ConnectionTestResult.Failed.fromEngine] false). */
+    private fun failed(code: String, detail: String? = null) =
+        ConnectionTestResult.Failed(ConnectionError(code, detail), fromEngine = false)
+
+    /** Whether [this] decrypted array holds exactly [text], compared without copying it into a string that can't be wiped. */
+    private fun CharArray.holds(text: String): Boolean = size == text.length && indices.all { this[it] == text[it] }
 
     companion object {
         /** The whole test, as the pre-flight check: TCP, TLS, the sign-in and the tunnel (VpnSession.Timing). */

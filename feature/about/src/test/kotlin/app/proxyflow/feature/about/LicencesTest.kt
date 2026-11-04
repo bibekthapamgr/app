@@ -80,6 +80,24 @@ class LicencesTest {
         )
     }
 
+    /** The BSD licences' three conditions are a list: each stays a paragraph of its own. */
+    @Test
+    fun aLicencesListItemsAreParagraphsOfTheirOwn() {
+        val text = "met:\n\n   * Redistributions of source code must retain the above copyright\nnotice, this list of conditions.\n" +
+            "   * Redistributions in binary form must reproduce the above\ncopyright notice.\n" +
+            "   * Neither the name of Google LLC nor the names of its\ncontributors may be used.\n\nTHIS SOFTWARE"
+        assertEquals(
+            listOf(
+                "met:",
+                "* Redistributions of source code must retain the above copyright notice, this list of conditions.",
+                "* Redistributions in binary form must reproduce the above copyright notice.",
+                "* Neither the name of Google LLC nor the names of its contributors may be used.",
+                "THIS SOFTWARE",
+            ),
+            paragraphsOf(text),
+        )
+    }
+
     @Test
     fun eachLicenceListsItsLibrariesAndOpensItsText() {
         val opened = mutableListOf<String>()

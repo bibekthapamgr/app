@@ -186,7 +186,14 @@ fun LicenceTextScreen(title: String?, text: String?, onBack: () -> Unit, modifie
     }
 }
 
-/** [text]'s paragraphs (blank-line separated), each one's lines joined. */
-internal fun paragraphsOf(text: String): List<String> = text.split(Regex("""\n[ \t]*\n""")).map { paragraph ->
-    paragraph.lines().joinToString(" ") { it.trim() }.trim()
+/** [text]'s paragraphs — blank-line separated, and each "* " list item its own — each one's lines joined. */
+internal fun paragraphsOf(text: String): List<String> = text.split(Regex("""\n[ \t]*\n""")).flatMap { block ->
+    val paragraphs = mutableListOf<MutableList<String>>()
+    for (line in block.lines().map { it.trim() }) {
+        if (paragraphs.isEmpty() || LIST_ITEM.matches(line)) paragraphs += mutableListOf<String>()
+        paragraphs.last() += line
+    }
+    paragraphs.map { it.joinToString(" ").trim() }
 }.filter { it.isNotEmpty() }
+
+private val LIST_ITEM = Regex("""[*\u2022]\s.*""")

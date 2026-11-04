@@ -104,6 +104,8 @@ class NoticesTest(unittest.TestCase):
             self.assertGreater(len(text), 1000, spdx)
         with open(os.path.join(assets, licences.LICENCES["BSD-3-Clause-Go"]["text"]), encoding="utf-8") as f:
             self.assertIn("Copyright 2009 The Go Authors.", f.read())
+        with open(os.path.join(assets, licences.LICENCES["BSD-3-Clause-Protobuf"]["text"]), encoding="utf-8") as f:
+            self.assertIn("Copyright 2008 Google Inc.", f.read())
         with open(os.path.join(assets, licences.LICENCES["gVisor"]["text"]), encoding="utf-8") as f:
             gvisor = f.read()
         self.assertIn("Apache License", gvisor)
@@ -133,6 +135,33 @@ class NoticesTest(unittest.TestCase):
         self.assertEqual(["the engine links example.com/new/dependency v1.0.0, which docs/m4/dependency-review.md hasn't reviewed"], problems)
         _, problems = licences.notices(TREE, FACTS[:1], fetch(POMS))
         self.assertEqual(2, len(problems), "neither the toolchain nor the modules can be read")
+
+    def test_the_engines_own_module_is_not_a_notice(self) -> None:
+        # What gomobile's bind links: the engine as a dependency of its generated main package, built from the checkout.
+        facts = FACTS + ["  github.com/bibekthapamgr/app/engine v0.0.0-00010101000000-000000000000", "  /home/runner/work/app/app/engine (devel)"]
+        document, problems = licences.notices(TREE, facts, fetch(POMS))
+        self.assertEqual([], problems)
+        names = {e["name"] for e in document["libraries"]}
+        self.assertNotIn("github.com/bibekthapamgr/app/engine", names)
+        self.assertFalse(any(name.startswith("/") for name in names))
+
+    def test_another_module_built_from_a_local_directory_fails(self) -> None:
+        facts = FACTS + ["  golang.org/x/sys v0.48.0", "  /home/runner/work/sys (devel)"]
+        _, problems = licences.notices(TREE, facts, fetch(POMS))
+        self.assertEqual(
+            ["the engine links golang.org/x/sys from the directory /home/runner/work/sys, which docs/m4/dependency-review.md hasn't reviewed"],
+            problems,
+        )
+
+    def test_datastores_repackaged_protobuf_ships_protobufs_own_licence(self) -> None:
+        tree = TREE + ["\\--- androidx.datastore:datastore-preferences-external-protobuf:1.3.0"]
+        document, problems = licences.notices(tree, FACTS, fetch(POMS))
+        self.assertEqual([], problems)
+        self.assertIn(
+            ("androidx.datastore:datastore-preferences-external-protobuf", "1.3.0", "BSD-3-Clause-Protobuf"),
+            {(e["name"], e["version"], e["licence"]) for e in document["libraries"]},
+        )
+        self.assertIn("BSD-3-Clause-Protobuf", document["licences"])
 
     def test_names_and_urls_of_apache_2(self) -> None:
         for name in ("Apache-2.0", "Apache 2.0", "Apache License, Version 2.0", "The Apache Software License, Version 2.0"):

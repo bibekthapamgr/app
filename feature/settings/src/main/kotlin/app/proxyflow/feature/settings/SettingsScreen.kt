@@ -14,8 +14,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,6 +69,7 @@ internal fun SettingsRoute(
         onOpenKillSwitchGuide = onOpenKillSwitchGuide,
         onLogRetentionChange = viewModel::setLogRetention,
         onClearLogs = viewModel::clearLogs,
+        onClearShown = viewModel::onClearShown,
         notificationsOn = notificationsOn,
         onOpenNotificationSettings = { openNotificationSettings(context) },
         onOpenHelp = onOpenHelp,
@@ -104,6 +108,7 @@ fun SettingsScreen(
     onOpenKillSwitchGuide: () -> Unit = {},
     onLogRetentionChange: (LogRetention) -> Unit = {},
     onClearLogs: () -> Unit = {},
+    onClearShown: () -> Unit = {},
     notificationsOn: Boolean? = null,
     onOpenNotificationSettings: () -> Unit = {},
     onOpenHelp: () -> Unit = {},
@@ -111,9 +116,20 @@ fun SettingsScreen(
     var choosingTheme by rememberSaveable { mutableStateOf(false) }
     var choosingRetention by rememberSaveable { mutableStateOf(false) }
     var confirmingClear by rememberSaveable { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
+    val clearedMessage = state.cleared?.let {
+        stringResource(if (it == LogsCleared.Done) R.string.settings_clear_logs_done else R.string.settings_clear_logs_failed)
+    }
+    LaunchedEffect(state.cleared) {
+        if (clearedMessage != null) {
+            snackbar.showSnackbar(clearedMessage)
+            onClearShown()
+        }
+    }
     Scaffold(
         modifier = modifier,
         topBar = { PfTopAppBar(title = stringResource(R.string.settings_title)) },
+        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(
             modifier = Modifier

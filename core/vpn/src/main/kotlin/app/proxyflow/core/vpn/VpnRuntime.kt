@@ -17,6 +17,7 @@ import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.TrafficStats
 import javax.net.ssl.X509TrustManager
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -171,7 +172,14 @@ class VpnRuntime(
      */
     internal suspend fun connectChosen(profileId: String) {
         session.connect(profileId)
-        if (profiles.chosenProfileId.first() != profileId) profiles.setActive(profileId)
+        try {
+            if (profiles.chosenProfileId.first() != profileId) profiles.setActive(profileId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Not saved: the connection goes on; Home connects the same profile next time unless another is chosen.
+            log.add("tile: the choice was not saved (${e.javaClass.simpleName})")
+        }
     }
 
     /** The system's VPN consent screen, or null when the VPN may start (see [ConnectionController.consentIntent]). */
@@ -213,6 +221,10 @@ internal class VpnConnectionController(private val runtime: VpnRuntime) : Connec
     override fun restart() = runtime.session.restart()
 
     override fun reconnect(profileId: String) = runtime.session.reconnect(profileId)
+
+    override fun switchIfConnected(profileId: String) = runtime.session.switchIfActive(profileId)
+
+    override fun disconnectIfConnected() = runtime.session.disconnectIfConnected()
 
     override fun clearError() = runtime.session.clearError()
 

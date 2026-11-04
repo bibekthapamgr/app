@@ -648,7 +648,7 @@ class HomeScreenTest {
         compose.onNodeWithText("Choose proxy").assertIsDisplayed()
         compose.onNodeWithText("Works · 182 ms · tested 2 min ago").assertIsDisplayed()
         compose.onNodeWithText("Not tested yet").assertIsDisplayed()
-        compose.onNodeWithText("Choosing another proxy", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Choosing another one reconnects", substring = true).assertDoesNotExist()
         compose.onNodeWithText("Tokyo").performClick()
         compose.onNodeWithText("Manage profiles").performClick()
         compose.onNodeWithText("Add proxy").performClick()
@@ -656,7 +656,8 @@ class HomeScreenTest {
 
         state =
             disconnected.copy(connection = ConnectionState(ConnectionStatus.Connected, "p1", "Office", profile, connectedSinceMillis = now))
-        compose.onNodeWithText("Choosing another proxy reconnects through it", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow is using a proxy now. Choosing another one reconnects through it", substring = true)
+            .assertIsDisplayed()
     }
 
     private fun ready(

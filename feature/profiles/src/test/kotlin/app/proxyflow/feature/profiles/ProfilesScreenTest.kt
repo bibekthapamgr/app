@@ -164,6 +164,42 @@ class ProfilesScreenTest {
         assertEquals(listOf("p2"), used)
     }
 
+    /** J11: "Use this proxy" while a connection runs on another profile switches it, so the screen asks first. */
+    @Test
+    fun usingAnotherProxyWhileConnectedAsksFirst() {
+        val used = mutableListOf<String>()
+        var state by mutableStateOf(
+            ProfilesUiState(loading = false, profiles = listOf(office, backup), activeProfileId = "p1", connectedProfileId = "p1"),
+        )
+        compose.setContent {
+            ProxyFlowTheme {
+                ProfilesScreen(state, onAddProxy = {}, onEditProxy = {}, onUseProxy = { used += it }, onDeleteProxy = {})
+            }
+        }
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertIsDisplayed()
+        compose.onNodeWithText(
+            "ProxyFlow is using Office HTTP. Switching ends its open connections, and apps can't go online until ProxyFlow is " +
+                "connected through Backup SOCKS.",
+            substring = true,
+        ).assertIsDisplayed()
+        compose.onNodeWithText("Cancel").performClick()
+        assertEquals("cancelled: nothing switches", emptyList<String>(), used)
+
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        compose.onNodeWithText("Switch").performClick()
+        assertEquals(listOf("p2"), used)
+
+        // The connection ends while the question is open: it closes, and nothing is switched.
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        state = state.copy(connectedProfileId = null)
+        compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertDoesNotExist()
+        assertEquals(listOf("p2"), used)
+    }
+
     @Test
     fun theMenuDuplicatesAProfile() {
         val duplicated = mutableListOf<String>()

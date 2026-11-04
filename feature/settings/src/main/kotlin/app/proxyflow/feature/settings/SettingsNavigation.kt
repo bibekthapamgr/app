@@ -26,11 +26,12 @@ fun NavGraphBuilder.settingsScreen(
     onOpenHelp: () -> Unit = {},
 ) {
     composable<SettingsDestination> {
+        // A second tap while the next screen opens does nothing (it would open it twice).
         SettingsRoute(
             viewModel = viewModel(factory = viewModelFactory),
-            onOpenAbout = onOpenAbout,
-            onOpenKillSwitchGuide = onOpenKillSwitchGuide,
-            onOpenHelp = onOpenHelp,
+            onOpenAbout = dropUnlessResumed(block = onOpenAbout),
+            onOpenKillSwitchGuide = dropUnlessResumed(block = onOpenKillSwitchGuide),
+            onOpenHelp = dropUnlessResumed(block = onOpenHelp),
         )
     }
 }

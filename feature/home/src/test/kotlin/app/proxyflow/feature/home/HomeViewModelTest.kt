@@ -139,9 +139,12 @@ class HomeViewModelTest {
         assertEquals(second.id, ready(viewModel).profile.id)
     }
 
-    /** B8: picking a profile makes it Home's; with a connection running on another one, the connection switches (J11). */
+    /**
+     * B8: picking a profile makes it Home's, and asks the session to switch a connection running on another one (J11) —
+     * the session decides, in order with what it was asked before (VpnSessionTest); picking itself connects nothing.
+     */
     @Test
-    fun pickingAProfileSwitchesARunningConnectionToItAndOnlyThen() = runTest {
+    fun pickingAProfileMakesItHomesAndAsksTheSessionToSwitch() = runTest {
         val controller = RecordingController()
         val first = profiles.save(null, ProxyProfileInput(name = "Tokyo", server = "tokyo.example.com", port = "1080"))
         val second = profiles.save(null, ProxyProfileInput(name = "Office", server = "office.example.com", port = "3128"))
@@ -151,13 +154,11 @@ class HomeViewModelTest {
 
         viewModel.chooseProfile(second.id)
         assertEquals(second.id, ready(viewModel).profile.id)
-        assertEquals("disconnected: picking starts nothing", emptyList<String>(), controller.connects)
+        assertEquals(listOf(second.id), controller.switches)
+        assertEquals("picking starts nothing", emptyList<String>(), controller.connects)
 
-        controller.current.value = ConnectionState(ConnectionStatus.Connected, profileId = second.id, profile = second)
-        viewModel.chooseProfile(second.id)
-        assertEquals("its own connection: nothing to switch", emptyList<String>(), controller.connects)
         viewModel.chooseProfile(first.id)
-        assertEquals(listOf(first.id), controller.connects)
+        assertEquals(listOf(second.id, first.id), controller.switches)
         assertEquals("the choice is kept for Always-on VPN too (M8)", first.id, profiles.chosenProfileId.first())
     }
 
@@ -186,6 +187,22 @@ class HomeViewModelTest {
         val shown = ready(viewModel).profile
         assertEquals("tokyo.example.com", shown.host)
         assertFalse("the running connection has no TLS", shown.useTls)
+    }
+
+    /** A rename is not a setting the engine runs: Home names the connection's profile as saved now. */
+    @Test
+    fun aRenamedConnectionProfileIsNamedAsSavedNow() = runTest {
+        val controller = RecordingController()
+        val saved = profiles.save(null, ProxyProfileInput(name = "Tokyo", server = "tokyo.example.com", port = "1080"))
+        val viewModel = HomeViewModel(profiles, controller)
+        observe(viewModel)
+        controller.current.value = ConnectionState(ConnectionStatus.Connected, profileId = saved.id, profileName = "Tokyo", profile = saved)
+
+        profiles.save(saved.id, ProxyProfileInput(name = "Tokyo (home)", server = "tls.example.com", port = "443", useTls = true))
+
+        val shown = ready(viewModel).profile
+        assertEquals("Tokyo (home)", shown.displayName)
+        assertEquals("still the settings it runs", "tokyo.example.com", shown.host)
     }
 
     @Test
@@ -383,6 +400,8 @@ class HomeViewModelTest {
         override val state: StateFlow<ConnectionState> = current
         val calls = mutableListOf<String>()
         val connects: List<String> get() = calls.filter { it.startsWith("connect ") }.map { it.removePrefix("connect ") }
+        val switches: List<String> get() =
+            calls.filter { it.startsWith("switchIfConnected ") }.map { it.removePrefix("switchIfConnected ") }
 
         override fun consentIntent(): Intent? = consent
 
@@ -396,6 +415,10 @@ class HomeViewModelTest {
 
         override fun clearError() {
             calls += "clearError"
+        }
+
+        override fun switchIfConnected(profileId: String) {
+            calls += "switchIfConnected $profileId"
         }
 
         val readings = MutableStateFlow<RoutingDiagnostics?>(null)

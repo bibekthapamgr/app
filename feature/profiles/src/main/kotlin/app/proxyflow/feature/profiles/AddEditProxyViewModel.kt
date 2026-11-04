@@ -20,11 +20,13 @@ import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Where "Test connection" stands (boards D5–D7). */
 sealed interface ConnectionTestState {
@@ -187,11 +189,14 @@ class AddEditProxyViewModel(
         state.update { it.copy(saving = true, saveFailed = false) }
         viewModelScope.launch {
             try {
-                val saved = repository.save(id, current.input)
-                // Before the screen closes, which ends this scope: a test of exactly what was saved is its last test.
-                lastTested?.takeIf { it.input == current.input }?.let { keep(saved, it) }
-                // Flows end and traffic is held until the saved settings are checked, never sent around a proxy.
-                if (reconnect) connection.reconnect(saved.id)
+                // Whole, even if the screen closes meanwhile (which ends this scope): the profile, its last test when it
+                // tested exactly what is saved, and the reconnect the user confirmed (D9).
+                withContext(NonCancellable) {
+                    val saved = repository.save(id, current.input)
+                    lastTested?.takeIf { it.input == current.input }?.let { keep(saved, it) }
+                    // Flows end and traffic is held until the saved settings are checked, never sent around a proxy.
+                    if (reconnect) connection.reconnect(saved.id)
+                }
                 state.update { it.copy(saving = false, saved = true, dirty = false) }
             } catch (e: CancellationException) {
                 throw e
@@ -245,10 +250,14 @@ class AddEditProxyViewModel(
         state.update { it.copy(test = ConnectionTestState.Idle) }
     }
 
-    /** Keeps [test] as [profile]'s last test; this phone's own failures aren't kept, and a storage failure only loses it. */
+    /**
+     * Keeps [test] as [profile]'s last test. Only the engine's answers are: not this phone's own failures (`INTERNAL`),
+     * and not what the tester found before asking the engine — a password it had none of, say — which describes the form,
+     * not the proxy. A storage failure only loses it.
+     */
     private suspend fun keep(profile: ProxyProfile, test: Tested) {
         val result = test.result
-        if (result is ConnectionTestResult.Failed && result.code == ConnectionError.INTERNAL) return
+        if (result is ConnectionTestResult.Failed && (result.code == ConnectionError.INTERNAL || !result.fromEngine)) return
         try {
             repository.recordTest(profile.id, profile, result.asProfileTest(test.atMillis))
         } catch (e: CancellationException) {
@@ -272,6 +281,8 @@ class AddEditProxyViewModel(
         // Nothing to edit until the profile is read; the screen shows no fields meanwhile.
         if (state.value.loading || state.value.loadFailed) return
         testJob?.cancel()
+        // The test was of the form as it was; its copy of a typed password goes too.
+        lastTested = null
         state.update { it.copy(input = transform(it.input), test = ConnectionTestState.Idle, saveFailed = false) }
         persist(state.value.input)
         refresh()

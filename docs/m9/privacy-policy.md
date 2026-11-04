@@ -26,15 +26,15 @@ A profile's username and password are sent only to that profile's proxy. With TL
 
 If your proxy's address is a name, this phone looks it up through its usual DNS, outside the VPN.
 
-When you connect, and when you test a profile, ProxyFlow asks your proxy to open one connection to connectivitycheck.gstatic.com on port 443, a Google service, and closes it without sending anything through it. Google then sees a connection from your proxy's address.
+Each time ProxyFlow connects or reconnects, including reconnecting by itself and switching to another proxy, and when you test a profile, ProxyFlow asks your proxy to open one connection to connectivitycheck.gstatic.com on port 443, a Google service, and closes it without sending anything through it. Google then sees a connection from your proxy's address.
 
-Nothing is sent to ProxyFlow's developer, who has no servers to receive it: no usage data, crash reports or logs.
+ProxyFlow itself sends nothing to its developer, who has no servers to receive it: no usage data, crash reports or logs.
 
 If you copy or export the log, you decide where it goes. It never includes passwords, server or site names, or addresses.
 
 ## Android and Google
 
-If your phone shares diagnostics with Google, Android may include ProxyFlow's crash reports. ProxyFlow removes sign-in details, server and site names and addresses from the error messages it hands to Android, though Android writes the original message to the phone's own log, which other apps can't read.
+If your phone shares diagnostics with Google, Android may include ProxyFlow's crash reports, and Google may show them to ProxyFlow's developer, with the phone's model and Android version. ProxyFlow removes sign-in details, server and site names and addresses from the error messages it hands to Android, though Android writes the original message to the phone's own log, which other apps can't read.
 
 Some traffic of Android itself and of its built-in apps, such as Google Play services, doesn't use the VPN, so it doesn't go through your proxy.
 

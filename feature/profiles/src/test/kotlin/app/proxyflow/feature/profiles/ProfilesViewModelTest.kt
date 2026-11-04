@@ -128,8 +128,12 @@ class ProfilesViewModelTest {
         assertNull(vm.uiState.value.failed)
     }
 
+    /**
+     * "Use this proxy" asks the session to switch a connection running on another profile — the session decides, in order
+     * with what it was asked before (VpnSessionTest) — then keeps the choice.
+     */
     @Test
-    fun useThisProxySwitchesARunningConnectionToItAndOnlyThen() = runTest {
+    fun useThisProxyAsksTheSessionToSwitchThenKeepsTheChoice() = runTest {
         val connection = RecordingConnection()
         val vm = viewModel(connection = connection)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
@@ -137,13 +141,9 @@ class ProfilesViewModelTest {
         repository.save(null, ProxyProfileInput(server = "b.example.com", port = "1080"))
 
         vm.setActive("p2")
-        assertEquals("disconnected: nothing starts", emptyList<String>(), connection.calls)
-        connection.current.value = ConnectionState(ConnectionStatus.Connected, profileId = "p2")
-        vm.setActive("p2")
-        assertEquals("already its connection", emptyList<String>(), connection.calls)
-        vm.setActive("p1")
-        assertEquals(listOf("connect p1"), connection.calls)
-        assertEquals("p1", vm.uiState.value.activeProfileId)
+        assertEquals(listOf("switchIfConnected p2"), connection.calls)
+        assertEquals("p2", vm.uiState.value.activeProfileId)
+        assertEquals("nothing connects or disconnects here", listOf("switchIfConnected p2"), connection.calls)
     }
 
     @Test
@@ -196,6 +196,10 @@ class ProfilesViewModelTest {
         override fun disconnect() {
             calls += "disconnect"
             current.value = current.value.copy(status = ConnectionStatus.Disconnected)
+        }
+
+        override fun switchIfConnected(profileId: String) {
+            calls += "switchIfConnected $profileId"
         }
     }
 }

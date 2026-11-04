@@ -250,6 +250,21 @@ class ProfileValidatorTest {
         ).forEach { changed -> assertFalse("$changed", changed.sameCredentialTargetAs(saved)) }
     }
 
+    /** The rule of saving and the check before credentials are sent compare servers alike (M9 review). */
+    @Test
+    fun theSameServerIsTheSameForTheRuleOfSavingAndTheCheckBeforeSending() {
+        val saved = valid.copy(requiresSignIn = true, username = "user")
+        val profile = saved.toProfile("p1", 0, 0)
+        for (server in listOf("PROXY.example.com", "proxy.example.com.", " proxy.example.com ")) {
+            val other = saved.copy(server = server)
+            assertTrue(server, other.sameCredentialTargetAs(saved))
+            assertTrue(server, other.toProfile("p1", 0, 0).sameServerAs(profile))
+        }
+        val elsewhere = saved.copy(server = "proxy.example.net")
+        assertFalse(elsewhere.sameCredentialTargetAs(saved))
+        assertFalse(elsewhere.toProfile("p1", 0, 0).sameServerAs(profile))
+    }
+
     @Test
     fun credentialsNeverAppearInToString() {
         val input = valid.copy(requiresSignIn = true, username = "alice", password = "s3cret-pw")

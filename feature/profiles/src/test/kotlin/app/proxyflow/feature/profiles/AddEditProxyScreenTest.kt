@@ -182,6 +182,14 @@ class AddEditProxyScreenTest {
         compose.onNodeWithText("ProxyFlow signs in to HTTP proxies with Basic sign-in", substring = true).performScrollTo()
             .assertIsDisplayed()
 
+        // No password to send, found before any proxy was asked: not worded as the proxy's answer, and no proxy code.
+        val unsent = ConnectionTestResult.Failed(ConnectionError("AUTH_REQUIRED"), fromEngine = false)
+        state = state.copy(test = ConnectionTestState.Done(unsent, office))
+        compose.onNodeWithText("Enter the password to test").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Nothing was sent.", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Test failed", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Code: AUTH_REQUIRED").assertDoesNotExist()
+
         state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Passed(latencyMillis = 87), office))
         compose.onNodeWithText("Proxy works").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("87 ms", substring = true).performScrollTo().assertIsDisplayed()
@@ -202,7 +210,7 @@ class AddEditProxyScreenTest {
             }
         }
         compose.onNodeWithText("Reconnect with changes?").assertIsDisplayed()
-        compose.onNodeWithText("You're connected through Office.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow is using Office.", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Nothing is sent around your proxy.", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Keep editing").performClick()
         compose.onNodeWithText("Save and reconnect").performClick()

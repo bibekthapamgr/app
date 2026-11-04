@@ -2,20 +2,22 @@ package app.proxyflow
 
 import android.content.Intent
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.unit.Density
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ConnectStep
@@ -334,6 +336,29 @@ class ScreenshotTest {
         assertAccessible("C3_delete_confirm_light")
     }
 
+    /** "Use this proxy" while connected through another profile (M9, J11): the switch is asked first. */
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun switchConfirmation() {
+        compose.setContent {
+            ProxyFlowTheme {
+                ProfilesScreen(
+                    profilesState.copy(connectedProfileId = "p1"),
+                    onAddProxy = {},
+                    onEditProxy = {},
+                    onUseProxy = {},
+                    onDeleteProxy = {},
+                    nowMillis = SAMPLE_TIME,
+                )
+            }
+        }
+        compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        compose.waitForIdle() // let the dialog draw before the screen is captured
+        captureScreenRoboImage("$DIR/C2_switch_confirm_light.png")
+        assertAccessible("C2_switch_confirm_light")
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun profileActions() {
@@ -612,13 +637,14 @@ class ScreenshotTest {
         OnboardingScreen(showNotificationsPage = true, onAllowNotifications = {}, onFinish = {}, startPage = 2)
     }
 
-    // M9, the brief's task 8: the smallest common phone width (320 dp) at Android's largest font size (200 %). Each
-    // screen keeps its words and its actions reachable, scrolled to where they are; light theme only (both themes are
-    // above at the default size).
+    // M9, the brief's task 8: the smallest common phone width (320 dp) at Android's largest font size (200 %), set as
+    // Android sets it (the configuration's font scale), so dialogs and sheets, drawn in windows of their own, scale too.
+    // Each screen keeps its words and its main action reachable: scrolled to it, which must then be on screen, or shown
+    // where it stays (a floating or bottom button, the top bar). Light theme only (both themes are above at 100 %).
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontHomeConnected() = captureLargeFont("B4_home_connected", scrollTo = "Disconnect") {
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontHomeConnected() = captureLargeFont("B4_home_connected", action = hasText("Disconnect")) {
         val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
         HomeScreen(
             home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic),
@@ -629,44 +655,45 @@ class ScreenshotTest {
     }
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontHomeDisconnected() = captureLargeFont("B2_home_disconnected", scrollTo = "Connect") {
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontHomeDisconnected() = captureLargeFont("B2_home_disconnected", action = hasText("Connect")) {
         HomeScreen(home(ConnectionState.Idle), HomeActions())
     }
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontConnectFailed() = captureLargeFont("B6b_connect_failed", scrollTo = "Try again") {
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontConnectFailed() = captureLargeFont("B6b_connect_failed", action = hasText("Try again")) {
         HomeScreen(home(ConnectionState(profileId = "p1", error = ConnectionError("PROXY_UNREACHABLE"))), HomeActions())
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
-    @Config(qualifiers = SMALL_PHONE)
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
     fun largeFontProfilePicker() {
         compose.setContent {
-            LargeFont { HomeScreen(home(ConnectionState.Idle).withProfiles(), HomeActions(), nowMillis = SAMPLE_TIME, picking = true) }
+            ProxyFlowTheme { HomeScreen(home(ConnectionState.Idle).withProfiles(), HomeActions(), nowMillis = SAMPLE_TIME, picking = true) }
         }
+        compose.onNodeWithText("Manage profiles").performScrollTo().assertIsDisplayed()
         compose.waitForIdle()
         captureScreenRoboImage("$DIR/large_font/B8_profile_picker.png")
         assertAccessible("B8_profile_picker (200 %)")
     }
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontProfiles() = captureLargeFont("C2_profiles_list") {
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontProfiles() = captureLargeFont("C2_profiles_list", action = hasText("Add proxy"), scroll = false) {
         ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}, nowMillis = SAMPLE_TIME)
     }
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontAddProxy() = captureLargeFont("D1_add_proxy", scrollTo = "Test connection") {
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontAddProxy() = captureLargeFont("D1_add_proxy", action = hasText("Test connection")) {
         AddEditProxyScreen(AddEditUiState(input = tokyoForm, dirty = true), AddEditActions())
     }
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontTestFailed() = captureLargeFont("D7_test_failed", scrollTo = "Code: AUTH_FAILED · proxy rejected the credentials") {
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontTestFailed() = captureLargeFont("D7_test_failed", action = hasText("Code: AUTH_FAILED · proxy rejected the credentials")) {
         val rejected = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED", "proxy rejected the credentials"))
         AddEditProxyScreen(
             AddEditUiState(input = officeForm, dirty = true, test = ConnectionTestState.Done(rejected, office)),
@@ -675,48 +702,58 @@ class ScreenshotTest {
     }
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontSettings() = captureLargeFont("E1_settings") {
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontSettings() = captureLargeFont("E1_settings", action = hasText("About & privacy")) {
         SettingsScreen(SettingsUiState(loading = false, theme = ThemePreference.System), onThemeChange = {
         }, onOpenAbout = {}, notificationsOn = true)
     }
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontLogs() = captureLargeFont("F2_logs") {
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontLogs() = captureLargeFont("F2_logs", action = hasContentDescription("Copy log"), scroll = false) {
         LogsScreen(LogsUiState(loading = false, entries = sampleLog, total = sampleLog.size))
     }
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontHowItWorks() = captureLargeFont("A2_onboarding_how_it_works") {
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontHowItWorks() = captureLargeFont("A2_onboarding_how_it_works", action = hasText("Continue"), scroll = false) {
         OnboardingScreen(showNotificationsPage = true, onAllowNotifications = {}, onFinish = {}, startPage = 1)
     }
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontNotificationsPage() = captureLargeFont("A3_onboarding_notifications") {
-        OnboardingScreen(showNotificationsPage = true, onAllowNotifications = {}, onFinish = {}, startPage = 2)
-    }
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontNotificationsPage() =
+        captureLargeFont("A3_onboarding_notifications", action = hasText("Allow notifications"), scroll = false) {
+            OnboardingScreen(showNotificationsPage = true, onAllowNotifications = {}, onFinish = {}, startPage = 2)
+        }
 
     @Test
-    @Config(qualifiers = SMALL_PHONE)
-    fun largeFontPrivacyPolicy() = captureLargeFont("G2_privacy_policy") { PrivacyPolicyScreen(version = "0.2.0 (2)", onBack = {}) }
+    @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
+    fun largeFontPrivacyPolicy() =
+        captureLargeFont("G2_privacy_policy", action = hasText("Changes and contact"), scroll = false, lazyList = true) {
+            PrivacyPolicyScreen(version = "0.2.0 (2)", onBack = {})
+        }
 
-    /** [content] at 200 % font size in the light theme, scrolled to [scrollTo] when given, captured and checked. */
-    private fun captureLargeFont(name: String, scrollTo: String? = null, content: @Composable () -> Unit) {
-        compose.setContent { LargeFont(content) }
-        scrollTo?.let { compose.onNodeWithText(it).performScrollTo().assertIsDisplayed() }
+    /**
+     * [content] in the light theme at the font scale the test's @Config sets, scrolled to its main [action] (unless it
+     * stays on screen anyway: [scroll] false; in a lazy list, [lazyList], by the list itself), which must then be
+     * displayed; captured and checked.
+     */
+    private fun captureLargeFont(
+        name: String,
+        action: SemanticsMatcher,
+        scroll: Boolean = true,
+        lazyList: Boolean = false,
+        content: @Composable () -> Unit,
+    ) {
+        compose.setContent { ProxyFlowTheme { content() } }
+        if (lazyList) compose.onNode(hasScrollAction()).performScrollToNode(action)
+        val main = compose.onNode(action)
+        if (scroll) main.performScrollTo()
+        main.assertIsDisplayed()
         val captured = runCatching { compose.onRoot().captureRoboImage("$DIR/large_font/$name.png") }
         assertAccessible("$name (200 %)")
         captured.getOrThrow()
-    }
-
-    /** Android's largest font size (Settings, Display size and text, 200 %), the light theme. */
-    @Composable
-    private fun LargeFont(content: @Composable () -> Unit) {
-        val density = LocalDensity.current
-        CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = 2f)) { ProxyFlowTheme { content() } }
     }
 
     private fun home(
@@ -779,6 +816,9 @@ class ScreenshotTest {
 
         /** The smallest common phone width, 320 dp (a 4.7-inch phone), for the 200 % font size tests. */
         const val SMALL_PHONE = "w320dp-h568dp-normal-long-notround-any-xhdpi-keyshidden-nonav"
+
+        /** Android's largest font size (Settings, Display size and text, 200 %). */
+        const val LARGEST_FONT = 2f
         const val SAMPLE_TIME = 1_793_000_000_000L
 
         /** Android's kill switch as Android said while ProxyFlow was last connected. */

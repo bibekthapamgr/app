@@ -9,8 +9,12 @@ sealed interface ConnectionTestResult {
     /** The proxy accepted the sign-in and opened a test connection through it, in [latencyMillis]. */
     data class Passed(val latencyMillis: Long) : ConnectionTestResult
 
-    /** The test failed with [error]: the catalogue's code (docs/m1/04 §4), for example `AUTH_FAILED`, and its detail. */
-    data class Failed(val error: ConnectionError) : ConnectionTestResult {
+    /**
+     * The test failed with [error]: the catalogue's code (docs/m1/04 §4), for example `AUTH_FAILED`, and its detail.
+     * [fromEngine] is false for a failure the tester found before asking the engine — no password to send, a sign-in that
+     * can't be encoded, a Keystore that failed — which describes the form or the phone, not the proxy.
+     */
+    data class Failed(val error: ConnectionError, val fromEngine: Boolean = true) : ConnectionTestResult {
         val code: String get() = error.code
     }
 

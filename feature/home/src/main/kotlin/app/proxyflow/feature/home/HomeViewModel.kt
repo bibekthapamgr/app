@@ -7,7 +7,6 @@ import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.InMemoryProtectionStore
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.data.ProtectionStore
-import app.proxyflow.core.data.switchIfConnected
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
@@ -111,7 +110,11 @@ class HomeViewModel(
             val list = stored.profiles
             val current = now.connection
             val active = list.firstOrNull { it.id == activeId } ?: list.firstOrNull()
-            val running = current.profile?.takeIf { current.active }
+            // A running connection is described with the settings it runs, which an edit changes only at the next
+            // connect; its name is not a setting, so a rename shows at once.
+            val running = current.profile?.takeIf { current.active }?.let { connected ->
+                list.firstOrNull { it.id == connected.id }?.let { saved -> connected.copy(name = saved.name) } ?: connected
+            }
             val shown = running ?: active
             if (shown == null) {
                 HomeUiState.NoProfile
