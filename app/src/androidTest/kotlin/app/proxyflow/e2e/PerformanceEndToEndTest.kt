@@ -17,8 +17,13 @@ import app.proxyflow.core.vpn.RetryPolicy
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 import kotlin.math.ceil
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -163,13 +168,13 @@ class PerformanceEndToEndTest {
     /**
      * Quality bar: once the proxy dies, new connections are refused (RST) in under 1 s, and none goes around it. Through
      * the lab's gate in front of Dante: connected, then the gate stops listening, as a proxy whose port is shut; the next
-     * [PROBES] connections to the destination are timed, with the session's state before and after each, and none may
-     * open — one that did would have gone around the proxy. A few failures in a row make the session reconnect (the
-     * escalation rule), and from then on new connections are held, not refused, until it gets through: the bar is the
-     * connections' made while the session stayed connected — connected before and after. One the reconnection began
-     * during is held, and is not the bar's (run 41837393553, API 32: 5 s, "Connected" before it). Then a proxy that
-     * accepts and never answers: its connection waits for the proxy's handshake timeout (10 s, engine/adapters/dialer.go),
-     * then is refused.
+     * [PROBES] connections to the destination are timed, and none may open — one that did would have gone around the
+     * proxy. A few failures in a row make the session reconnect (the escalation rule), and from then on new connections
+     * are held, not refused, until it gets through: the bar is how long each connection waited while the session was
+     * still connected. The moment the session left Connected is recorded, so a probe the reconnection began during counts
+     * for the time it waited before it (run 41837393553, API 32: one held 5 s by the reconnection), and one made after it
+     * does not count. Then a proxy that accepts and never answers: its connection waits for the proxy's handshake timeout
+     * (10 s, engine/adapters/dialer.go), then is refused.
      */
     @Test(timeout = 300_000)
     fun aDeadProxysConnectionsAreRefusedQuickly() {
@@ -178,28 +183,36 @@ class PerformanceEndToEndTest {
         val open = shell("connect", env.destinationName, env.destinationPort, PROBE_TIMEOUT_MS)
         assertTrue("through a working proxy, a connection opens: $open", open.startsWith("CONNECTED "))
 
-        gate.refuse()
-        val refused = (1..PROBES).map {
-            val before = app.controller.state.value.status
-            val result = shell("connect", env.destinationName, env.destinationPort, PROBE_TIMEOUT_MS)
-            val after = app.controller.state.value.status
-            result to if (before == after) "$before" else "$before>$after"
+        // When the session leaves Connected (Android's clock): it reconnects after a few failures in a row.
+        val leftConnected = AtomicLong(0)
+        val watch = CoroutineScope(Dispatchers.Default).launch {
+            app.controller.state.first { it.status != ConnectionStatus.Connected }
+            leftConnected.set(SystemClock.elapsedRealtime())
         }
-        val stayedConnected = "${ConnectionStatus.Connected}"
-        val connectedTimes = refused.filter { (result, states) -> states == stayedConnected && result.startsWith("FAILED ") }
-            .map { it.first.split(" ")[1].toLong() }
+        gate.refuse()
+        val refused = try {
+            (1..PROBES).map {
+                val result = shell("connect", env.destinationName, env.destinationPort, PROBE_TIMEOUT_MS)
+                Probe(result, ended = SystemClock.elapsedRealtime(), state = app.controller.state.value.status)
+            }
+        } finally {
+            watch.cancel()
+        }
+        val left = leftConnected.get()
+        val connectedWaits = refused.mapNotNull { it.waitedWhileConnected(left) }
         perf(
             "fail_closed",
             "proxy" to "refusing",
-            "first_ms" to refused.first().first.takeIf { it.startsWith("FAILED ") }?.split(" ")?.get(1),
-            "connected_probes" to connectedTimes.size,
-            "worst_connected_ms" to connectedTimes.maxOrNull(),
-            "opened" to refused.count { it.first.startsWith("CONNECTED ") },
-            "results" to refused.joinToString(",") { (result, state) -> result.replace(' ', ':') + ":" + state },
+            "first_ms" to refused.first().ms?.takeIf { refused.first().failed },
+            "connected_probes" to connectedWaits.size,
+            "worst_connected_ms" to connectedWaits.maxOrNull(),
+            "opened" to refused.count { it.result.startsWith("CONNECTED ") },
+            "results" to refused.joinToString(",") { it.result.replace(' ', ':') + ":" + it.state },
+            "left_connected_ms" to refused.first().ended.let { first -> if (left == 0L) null else left - first },
             "status" to app.controller.state.value.status,
         )
-        assertTrue("with the proxy refusing, no connection opens: $refused", refused.none { it.first.startsWith("CONNECTED ") })
-        assertTrue("the first connection fails, timed: $refused", refused.first().first.startsWith("FAILED "))
+        assertTrue("with the proxy refusing, no connection opens: $refused", refused.none { it.result.startsWith("CONNECTED ") })
+        assertTrue("the first connection fails, timed: $refused", refused.first().failed)
 
         gate.forward(env.socksPort)
         app.disconnectAndSettle()
@@ -229,8 +242,26 @@ class PerformanceEndToEndTest {
      */
     @Test(timeout = 900_000)
     fun throughputAndItsCpu() {
-        // A protocol's failed check is kept for the end, so the other protocol is measured and its figures logged too.
+        // A failed check is kept for the end, so the rest is measured and its figures logged too; each is logged at once,
+        // so an end the test does not reach (a failed connect, its time limit) loses none.
         val failed = mutableListOf<AssertionError>()
+        val keep = { e: AssertionError ->
+            Log.w(TAG, "throughput: kept for the end: ${e.message}")
+            failed += e
+        }
+        try {
+            measureThroughput(keep)
+        } catch (e: Throwable) {
+            failed.forEach(e::addSuppressed)
+            throw e
+        }
+        failed.firstOrNull()?.let { first ->
+            failed.drop(1).forEach(first::addSuppressed)
+            throw first
+        }
+    }
+
+    private fun measureThroughput(keep: (AssertionError) -> Unit) {
         for ((protocol, profile) in listOf("socks5" to socks(), "http" to http())) {
             val byPath = mapOf(PROXY_ONLY to Transfers(), VPN to Transfers())
             try {
@@ -264,14 +295,10 @@ class PerformanceEndToEndTest {
                     for (path in listOf(PROXY_ONLY, VPN)) byPath.getValue(path).report(protocol, direction, path)
                 }
             }
-            failureOf { for (path in listOf(PROXY_ONLY, VPN)) byPath.getValue(path).assertAll(protocol, path) }?.let(failed::add)
+            for (path in listOf(PROXY_ONLY, VPN)) failureOf { byPath.getValue(path).assertAll(protocol, path) }?.let(keep)
             app.connect(profile.id)
-            failureOf { pacedAt50Mbit(protocol, profile) }?.let(failed::add)
+            failureOf { pacedAt50Mbit(protocol, profile) }?.let(keep)
             app.disconnectAndSettle()
-        }
-        failed.firstOrNull()?.let { first ->
-            failed.drop(1).forEach(first::addSuppressed)
-            throw first
         }
     }
 
@@ -291,9 +318,10 @@ class PerformanceEndToEndTest {
         (after.bytesUp + after.bytesDown) - (before.bytesUp + before.bytesDown)
 
     /**
-     * ProxyFlow's CPU while it carries 50 Mbit/s, measured: an upload paced at that rate for [PACED_S]. One that did not
-     * run measures nothing: it is logged with what ProxyFlow said then and tried once more, once the session is connected
-     * (run 41837393553, API 33: the first connection after connecting was refused); the line says how many tries it took.
+     * ProxyFlow's CPU while it carries 50 Mbit/s, measured: an upload paced at that rate for [PACED_S]. One the emulator's
+     * own uplink dropped — the engine had no route to the proxy, as [App.connect] allows — is tried once more when the
+     * proxy answers this process again, logged as such; any other failure fails, with what ProxyFlow said then (run
+     * 41837393553, API 33: the first connection after connecting was refused, M10-65). The line says how many tries.
      */
     private fun pacedAt50Mbit(protocol: String, profile: ProxyProfile) {
         for (attempt in 1..PACED_TRIES) {
@@ -303,9 +331,9 @@ class PerformanceEndToEndTest {
             val cpu = cpuMillis() - cpuBefore
             val after = ProxyEngine().stats()
             val paced = Regex("^PACED (\\d+) (\\d+)$").find(result)
-            if (paced == null && attempt < PACED_TRIES) {
-                val why = "$result; ${failedBetween(before, after)}\n${Diagnostics.report(app)}"
-                Log.w(TAG, "the paced upload through $protocol did not run: $why")
+            if (paced == null && attempt < PACED_TRIES && uplinkDroppedBetween(before, after)) {
+                val waited = app.awaitProxy(profile.host, profile.port)
+                Log.i(TAG, "uplink dropped: the paced upload through $protocol again (the proxy answered after $waited ms): $result")
                 app.await(what = "Connected, to pace again") { it.status == ConnectionStatus.Connected && it.profileId == profile.id }
                 continue
             }
@@ -328,6 +356,11 @@ class PerformanceEndToEndTest {
             return
         }
     }
+
+    /** Whether the engine had no route to the proxy between two of its readings: the emulator's own uplink failing. */
+    private fun uplinkDroppedBetween(before: EngineStats, after: EngineStats): Boolean =
+        (after.failures[UPLINK_DROPPED.code] ?: 0) > (before.failures[UPLINK_DROPPED.code] ?: 0) &&
+            after.lastProxyError?.detail == UPLINK_DROPPED.detail
 
     /** The engine's failures between two of its readings, by code: what it refused meanwhile, and why. */
     private fun failedBetween(before: EngineStats, after: EngineStats): String {
@@ -390,6 +423,32 @@ class PerformanceEndToEndTest {
                 TRANSFERS * DIRECTIONS.size,
                 each.values.sumOf { it.size },
             )
+        }
+    }
+
+    /**
+     * One timed connection of the fail-closed test: the shell client's result ("FAILED ms exception" or "CONNECTED ms"),
+     * when it returned (Android's clock) and the session's state then.
+     */
+    private data class Probe(val result: String, val ended: Long, val state: ConnectionStatus) {
+        val failed: Boolean get() = result.startsWith("FAILED ")
+
+        /** The client's own time to its result. */
+        val ms: Long? get() = result.split(" ").getOrNull(1)?.toLongOrNull()?.takeIf { failed || result.startsWith("CONNECTED ") }
+
+        /**
+         * How long this connection waited while the session was still connected, given when the session left Connected
+         * ([left], 0 if it never did): all its time if it ended before that, the part before it if the session left while
+         * it waited, nothing (null) if it began after — its window is the client's own time before it returned.
+         */
+        fun waitedWhileConnected(left: Long): Long? {
+            val took = ms ?: return null
+            val began = ended - took
+            return when {
+                left == 0L || left >= ended -> took
+                left > began -> left - began
+                else -> null
+            }
         }
     }
 
@@ -620,7 +679,7 @@ class PerformanceEndToEndTest {
         /** The paced upload's length: 62.5 MB at 50 Mbit/s, inside the bulk server's limit of 64 MiB a request. */
         const val PACED_S = 10
 
-        /** A paced upload that did not run is tried once more ([pacedAt50Mbit]). */
+        /** A paced upload the emulator's uplink dropped is tried once more ([pacedAt50Mbit]). */
         const val PACED_TRIES = 2
         const val MANY = 200
         const val HOLD_S = 60

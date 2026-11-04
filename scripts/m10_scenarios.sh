@@ -85,7 +85,7 @@ line_through() { # <label>: one line to the destination by name, which only a pr
     local reply
     LAST_REPLY=""
     reply="$(client tcp "$DESTINATION_NAME" "$DESTINATION_PORT" "PF10-$1" 10000)"
-    LAST_REPLY="$reply"
+    LAST_REPLY="${reply:-no reply to PF10-$1}" # sent, whatever came back: "not sent" is for a line never tried
     [ "$reply" = "REPLY PROXYFLOW-DEST PF10-$1" ]
 }
 admin() { # <command> [extras...]: what the lab's device owner answered (LabAdminCommands)
@@ -428,7 +428,7 @@ part_restart() {
 
     note "R: restarting the phone"
     stop_logcat
-    # The emulators restarted in 23 to 32 s (runs 41826918038 and 41837393553): five minutes is ten times that, and leaves
+    # The emulators restarted in 22 to 40 s (runs 41826918038 and 41837393553): five minutes is seven times that, and leaves
     # R's shortest limit (9 minutes, scripts/e2e_device.sh) the time to say what it saw.
     if ! reboot_and_wait 300; then
         fail "R: the phone did not start again within 5 minutes (a new boot, its boot completed): $REBOOT_SEEN"

@@ -104,7 +104,7 @@ class M10PerformanceTest(unittest.TestCase):
         self.assertIn("SOCKS5 121.5 Mbit/s through ProxyFlow (each 119.4,121.5,122.7; set-up 35 ms), 243.1 straight through the proxy", text)
         self.assertIn("(50 % of it)", text)
         self.assertIn("0 of 5 opened", text)
-        self.assertIn("the worst of the 2 made while the session stayed connected after 15 ms", text)
+        self.assertIn("the longest any of the 2 made while the session was still connected waited then: 15 ms", text)
         self.assertIn("SOCKS5 p50 9 ms, p90 14 ms, max 30 ms (n=20), a TCP connection straight to the proxy p50 2 ms, p90 3 ms", text)
         self.assertIn("throughput down (16 MiB each, the median of 3, timed without its set-up)", text)
         self.assertIn("each with 262144 bytes in flight (ProxyFlow had handed each at least 98304 bytes on when read)", text)
@@ -207,7 +207,7 @@ class M10PerformanceTest(unittest.TestCase):
         # A paced upload that ran on its second try says so.
         retried = [line.replace("cpu_pct=9.0 engine_bytes=62501000", "cpu_pct=9.0 engine_bytes=62501000 tries=2") for line in GOOD]
         facts = m10_performance.report(m10_performance.measurements(run(retried)))[0]
-        self.assertIn("9.0 % of one core; 2 tries, the first 1 did not run (the test's log says why)", "\n".join(facts))
+        self.assertIn("9.0 % of one core; 2 tries, the emulator's uplink dropped the first 1", "\n".join(facts))
         self.assertNotIn("tries", "\n".join(m10_performance.report(m10_performance.measurements(run(GOOD)))[0]))
         # 47.5 and 52.5 Mbit/s are within 5 %; 47.4 is not.
         for rate, counted in (("47.5", True), ("52.5", True), ("47.4", False)):

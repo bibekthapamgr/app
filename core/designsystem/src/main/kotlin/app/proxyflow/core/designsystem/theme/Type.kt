@@ -32,10 +32,11 @@ private val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp
 /**
  * The scale, laid out in [layoutDirection] (defect M10-64). On a phone set to a right-to-left language the screens
  * mirror; ProxyFlow's words are English (until decision D8), and Compose would lay each sentence out right to left too —
- * its full stop at the line's start, a unit before its number ("MB 61.3"), a range turned round. So each text takes the
- * direction of its own words, as Android's own views do, left to right when it has none (numbers, "1–65535"), and its
- * lines keep to the layout's start edge, as the mirrored screen around them does: a text's own direction would
- * otherwise set its alignment, and an English line would sit at the far side of its space.
+ * its full stop at the line's start, a unit before its number ("MB 61.3"), a range turned round. So every text is laid
+ * out left to right, as English is written, whatever the screen's direction — a name in a right-to-left script keeps its
+ * own order inside it, and a line that starts with one is not turned round — and its lines keep to the layout's start
+ * edge, as the mirrored screen around them does: a paragraph's direction sets its alignment otherwise, and an English
+ * line would sit at the far side of its space. Translations (D8) will need each language's own direction instead.
  */
 internal fun proxyFlowTypography(layoutDirection: LayoutDirection): Typography = Scale.laidOut(layoutDirection)
 
@@ -51,7 +52,7 @@ private fun startOf(layoutDirection: LayoutDirection): TextAlign =
     if (layoutDirection == LayoutDirection.Rtl) TextAlign.Right else TextAlign.Left
 
 private fun TextStyle.laidOut(layoutDirection: LayoutDirection): TextStyle =
-    copy(textDirection = TextDirection.ContentOrLtr, textAlign = startOf(layoutDirection))
+    copy(textDirection = TextDirection.Ltr, textAlign = startOf(layoutDirection))
 
 private fun Typography.laidOut(layoutDirection: LayoutDirection): Typography = copy(
     displayLarge = displayLarge.laidOut(layoutDirection),

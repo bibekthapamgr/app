@@ -10,19 +10,18 @@ import org.junit.Test
 
 class TypographyTest {
     /**
-     * Defect M10-64: laid out right to left, as on a phone set to Arabic, Hebrew, Persian or Urdu, every style's text
-     * takes the direction of its own words — so an English sentence stays left to right, its full stop at its end and a
-     * unit after its number — left to right when it has none (a range, "1–65535"), and keeps to the layout's start edge,
-     * the right one there, as the mirrored screen does. Left to right, nothing changes. The right-to-left screenshots
-     * show it laid out.
+     * Defect M10-64: laid out right to left, as on a phone set to Arabic, Hebrew, Persian or Urdu, every style's text is
+     * still laid out left to right, as English is written — its full stop at its end, a unit after its number, a range
+     * in order — and keeps to the layout's start edge, the right one there, as the mirrored screen does. Left to right,
+     * nothing changes. The right-to-left screenshots show it laid out.
      */
     @Test
-    fun everyStyleTakesItsWordsDirectionAndTheLayoutsStart() {
+    fun everyStyleIsLaidOutAsEnglishAtTheLayoutsStart() {
         for ((layout, start) in listOf(LayoutDirection.Ltr to TextAlign.Left, LayoutDirection.Rtl to TextAlign.Right)) {
             val styles = stylesOf(proxyFlowTypography(layout)) + ("monoSmall" to monoSmall(layout))
             assertEquals(16, styles.size)
             styles.forEach { (name, style) ->
-                assertEquals("$name ($layout)", TextDirection.ContentOrLtr, style.textDirection)
+                assertEquals("$name ($layout)", TextDirection.Ltr, style.textDirection)
                 assertEquals("$name ($layout)", start, style.textAlign)
             }
         }

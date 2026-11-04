@@ -34,7 +34,7 @@ VALUES = """<?xml version="1.0" encoding="utf-8"?>
     </array>
     <string name="quoted_markup">"Tap <b>Connect</b>, it's quick"</string>
     <string name="quoted_xliff">"It's <xliff:g id="count">%1$d</xliff:g> left"</string>
-    <string name="quoted_span_in_xliff">"It's <xliff:g id="count"><b>%1$d</b></xliff:g> left"</string>
+    <string name="quoted_span_in_xliff">"<xliff:g id="count"><b>%1$d</b></xliff:g> it's left"</string>
 </resources>
 """
 
@@ -48,12 +48,16 @@ class ProblemsInTest(unittest.TestCase):
         self.assertEqual(["an apostrophe without its backslash (write \\')"], check_strings.problems_in("Android's"))
         self.assertEqual(2, len(check_strings.problems_in("Android's page doesn't open")))
 
-    def test_markup_ends_a_quoted_strings_exemption_and_hash_escapes(self) -> None:
-        # aapt2 starts quoting afresh at each span, so a wholly quoted string with markup needs its backslashes.
-        quote, apostrophe = 'a double quote without its backslash (write \\")', "an apostrophe without its backslash (write \\')"
-        self.assertEqual([quote, apostrophe, quote], check_strings.problems_in('"Tap Connect, it\'s quick"', markup=True))
+    def test_quoting_starts_afresh_at_each_span_and_hash_escapes(self) -> None:
+        # aapt2 turns quoting off at each style span's start and end: the opening quote covers the text before the first
+        # span only, and the closing quote quotes nothing after it.
+        apostrophe = "an apostrophe without its backslash (write \\')"
+        self.assertEqual([apostrophe], check_strings.problems_in_segments(['"Tap ', "Connect", ", it's quick\""]))
+        self.assertEqual([], check_strings.problems_in_segments(['"It\'s ', "%1$d", ' left"']))
         self.assertEqual([], check_strings.problems_in('"Tap Connect, it\'s quick"'))
         self.assertEqual([], check_strings.problems_in("\\#1 in \\@ and \\?"))
+        # A double quote inside, not the string's own opening or closing one, still shows nothing: it is a problem.
+        self.assertEqual(['a double quote without its backslash (write \\")'], check_strings.problems_in_segments(["Say ", "it", ' "loud']))
 
     def test_bad_escapes_and_stray_quotes(self) -> None:
         self.assertIn("a backslash before '%', which Android does not escape", check_strings.problems_in("50\\% off"))
@@ -86,13 +90,10 @@ class CheckTest(unittest.TestCase):
                 f"{where}:14: stray_quote: a double quote without its backslash (write \\\")",
                 f"{where}:14: stray_quote: a double quote without its backslash (write \\\")",
                 f"{where}:15: mixed[0]: an apostrophe without its backslash (write \\')",
-                f"{where}:18: quoted_markup: a double quote without its backslash (write \\\")",
+                # After the span, quoting is off: the apostrophe needs its backslash; the string's own quotes are fine.
                 f"{where}:18: quoted_markup: an apostrophe without its backslash (write \\')",
-                f"{where}:18: quoted_markup: a double quote without its backslash (write \\\")",
                 # An <xliff:g> is no span: quoting goes on across it (aapt2 resets it at spans only). A span inside one is.
-                f"{where}:20: quoted_span_in_xliff: a double quote without its backslash (write \\\")",
                 f"{where}:20: quoted_span_in_xliff: an apostrophe without its backslash (write \\')",
-                f"{where}:20: quoted_span_in_xliff: a double quote without its backslash (write \\\")",
             ],
             report,
         )

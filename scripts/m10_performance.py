@@ -174,9 +174,9 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
     if refusing:
         opened = int(number(refusing.get("opened")) or 0)
         facts.append(
-            f"fail closed, the proxy refusing: the first new connection failed after {refusing.get('first_ms')} ms, the worst of the "
-            f"{refusing.get('connected_probes', '?')} made while the session stayed connected after {refusing.get('worst_connected_ms')} ms; "
-            f"{opened} of {len(refusing.get('results', '').split(','))} opened; each (result:ms:exception:the session's state, before>after where it changed): "
+            f"fail closed, the proxy refusing: the first new connection failed after {refusing.get('first_ms')} ms; the longest any of the "
+            f"{refusing.get('connected_probes', '?')} made while the session was still connected waited then: {refusing.get('worst_connected_ms')} ms; "
+            f"{opened} of {len(refusing.get('results', '').split(','))} opened; each (result:ms:exception:the session's state as it returned): "
             f"{refusing.get('results')}; the session then: {refusing.get('status')}"
         )
         if opened:
@@ -239,7 +239,7 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
             facts.append(f"CPU at 50 Mbit/s, measured, {NAMES[protocol]}: an upload paced at it, {paced.get('bytes')} bytes in {paced.get('ms')} ms "
                          f"({paced.get('mbit_s')} Mbit/s): {paced.get('cpu_ms')} ms of CPU, {paced.get('cpu_pct')} % of one core"
                          + ("" if at_rate else f"; left out of the bar: not within {PACED_BAND * 100:.0f} % of {PACED_MBIT_S:.0f} Mbit/s")
-                         + ("" if tries == 1 else f"; {tries} tries, the first {tries - 1} did not run (the test's log says why)"))
+                         + ("" if tries == 1 else f"; {tries} tries, the emulator's uplink dropped the first {tries - 1}"))
     costliest = max(measured + stand_ins + extrapolated_down, default=None)
     instead = (f", uploads by their rate {'/'.join(f'{v:.1f}' for v in stand_ins) or '?'} % ({'/'.join(off_rate)}: not paced at 50 Mbit/s)"
                if off_rate else "")
