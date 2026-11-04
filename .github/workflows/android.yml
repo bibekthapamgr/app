@@ -198,6 +198,11 @@ jobs:
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: ./gradlew :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle-5-release.log"
 
+      # M10's release candidate: the App Bundle Google Play takes, from the same release build (signed in M11).
+      - name: Release App Bundle
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: ./gradlew :app:bundleRelease 2>&1 | tee "$RUNNER_TEMP/gradle-5b-bundle.log"
+
       # M8: also what the release APK ships for the manifest's @xml files, read back with aapt2 and checked by content
       # in every configuration it ships.
       - name: Release manifest and APK (permissions, backups, debuggable, cleartext, trust, exported components, @xml files)
@@ -269,6 +274,7 @@ jobs:
             app/screenshots/
             app/build/outputs/roborazzi/
             app/build/outputs/apk/
+            app/build/outputs/bundle/
             core/data/schemas/
           if-no-files-found: warn
 
@@ -308,8 +314,8 @@ jobs:
           git commit --allow-empty -m "Screenshots recorded in CI for $(git rev-parse --short HEAD)"
           git push --force origin "HEAD:refs/heads/ci-screenshots/$HEAD_REF"
 
-  # Real Android runtimes: the oldest supported (minSdk 29), the first with
-  # foreground-service types (34), and current ones (35, 36).
+  # Real Android runtimes: every version the app supports, from minSdk 29 (Android 10) to targetSdk 36
+  # (Android 16) — 29, 34, 35 and 36 since M5, 30–33 since M10's compatibility matrix.
   # - ADR-0006: credentials sealed with Android Keystore keys, the real SQLite, and
   #   every file in the app's data directory checked for plaintext (core/data).
   # - The engine (core/engine): the real libgojni.so carrying TCP through mock SOCKS5
@@ -342,7 +348,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api-level: [29, 34, 35, 36]
+        api-level: [29, 30, 31, 32, 33, 34, 35, 36]
     defaults:
       run:
         shell: bash
