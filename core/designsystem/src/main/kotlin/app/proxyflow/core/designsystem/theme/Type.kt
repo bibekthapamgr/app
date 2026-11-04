@@ -11,6 +11,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
+import app.proxyflow.core.model.isolatedText
 
 /** Type scale from design/tokens (system font, sizes in sp so they follow the user's font scale). */
 private val Scale =
@@ -99,9 +100,7 @@ fun TextStyle.typedLeftToRight(): TextStyle = copy(textDirection = TextDirection
  * [text] the user wrote, set inside one of ProxyFlow's sentences: Unicode's first-strong isolate, so it keeps its own
  * direction — left to right when it has no letter — and leaves the sentence's order alone ("Switch to مكتب 2?"). The
  * text's own directional formatting characters (embeddings, overrides, isolates and their ends) are left out, so it
- * cannot end the isolate early and turn the rest of the sentence round (M10-94).
+ * cannot end the isolate early and turn the rest of the sentence round (M10-94). The model's [isolatedText], which the
+ * Quick Settings tile uses too.
  */
-fun isolated(text: String): String = "\u2068" + text.filterNot(::isDirectionalFormatting) + "\u2069"
-
-/** U+202A–U+202E (LRE, RLE, PDF, LRO, RLO) and U+2066–U+2069 (LRI, RLI, FSI, PDI). */
-private fun isDirectionalFormatting(c: Char): Boolean = c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069'
+fun isolated(text: String): String = isolatedText(text)

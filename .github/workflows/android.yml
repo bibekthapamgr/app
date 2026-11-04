@@ -392,9 +392,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # The emulator wants 1.2 times its data partition free (7.4 GB on API 31) before it starts, and its capture grows
-      # past a gigabyte. One runner had 6.6 GB left by then (run 41875419181, API 31: "Not enough space to create userdata
-      # partition", so no test ran): toolchains no job here uses are removed first, the free space logged before and after.
+      # The emulator wanted 7.4 GB free to create API 31's data partition, and one runner had 6.6 GB left by then (run
+      # 41875419181: "Not enough space to create userdata partition", so no test ran; M10-96); its capture takes more as
+      # the tests run. Toolchains no job here uses are removed first, the free space logged before and after.
       - name: Room on the runner's disk for the emulator and its capture
         run: |
           echo "free before: $(df -Ph / | awk 'NR==2 {print $4 " of " $2}')"
@@ -432,6 +432,28 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+
+      # sdkmanager's downloads sometimes arrive broken ("Error on ZipFile unknown archive": an API 36 system image in run
+      # 41850357364, the emulator in 41869234205, API 35's image in 41883778410), and the emulator step's own install
+      # then fails with no test run (M10-105). Installed here first, each up to three times; that install then finds them.
+      - name: The emulator and the system image, installed (each up to three times)
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          for package in emulator "system-images;android-${{ matrix.api-level }};google_apis;x86_64"; do
+            for try in 1 2 3; do
+              if out="$("$sdkmanager" --install "$package" --channel=0 2>&1)"; then
+                echo "$package: installed (try $try)"
+                break
+              fi
+              echo "$package: try $try failed: $(grep -i -m1 'error' <<<"$out" | cut -c1-200)"
+              if [ "$try" = 3 ]; then
+                echo "::error title=Android SDK (API ${{ matrix.api-level }})::$package did not install in three tries"
+                exit 1
+              fi
+              sleep 15
+            done
+          done
 
       - name: Build the instrumented tests
         run: |

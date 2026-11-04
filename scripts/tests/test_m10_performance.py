@@ -165,6 +165,17 @@ class M10PerformanceTest(unittest.TestCase):
         self.assertEqual(1, len(problems), problems)
         self.assertIn("went around it", problems[0])
 
+    def test_a_probe_without_its_stamp_fails_once_the_session_has_left(self):
+        refusing = ("fail_closed proxy=refusing first_ms=8 connected_probes=3 worst_connected_ms=8 opened=0 "
+                    "results=FAILED:8:ConnectException:Connected:{a},FAILED:2:ConnectException:Reconnecting:{b},"
+                    "UNRESOLVED:UnknownHostException:Reconnecting:? left_connected_ms={left} status=Reconnecting")
+        for stamps, left, failures in [(("-40", "310"), "120", 0), (("-40", "?"), "120", 1), (("?", "?"), "?", 0)]:
+            lines = [line for line in GOOD if "proxy=refusing" not in line] + [refusing.format(a=stamps[0], b=stamps[1], left=left)]
+            problems = m10_performance.report(m10_performance.measurements(run(lines)))[2]
+            self.assertEqual(failures, len(problems), (stamps, left, problems))
+            if failures:
+                self.assertIn("without the shell client's stamp", problems[0])
+
     def test_figures_past_their_bars_are_reported_not_failed(self):
         slow = [
             line.replace("p90_ms=1210", "p90_ms=3400")

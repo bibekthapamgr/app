@@ -83,7 +83,7 @@ class ProxyFlowTileService : TileService() {
         val tile = qsTile ?: return
         val content = QuickTile.content(state, profile, locked)
         val line = when (content.line) {
-            QuickTile.Line.Profile -> content.profileName?.let(QuickTile::subtitleOf).orEmpty()
+            QuickTile.Line.Profile -> content.profileName.orEmpty()
             QuickTile.Line.Connected -> getString(R.string.tile_connected)
             QuickTile.Line.Connecting -> getString(R.string.tile_connecting)
             QuickTile.Line.Reconnecting -> getString(R.string.tile_reconnecting)
@@ -98,7 +98,7 @@ class ProxyFlowTileService : TileService() {
             QuickTile.Look.Off -> Tile.STATE_INACTIVE
         }
         tile.label = getString(R.string.tile_label)
-        tile.subtitle = line
+        tile.subtitle = QuickTile.subtitleOf(line)
         // TalkBack reads the tile's name and what it is doing, not only on or off.
         tile.contentDescription = getString(R.string.tile_description, line)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) tile.stateDescription = line

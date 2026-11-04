@@ -182,6 +182,13 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
         )
         if opened:
             problems.append(f"{opened} connection(s) opened while the proxy refused every connection: they went around it ({refusing.get('results')})")
+        # Once the session has left Connected, each connection the shell client made carries when it began (M10-92,
+        # M10-99); without it the count falls back to the test's start of the client, which over-counts (M10-109).
+        if number(refusing.get("left_connected_ms")) is not None:
+            unstamped = [r for r in refusing.get("results", "").split(",") if r.startswith(("FAILED:", "CONNECTED:")) and r.endswith(":?")]
+            if unstamped:
+                problems.append(f"{len(unstamped)} fail-closed probe(s) without the shell client's stamp of when the connection began, so the "
+                                f"count while connected falls back to an over-count: {','.join(unstamped)}")
     if silent:
         facts.append(f"fail closed, the proxy accepting and never answering: the connection failed after {silent.get('first_ms')} ms (the handshake timeout); "
                      f"the session then: {silent.get('status')}")

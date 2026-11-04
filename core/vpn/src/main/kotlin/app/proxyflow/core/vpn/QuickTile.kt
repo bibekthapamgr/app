@@ -3,6 +3,7 @@ package app.proxyflow.core.vpn
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfile
+import app.proxyflow.core.model.isolatedText
 
 /**
  * What the Quick Settings tile (board B11, M9) shows and does, apart from Android's tile API so it can be tested on the
@@ -44,20 +45,14 @@ internal object QuickTile {
     }
 
     /**
-     * [name] as the tile's subtitle shows it. Android's system UI lays the subtitle out by its first character with a
-     * direction of its own (a letter) and, on a right-to-left phone, right to left when it has none, which would turn
-     * round a name that is an address ("2606:4700::1111": a profile without a name shows its server's). A left-to-right
-     * mark in front of such a name keeps it in order, as ProxyFlow's own screens do (M10-101); any other is left as is.
+     * [line] as the tile's subtitle shows it: in a first-strong isolate ([isolatedText]), so it reads in its own
+     * direction whatever the system UI's (M10-106). From Android 12, the system UI lays the subtitle out in the phone's
+     * language's direction, which on a right-to-left phone would put a name's trailing full stop or leading digit at the
+     * wrong end ("2 Office", "Tokyo.") and ProxyFlow's own "Connecting…" turned round; Android 10 and 11 go by the
+     * first letter, which would turn round a name without one ("2606:4700::1111", an unnamed profile's server: M10-101).
+     * The isolate keeps each in order on all of them. TalkBack is given the line as it is.
      */
-    fun subtitleOf(name: String): String = if (name.codePoints().anyMatch(::hasADirection)) name else "\u200E$name"
-
-    private fun hasADirection(codePoint: Int): Boolean = when (Character.getDirectionality(codePoint)) {
-        Character.DIRECTIONALITY_LEFT_TO_RIGHT,
-        Character.DIRECTIONALITY_RIGHT_TO_LEFT,
-        Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC,
-        -> true
-        else -> false
-    }
+    fun subtitleOf(line: String): String = isolatedText(line)
 
     /**
      * @param hasProfile a profile exists to connect.

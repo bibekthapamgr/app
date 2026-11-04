@@ -247,11 +247,25 @@ tcpdump_interfaces() {
 }
 GUEST_CAPTURE=0
 if [ "$API" -lt 34 ]; then
-    # What the emulator's own capture sees of the uplink chosen above (M10-103: not always mobile data).
+    # What the emulator's own capture records of the uplink chosen above (M10-103, M10-107): mobile data always; Wi-Fi
+    # on API 29 only, where it sits behind the same device (radio0); with both up, Android prefers Wi-Fi.
     case "$UPLINK" in
-        "mobile data and Wi-Fi"*) SEEN="its uplink is ${UPLINK}: the emulator's own capture (-tcpdump) sees the mobile data" ;;
-        "mobile data"*) SEEN="its uplink is mobile data, which the emulator's own capture (-tcpdump) sees" ;;
-        *) SEEN="its uplink is ${UPLINK:-none}, which from API 30 on the emulator's own capture (-tcpdump) does not see: it records mobile data's device alone" ;;
+        "") SEEN="no uplink reached the runner" ;;
+        "mobile data and Wi-Fi"*)
+            if [ "$API" = 29 ]; then
+                SEEN="its uplink is ${UPLINK}, both behind the device the emulator's own capture (-tcpdump) records"
+            else
+                SEEN="its uplink is ${UPLINK}: Android prefers Wi-Fi, which from API 30 on the emulator's own capture (-tcpdump) does not record"
+            fi
+            ;;
+        "mobile data"*) SEEN="its uplink is mobile data, which the emulator's own capture (-tcpdump) records" ;;
+        *)
+            if [ "$API" = 29 ]; then
+                SEEN="its uplink is ${UPLINK}, behind the device the emulator's own capture (-tcpdump) records on API 29 (radio0)"
+            else
+                SEEN="its uplink is ${UPLINK}, which from API 30 on the emulator's own capture (-tcpdump) does not record: it records mobile data's device alone"
+            fi
+            ;;
     esac
     echo "not on API $API, below 34: $SEEN (adbd did not survive adb root and unroot on API 29; not tried on 30 to 33)" > "$OUT/guest-capture.txt"
 else
