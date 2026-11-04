@@ -43,7 +43,7 @@ fun PfProfileTestLine(profile: ProxyProfile, lastTest: ProfileTest?, testing: Bo
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     val style = MaterialTheme.typography.bodySmall
     // The icon stays beside the first line when a large font wraps the words over several. A line is as tall as Compose
-    // draws it: the line height in proportion to the font size as Android scales it (non-linearly, from Android 14).
+    // draws it: the line height in proportion to the font size as Compose scales it (not linearly at large scales).
     val line = if (style.lineHeight.isSp && style.fontSize.isSp) {
         with(LocalDensity.current) { style.fontSize.toDp() } * (style.lineHeight.value / style.fontSize.value)
     } else {

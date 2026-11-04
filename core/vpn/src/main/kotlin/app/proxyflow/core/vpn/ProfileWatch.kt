@@ -2,6 +2,7 @@ package app.proxyflow.core.vpn
 
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ProxyProfile
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -34,18 +35,19 @@ internal fun CoroutineScope.watchConnectionProfile(
     renamed: (profileId: String, name: String) -> Unit,
     log: (String) -> Unit,
     retryDelayMillis: (failuresInARow: Long) -> Long = ::profileReadRetryDelay,
+    clockMillis: () -> Long = { System.nanoTime() / 1_000_000 },
 ): Job {
     val connection = state.map { s -> s.profileId?.takeIf { s.active } }.distinctUntilChanged()
-    val readable = profiles.retryReading(log, retryDelayMillis)
+    val readable = profiles.retryReading(log, retryDelayMillis, clockMillis)
     return launch {
-        launch {
+        launch(CoroutineName(DELETION_WATCH)) {
             connection.collectLatest { id ->
                 if (id == null) return@collectLatest
                 val gone = readable.firstOrNull { list -> list.none { it.id == id } }
                 if (gone != null) deleted(id)
             }
         }
-        launch {
+        launch(CoroutineName(RENAME_WATCH)) {
             connection.collectLatest { id ->
                 if (id == null) return@collectLatest
                 readable.mapNotNull { list -> list.firstOrNull { it.id == id }?.name }
@@ -56,17 +58,30 @@ internal fun CoroutineScope.watchConnectionProfile(
     }
 }
 
+internal const val DELETION_WATCH = "profile deletion watch"
+internal const val RENAME_WATCH = "profile rename watch"
+
+/** How long a read must stay good before the count of failures starts over: the store has recovered. */
+internal const val RECOVERED_AFTER_MILLIS = 60_000L
+
 /**
  * The profiles, read again after each failure: logged ([log]), then tried again after [delayMillis] of the failures in a
- * row so far (0 for the first). A good read starts the count over. Cancellation and failures downstream are not retried.
+ * row so far (0 for the first). A read that stays good for [RECOVERED_AFTER_MILLIS] ([clockMillis]) starts the count
+ * over; one that fails again sooner doesn't, so a store that keeps failing soon after each read is still tried less and
+ * less often. Cancellation and failures downstream are not retried.
  */
 internal fun Flow<List<ProxyProfile>>.retryReading(
     log: (String) -> Unit,
     delayMillis: (failuresInARow: Long) -> Long,
+    clockMillis: () -> Long,
 ): Flow<List<ProxyProfile>> = flow {
     var inARow = 0L
+    var goodSince: Long? = null
     emitAll(
-        onEach { inARow = 0 }.retryWhen { e, _ ->
+        onEach { if (goodSince == null) goodSince = clockMillis() }.retryWhen { e, _ ->
+            val good = goodSince
+            goodSince = null
+            if (good != null && clockMillis() - good >= RECOVERED_AFTER_MILLIS) inARow = 0
             log("profiles can't be read (${e.javaClass.simpleName}); trying again")
             delay(delayMillis(inARow++))
             true

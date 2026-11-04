@@ -4,12 +4,15 @@ import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emitAll
@@ -90,10 +93,11 @@ class ProfileWatchTest {
     /** Each watch's first read fails: both are tried again, so a rename and a deletion after Room recovers still count. */
     @Test
     fun bothWatchesGoOnAfterAFailedRead() {
-        val reads = AtomicInteger()
+        val failed = ConcurrentHashMap.newKeySet<String>()
         watch(
             flow {
-                if (reads.getAndIncrement() < 2) throw IllegalStateException("disk")
+                // Once for each watch, whichever reads first and however the reads interleave.
+                if (failed.add(currentCoroutineContext()[CoroutineName]?.name.orEmpty())) throw IllegalStateException("disk")
                 emitAll(profiles)
             },
         )
@@ -104,32 +108,29 @@ class ProfileWatchTest {
         profiles.value = listOf(home)
 
         eventually("the deletion watch went on") { "deleted office" in calls.all }
-        assertEquals("one failure each", 2, calls.count("profiles can't be read"))
+        assertEquals("one failure each", setOf(DELETION_WATCH, RENAME_WATCH), failed)
+        assertEquals(2, calls.count("profiles can't be read"))
     }
 
-    /** The wait doubles with the failures in a row, and starts over after a good read. */
+    /**
+     * The wait grows with the failures in a row. A read that stays good for a minute starts the count over; one that
+     * fails again sooner doesn't, so a store that fails soon after every read is tried less and less often.
+     */
     @Test
-    fun aFailedReadIsTriedAgainAndItsWaitStartsOverAfterAGoodRead() = runBlocking {
-        val waits = CopyOnWriteArrayList<Long>()
-        var reads = 0
-        val source = flow {
-            when (reads++) {
-                0, 1 -> throw IllegalStateException("disk")
-                2 -> {
-                    emit(listOf(office))
-                    throw IllegalStateException("disk")
-                }
-                else -> emit(listOf(home))
-            }
-        }
-        val read = source.retryReading(calls::add) { inARow ->
-            waits += inARow
-            1
-        }.take(2).toList()
+    fun theWaitStartsOverOnlyOnceAReadStaysGood() = runBlocking {
+        val now = AtomicLong()
 
-        assertEquals(listOf(listOf(office), listOf(home)), read)
-        assertEquals("two in a row, then one after a good read", listOf(0L, 1L, 0L), waits)
-        assertEquals(3, calls.count("profiles can't be read (IllegalStateException); trying again"))
+        // Every read gives the profiles, then fails after [goodFor].
+        fun failingAfter(goodFor: Long) = flow {
+            emit(listOf(office))
+            now.addAndGet(goodFor)
+            throw IllegalStateException("disk")
+        }
+        for ((goodFor, expected) in listOf(0L to listOf(0L, 1L, 2L), RECOVERED_AFTER_MILLIS to listOf(0L, 0L, 0L))) {
+            val waits = CopyOnWriteArrayList<Long>()
+            failingAfter(goodFor).retryReading(calls::add, { inARow -> 1L.also { waits += inARow } }, now::get).take(4).toList()
+            assertEquals("good for $goodFor ms", expected, waits)
+        }
     }
 
     @Test
