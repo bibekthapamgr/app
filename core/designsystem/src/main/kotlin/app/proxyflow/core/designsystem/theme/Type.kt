@@ -37,7 +37,8 @@ private val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp
  * start edge, as the mirrored screen around them does: a paragraph's direction sets its alignment otherwise, and an
  * English line would sit at the far side of its space. What the user wrote — a profile's name, what they type — is not
  * ProxyFlow's English: it takes its own direction ([inItsOwnDirection], [isolated], and the fields'
- * [typedInItsOwnDirection]). Translations (D8) will need each language's own direction instead.
+ * [typedInItsOwnDirection]), except an address or a credential typed in, laid out left to right ([typedLeftToRight]).
+ * Translations (D8) will need each language's own direction instead.
  */
 internal fun proxyFlowTypography(layoutDirection: LayoutDirection): Typography = Scale.laidOut(layoutDirection)
 
@@ -74,10 +75,12 @@ private fun Typography.laidOut(layoutDirection: LayoutDirection): Typography = c
 )
 
 /**
- * For text the user wrote shown on its own (a profile's name): the direction of its own words, whatever their script —
- * "مكتب 2" reads as written — still at the layout's start edge.
+ * For text the user wrote shown on its own (a profile's name): the direction of its first letter's script — "مكتب 2"
+ * reads as written — or, when it has no letter, left to right, so a name that is an address (a profile without a name
+ * shows its server's, "2606:4700::1111") keeps its order on a right-to-left screen too (M10-91); still at the layout's
+ * start edge.
  */
-fun TextStyle.inItsOwnDirection(): TextStyle = copy(textDirection = TextDirection.Content)
+fun TextStyle.inItsOwnDirection(): TextStyle = copy(textDirection = TextDirection.ContentOrLtr)
 
 /**
  * For a text field's input: the direction of what is typed, and its lines at that direction's start, as Android's own
@@ -86,7 +89,19 @@ fun TextStyle.inItsOwnDirection(): TextStyle = copy(textDirection = TextDirectio
 fun TextStyle.typedInItsOwnDirection(): TextStyle = copy(textDirection = TextDirection.Content, textAlign = TextAlign.Start)
 
 /**
- * [text] the user wrote, set inside one of ProxyFlow's sentences: Unicode's first-strong isolate, so it keeps its own
- * direction and leaves the sentence's order alone ("Switch to مكتب 2?").
+ * For a field whose input is an address, a port or a credential: left to right whatever is typed and whatever the
+ * screen's direction, from its left edge, as Android lays out its password fields — so an address with no letter
+ * ("2606:4700::1111") keeps its order, and a password's dots stay where its revealed letters are (M10-91).
  */
-fun isolated(text: String): String = "\u2068$text\u2069"
+fun TextStyle.typedLeftToRight(): TextStyle = copy(textDirection = TextDirection.Ltr, textAlign = TextAlign.Start)
+
+/**
+ * [text] the user wrote, set inside one of ProxyFlow's sentences: Unicode's first-strong isolate, so it keeps its own
+ * direction — left to right when it has no letter — and leaves the sentence's order alone ("Switch to مكتب 2?"). The
+ * text's own directional formatting characters (embeddings, overrides, isolates and their ends) are left out, so it
+ * cannot end the isolate early and turn the rest of the sentence round (M10-94).
+ */
+fun isolated(text: String): String = "\u2068" + text.filterNot(::isDirectionalFormatting) + "\u2069"
+
+/** U+202A–U+202E (LRE, RLE, PDF, LRO, RLO) and U+2066–U+2069 (LRI, RLI, FSI, PDI). */
+private fun isDirectionalFormatting(c: Char): Boolean = c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069'

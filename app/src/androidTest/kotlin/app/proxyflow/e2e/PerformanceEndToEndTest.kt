@@ -173,9 +173,10 @@ class PerformanceEndToEndTest {
      * [PROBES] connections to the destination are timed, and none may open — one that did would have gone around the
      * proxy. A few failures in a row make the session reconnect (the escalation rule), and from then on new connections
      * are held, not refused, until it gets through: the bar is how long each connection waited while the session was
-     * still connected. The moment the session left Connected is recorded, so a probe the reconnection began during counts
-     * for the time it waited before it (run 41837393553, API 32: one held 5 s by the reconnection), and one made after it
-     * does not count. Then a proxy that accepts and never answers: its connection waits for the proxy's handshake timeout
+     * still connected. The moment the session left Connected is recorded, and the shell client stamps when each
+     * connection began, so one the reconnection began during counts for the time it waited before it (run 41837393553,
+     * API 32: one held 5 s by the reconnection), and one begun after it does not count, even if the test had started its
+     * client before (M10-92). Then a proxy that accepts and never answers: its connection waits for the proxy's handshake timeout
      * (10 s, engine/adapters/dialer.go), then is refused.
      */
     @Test(timeout = 300_000)
@@ -195,8 +196,8 @@ class PerformanceEndToEndTest {
         val refused = try {
             (1..PROBES).map {
                 val started = SystemClock.elapsedRealtime()
-                val result = shell("connect", env.destinationName, env.destinationPort, PROBE_TIMEOUT_MS)
-                Probe(result, started, ended = SystemClock.elapsedRealtime(), state = app.controller.state.value.status)
+                val line = shell("connect", env.destinationName, env.destinationPort, PROBE_TIMEOUT_MS, "stamped")
+                Probe.of(line, started, ended = SystemClock.elapsedRealtime(), state = app.controller.state.value.status)
             }
         } finally {
             watch.cancel()
@@ -437,10 +438,10 @@ class PerformanceEndToEndTest {
 
     /**
      * One timed connection of the fail-closed test: the shell client's result ("FAILED ms exception" or "CONNECTED ms"),
-     * when the test started it and when it returned (Android's clock; the client starts and stops around its connection,
-     * so its own time is shorter), and the session's state as it returned.
+     * when its connection began ([began], the client's own stamp, after its start-up; null if it printed none), when the
+     * test started the client and when it returned (all on Android's clock), and the session's state as it returned.
      */
-    private data class Probe(val result: String, val started: Long, val ended: Long, val state: ConnectionStatus) {
+    private data class Probe(val result: String, val began: Long?, val started: Long, val ended: Long, val state: ConnectionStatus) {
         val failed: Boolean get() = result.startsWith("FAILED ")
 
         /** The client's own time to its result. */
@@ -448,16 +449,29 @@ class PerformanceEndToEndTest {
 
         /**
          * How long this connection waited while the session was still connected, given when the session left Connected
-         * ([left], 0 if it never did): all its time if it ended before that; if the session left while the probe ran,
-         * its time up to then, which the probe's start bounds from above (the client's own start comes later), never
-         * more than its whole time; nothing (null) if the probe began after.
+         * ([left], 0 if it never did): all its time if it ended before that; if the session left while it waited, its
+         * time up to then; nothing (null) if it began after (M10-92: a connection the client began after the session left,
+         * though the test had started the client before, is not counted). Without a stamp, the client's start bounds
+         * its connection's: its time up to the session leaving is then at most that, never more than its whole time.
          */
         fun waitedWhileConnected(left: Long): Long? {
             val took = ms ?: return null
+            val from = began ?: started
+            val to = if (began != null) began + took else ended
             return when {
-                left == 0L || left >= ended -> took
-                left > started -> minOf(took, left - started)
+                left == 0L || left >= to -> took
+                left > from -> minOf(took, left - from)
                 else -> null
+            }
+        }
+
+        companion object {
+            private val STAMP = Regex(" AT (\\d+)$")
+
+            /** [line] as the stamped shell client printed it: its result, then " AT t" (t: when its connection began). */
+            fun of(line: String, started: Long, ended: Long, state: ConnectionStatus): Probe {
+                val stamp = STAMP.find(line)
+                return Probe(line.removeSuffix(stamp?.value.orEmpty()), stamp?.groupValues?.get(1)?.toLong(), started, ended, state)
             }
         }
     }

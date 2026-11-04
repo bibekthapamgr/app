@@ -40,6 +40,7 @@ import app.proxyflow.core.designsystem.R
 import app.proxyflow.core.designsystem.icon.PfIcons
 import app.proxyflow.core.designsystem.theme.Spacing
 import app.proxyflow.core.designsystem.theme.typedInItsOwnDirection
+import app.proxyflow.core.designsystem.theme.typedLeftToRight
 
 /**
  * Single-line text field with a label, optional hint, and an error message
@@ -47,6 +48,9 @@ import app.proxyflow.core.designsystem.theme.typedInItsOwnDirection
  *
  * @param secret for credentials: Copy and Cut put nothing on the clipboard, so
  *   what is typed here never reaches other apps through it. Paste still works.
+ * @param leftToRight for an address, a port or a credential: laid out left to right
+ *   whatever is typed and whatever the screen's direction, as Android lays out its
+ *   password fields (M10-91). Otherwise what is typed takes its own direction.
  */
 @Composable
 fun PfTextField(
@@ -61,6 +65,7 @@ fun PfTextField(
     trailingIcon: @Composable (() -> Unit)? = null,
     enabled: Boolean = true,
     secret: Boolean = false,
+    leftToRight: Boolean = false,
 ) {
     val message = errorText ?: supportingText
     val field: @Composable () -> Unit = {
@@ -75,8 +80,8 @@ fun PfTextField(
             keyboardOptions = keyboardOptions,
             visualTransformation = visualTransformation,
             trailingIcon = trailingIcon,
-            // What is typed takes its own direction, whatever the screen's (M10-64): it is the user's, not ProxyFlow's English.
-            textStyle = LocalTextStyle.current.typedInItsOwnDirection(),
+            // What is typed is the user's, not ProxyFlow's English (M10-64, M10-83): its own direction, or an address's.
+            textStyle = LocalTextStyle.current.let { if (leftToRight) it.typedLeftToRight() else it.typedInItsOwnDirection() },
             modifier = modifier.fillMaxWidth(),
         )
     }
@@ -94,7 +99,10 @@ private class PasteOnlyClipboard(private val delegate: Clipboard) : Clipboard by
     override suspend fun setClipEntry(clipEntry: ClipEntry?) = Unit
 }
 
-/** Password field: masked by default, with a show/hide toggle; never copied to the clipboard, even when shown. */
+/**
+ * Password field: masked by default, with a show/hide toggle; never copied to the clipboard, even when shown; left to
+ * right, as Android's own.
+ */
 @Composable
 fun PfPasswordField(
     value: String,
@@ -113,6 +121,7 @@ fun PfPasswordField(
         supportingText = supportingText,
         errorText = errorText,
         secret = true,
+        leftToRight = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
         visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {

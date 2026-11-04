@@ -64,17 +64,20 @@ restart_adbd() {
     return 1
 }
 
-# The phone's uplink becomes its mobile data, which runs through the emulator's own network
-# stack on every API level, so the emulator's -tcpdump sees it; from API 34 on, Wi-Fi runs
-# through a separate simulator that capture does not see.
+# The phone's uplink becomes its mobile data, which runs through the emulator's main network
+# device on every API level, so the emulator's -tcpdump, which records that device alone, sees it.
+# From API 30 on, Wi-Fi (virtio Wi-Fi) is a network device of its own, which that capture does not
+# see (M10-89: the emulator's source, and API 34 and 35's runs on Wi-Fi); on API 29 the phone's
+# Wi-Fi sits behind the same device as its mobile data (radio0).
 #
 # The tests need that uplink to reach the runner (10.0.2.2, the emulator's name for the runner's
 # loopback). The runner's closed port refuses a connection and the refusal comes back through the
 # emulator: that proves the route without touching the proxies or the destination. Without an
 # uplink the phone answers "Network is unreachable" itself. Mobile data did not come up on one
 # API 35 emulator (run 41219399550: one packet on its uplink all run, every connection "no route
-# to the proxy"), so it is switched off and on once, and then Wi-Fi is the fallback (from API 34
-# on only tcpdump inside the phone sees it; the evidence says which captures cover the uplink).
+# to the proxy"), so it is switched off and on once, and then Wi-Fi is the fallback (from API 30
+# on only tcpdump inside the phone sees it, which runs from API 34 on: on API 30 to 33 the evidence
+# then fails, for want of a capture of the uplink; it says which captures cover it).
 reaches_runner() {
     local out
     out="$(adb shell 'toybox nc -w 3 10.0.2.2 1082 </dev/null; true' 2>&1 | tr -d '\r')"
@@ -154,9 +157,10 @@ choose_uplink() {
     # failing tests twice, and never came up in one), while Wi-Fi alone held on both: there Wi-Fi is the uplink, in
     # airplane mode, and tcpdump inside the phone captures it. The API 33 image's mobile data dropped during the
     # tests in M10's runs too (41822664621: four attempts in one test; 41856359695: gone for the last minutes of the
-    # tests, every connection "Network is unreachable"): Wi-Fi there too, which before API 34 runs through the
-    # emulator's own network stack, so its -tcpdump still sees the uplink (the evidence checks the capture covers it).
-    if [ "$API" = 33 ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
+    # tests, every connection "Network is unreachable"), but its Wi-Fi is not in the emulator's capture, and tcpdump
+    # does not run inside the phone below API 34: over Wi-Fi, nothing would capture API 33's uplink (M10-89, run
+    # 41869234205). So it keeps mobile data, and a run whose mobile data drops fails, for the emulator (M10-88).
+    if [ "$API" = 34 ] || [ "$API" = 35 ]; then
         wifi_in_airplane_mode
         if uplink_within 60; then
             UPLINK="$(uplink_name) (airplane mode, so the radio is off: mobile data is unreliable on this image)"
@@ -181,7 +185,7 @@ choose_uplink() {
             sleep 2
         done
     fi
-    if [ -n "$UPLINK" ] || [ "$API" = 33 ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
+    if [ -n "$UPLINK" ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
         : # chosen above
     elif cellular_up; then
         NOTE=""
@@ -231,8 +235,9 @@ fi
 # group (init kills that group's cgroup when adbd restarts as the shell user, which the tests
 # need: the VPN covers the shell, not root). The evidence counts these captures only if
 # tcpdump is still running after the tests.
-# Not on API 29: adbd does not come back after adb root and unroot there (run 41230555282: the device stayed
-# offline, so no test ran), and its uplink, mobile data or Wi-Fi, all passes the emulator's own capture.
+# Not below API 34: on API 29 adbd does not come back after adb root and unroot (run 41230555282: the device stayed
+# offline, so no test ran), and on API 30 to 33 it has not been tried, their uplink being mobile data, which the
+# emulator's own capture sees (Wi-Fi, which it does not see, is only their fallback: M10-89).
 # The interfaces the phone's running tcpdump processes capture, from their command lines ("none" when none runs).
 tcpdump_interfaces() {
     local found
@@ -242,7 +247,7 @@ tcpdump_interfaces() {
 }
 GUEST_CAPTURE=0
 if [ "$API" -lt 34 ]; then
-    echo "not on API $API: adbd does not survive adb root and unroot on this image; the emulator's own capture (-tcpdump) sees the whole uplink" > "$OUT/guest-capture.txt"
+    echo "not on API $API, below 34: its uplink is mobile data, which the emulator's own capture (-tcpdump) sees (adbd did not survive adb root and unroot on API 29; not tried on 30 to 33)" > "$OUT/guest-capture.txt"
 else
     {
         echo "adb root: $(timeout 30 adb root 2>&1 | tr -d '\r')"

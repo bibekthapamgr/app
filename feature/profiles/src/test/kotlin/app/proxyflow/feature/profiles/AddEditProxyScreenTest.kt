@@ -252,6 +252,18 @@ class AddEditProxyScreenTest {
         }
     }
 
+    /**
+     * Leaving unsaved edits asks first, naming the profile as a first-strong isolate (M10-90): "2 مكتب" keeps its digit and
+     * the sentence its full stop where they belong, whatever the name's direction.
+     */
+    @Test
+    fun discardingEditsNamesTheProfileInItsOwnDirection() {
+        showForm(editing.copy(dirty = true, originalName = "2 مكتب"))
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Discard changes?").assertIsDisplayed()
+        compose.onNodeWithText("Your edits to ${isolated("2 مكتب")} haven't been saved.").assertIsDisplayed()
+    }
+
     /** D9 during a first connect: the reconnect only checks the new settings, and says so. */
     @Test
     fun aReconnectDuringAFirstConnectSaysItOnlyChecks() {

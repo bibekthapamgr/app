@@ -359,7 +359,8 @@ class App {
             retries++
             val waited = ended.profile?.let { awaitProxy(it.host, it.port) }
             val answered = when {
-                waited == null || waited < 0 -> "did not answer this process within ${UPLINK_WAIT_MS / 1000} s"
+                waited == null -> "was not waited for: the failed state names no profile"
+                waited < 0 -> "did not answer this process within ${UPLINK_WAIT_MS / 1000} s"
                 else -> "answered this process again after $waited ms"
             }
             Log.i(TAG, "uplink dropped: connecting again (retry $retries; the proxy $answered)")

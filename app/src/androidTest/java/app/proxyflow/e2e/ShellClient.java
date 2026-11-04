@@ -1,5 +1,6 @@
 package app.proxyflow.e2e;
 
+import android.os.SystemClock;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.FileInputStream;
@@ -50,7 +51,7 @@ import javax.net.ssl.TrustManagerFactory;
  *   hold HOST PORT SECONDS                    ENDED ms closed|reset|data|timeout | ERROR ...
  *   rate HOST PORT up|down BYTES TIMEOUT_MS [via socks5|http]   RATE timed ms SETUP ms | ERROR ...
  *   pace HOST PORT BYTES_PER_S SECONDS TIMEOUT_MS                PACED bytes ms | ERROR ...
- *   connect HOST PORT TIMEOUT_MS              CONNECTED ms | FAILED ms exception | UNRESOLVED exception
+ *   connect HOST PORT TIMEOUT_MS [stamped]    CONNECTED ms | FAILED ms exception | UNRESOLVED exception
  *   many HOST PORT COUNT SECONDS [load BYTES] HELD opened OF count FAILED failures IN ms [DRAINED n] [first exception]
  * </pre>
  *
@@ -61,7 +62,8 @@ import javax.net.ssl.TrustManagerFactory;
  * no password is on a command line) and asks it for HOST:PORT by name, as ProxyFlow does: the same transfer without
  * ProxyFlow, for while it is not connected. pace uploads BYTES_PER_S for SECONDS, evenly, so a test can read what a
  * given rate costs ProxyFlow. connect resolves HOST, then times the connection's set-up alone (through ProxyFlow, it is
- * accepted only once the proxy's tunnel is open, ADR-0002, so a refusing proxy shows as a quick failure). many looks
+ * accepted only once the proxy's tunnel is open, ADR-0002, so a refusing proxy shows as a quick failure); stamped, it
+ * adds " AT t", t being when the connection began on Android's clock (SystemClock.elapsedRealtime). many looks
  * HOST up once and opens COUNT connections one after another, each asking the bulk server to hold it for SECONDS — or,
  * with load, to send it BYTES, which it leaves unread behind a small receive buffer, so they wait along the way,
  * ProxyFlow's buffers among them — prints how long opening them took, and closes each a moment before SECONDS after it
@@ -114,7 +116,7 @@ public final class ShellClient {
             case "pace":
                 return pace(a[1], Integer.parseInt(a[2]), Long.parseLong(a[3]), Integer.parseInt(a[4]), Integer.parseInt(a[5]));
             case "connect":
-                return connect(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]));
+                return connect(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]), a.length > 4 && a[4].equals("stamped"));
             case "many":
                 return many(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]), Integer.parseInt(a[4]),
                         a.length > 6 && a[5].equals("load") ? Long.parseLong(a[6]) : 0);
@@ -323,19 +325,22 @@ public final class ShellClient {
         return reply.toString("US-ASCII").trim();
     }
 
-    private static String connect(String host, int port, int timeout) {
+    private static String connect(String host, int port, int timeout, boolean stamped) {
         InetSocketAddress address;
         try {
             address = new InetSocketAddress(InetAddress.getByName(host), port);
         } catch (Exception e) {
             return "UNRESOLVED " + e.getClass().getSimpleName();
         }
+        // Stamped: when the connection began, on Android's clock (elapsedRealtime, the tests'), after the client's own
+        // start-up, for a test that sets it against when the session changed state (M10-92).
+        String began = stamped ? " AT " + SystemClock.elapsedRealtime() : "";
         long start = System.nanoTime();
         try (Socket socket = new Socket()) {
             socket.connect(address, timeout);
-            return "CONNECTED " + (System.nanoTime() - start) / 1_000_000;
+            return "CONNECTED " + (System.nanoTime() - start) / 1_000_000 + began;
         } catch (Exception e) {
-            return "FAILED " + (System.nanoTime() - start) / 1_000_000 + " " + e.getClass().getSimpleName();
+            return "FAILED " + (System.nanoTime() - start) / 1_000_000 + " " + e.getClass().getSimpleName() + began;
         }
     }
 

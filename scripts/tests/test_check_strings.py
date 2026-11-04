@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import check_strings  # noqa: E402
 
 VALUES = """<?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" xmlns:tools="http://schemas.android.com/tools">
     <!-- A comment's apostrophe: Android's -->
     <string name="good">You\\'re offline: Android\\'s kill switch, \\"quoted\\", a\\nb, \\u00e9, \\@ and \\?</string>
     <string name="quoted">"It's quoted whole"</string>
@@ -35,6 +35,7 @@ VALUES = """<?xml version="1.0" encoding="utf-8"?>
     <string name="quoted_markup">"Tap <b>Connect</b>, it's quick"</string>
     <string name="quoted_xliff">"It's <xliff:g id="count">%1$d</xliff:g> left"</string>
     <string name="quoted_span_in_xliff">"<xliff:g id="count"><b>%1$d</b></xliff:g> it's left"</string>
+    <string name="quoted_other_namespace">"It's <tools:note>still</tools:note> quoted"</string>
 </resources>
 """
 
@@ -94,6 +95,7 @@ class CheckTest(unittest.TestCase):
                 f"{where}:18: quoted_markup: an apostrophe without its backslash (write \\')",
                 # An <xliff:g> is no span: quoting goes on across it (aapt2 resets it at spans only). A span inside one is.
                 f"{where}:20: quoted_span_in_xliff: an apostrophe without its backslash (write \\')",
+                # Nor is an element of any other namespace (aapt2 ignores it): line 21's apostrophe is still quoted.
             ],
             report,
         )

@@ -196,7 +196,7 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
     if (confirmDiscard) {
         PfConfirmDialog(
             title = stringResource(R.string.edit_discard_title),
-            text = state.originalName?.let { stringResource(R.string.edit_discard_body_named, it) }
+            text = state.originalName?.let { stringResource(R.string.edit_discard_body_named, isolated(it)) }
                 ?: stringResource(R.string.edit_discard_body),
             confirmLabel = stringResource(R.string.edit_discard),
             dismissLabel = stringResource(R.string.edit_keep_editing),
@@ -246,6 +246,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
             label = stringResource(R.string.edit_server),
             errorText = errors[ProfileField.Server]?.let { errorText(it, input.protocol) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+            leftToRight = true,
             modifier = Modifier.weight(0.64f),
         )
         PfTextField(
@@ -255,6 +256,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
             supportingText = stringResource(R.string.edit_port_hint),
             errorText = errors[ProfileField.Port]?.let { errorText(it, input.protocol) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            leftToRight = true,
             modifier = Modifier.weight(0.36f),
         )
     }
@@ -272,6 +274,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
             errorText = errors[ProfileField.Username]?.let { errorText(it, input.protocol) },
             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
             secret = true,
+            leftToRight = true,
         )
         PfPasswordField(
             value = input.password,
@@ -306,6 +309,7 @@ private fun FormFields(state: AddEditUiState, actions: AddEditActions) {
             supportingText = stringResource(R.string.edit_tls_server_name_hint),
             errorText = errors[ProfileField.TlsServerName]?.let { errorText(it, input.protocol) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+            leftToRight = true,
         )
     } else {
         // Board D4: always shown while TLS is off, stronger when a password would travel in the clear.

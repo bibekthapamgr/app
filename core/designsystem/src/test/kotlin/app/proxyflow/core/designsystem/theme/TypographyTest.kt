@@ -28,21 +28,39 @@ class TypographyTest {
     }
 
     /**
-     * What the user wrote is not ProxyFlow's English (defect M10-83): a name shown alone takes the direction of its own
-     * words, still at the layout's start; what is typed takes its own direction and that direction's start, as Android's
-     * fields do; and a name set inside a sentence is a first-strong isolate, which keeps its order and the sentence's.
+     * What the user wrote is not ProxyFlow's English (defect M10-83): a name shown alone takes the direction of its first
+     * letter, left to right when it has none (M10-91), still at the layout's start; what is typed takes its own direction
+     * and that direction's start, as Android's fields do, but an address or a credential is typed left to right from the
+     * left edge, as Android's password fields are (M10-91); and a name set inside a sentence is a first-strong isolate,
+     * which keeps its order and the sentence's.
      */
     @Test
     fun theUsersOwnTextTakesItsOwnDirection() {
         for ((layout, start) in listOf(LayoutDirection.Ltr to TextAlign.Left, LayoutDirection.Rtl to TextAlign.Right)) {
             val name = proxyFlowTypography(layout).titleMedium.inItsOwnDirection()
-            assertEquals(TextDirection.Content, name.textDirection)
+            assertEquals(TextDirection.ContentOrLtr, name.textDirection)
             assertEquals("a name stays at the layout's start ($layout)", start, name.textAlign)
             val typed = proxyFlowTypography(layout).bodyLarge.typedInItsOwnDirection()
             assertEquals(TextDirection.Content, typed.textDirection)
             assertEquals(TextAlign.Start, typed.textAlign)
+            val address = proxyFlowTypography(layout).bodyLarge.typedLeftToRight()
+            assertEquals(TextDirection.Ltr, address.textDirection)
+            assertEquals(TextAlign.Start, address.textAlign)
         }
         assertEquals("\u2068مكتب 2\u2069", isolated("مكتب 2"))
+    }
+
+    /**
+     * A name cannot end its isolate early (M10-94): its own embeddings, overrides and isolates are left out, so a pop
+     * followed by a right-to-left override cannot turn the rest of ProxyFlow's sentence round. Other text is kept.
+     */
+    @Test
+    fun aNamesOwnDirectionalFormattingIsLeftOut() {
+        assertEquals("\u2068Office!\u2069", isolated("Office\u2069\u202E!"))
+        val formatting = ('\u202A'..'\u202E') + ('\u2066'..'\u2069')
+        assertEquals("\u2068ab\u2069", isolated(formatting.joinToString("", prefix = "a", postfix = "b")))
+        // Marks are not formatting that nests: they stay, as do the letters and spaces around them.
+        assertEquals("\u2068a\u200Fb \u200Ec\u2069", isolated("a\u200Fb \u200Ec"))
     }
 
     /** Only the direction and the alignment change: the sizes are still design/tokens'. */
