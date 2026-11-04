@@ -695,12 +695,8 @@ class ScreenshotTest {
     @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
     fun largeFontHomeConnected() = captureLargeFont("B4_home_connected", action = hasText("Disconnect")) {
         val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
-        HomeScreen(
-            home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic),
-            HomeActions(),
-            nowMillis =
-            SAMPLE_TIME + 767_000,
-        )
+        val state = home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic)
+        HomeScreen(state, HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
     }
 
     @Test
@@ -753,8 +749,8 @@ class ScreenshotTest {
     @Test
     @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
     fun largeFontSettings() = captureLargeFont("E1_settings", action = hasText("About & privacy")) {
-        SettingsScreen(SettingsUiState(loading = false, theme = ThemePreference.System), onThemeChange = {
-        }, onOpenAbout = {}, notificationsOn = true)
+        val state = SettingsUiState(loading = false, theme = ThemePreference.System)
+        SettingsScreen(state, onThemeChange = {}, onOpenAbout = {}, notificationsOn = true)
     }
 
     @Test
@@ -794,49 +790,51 @@ class ScreenshotTest {
 
     @Test
     @Config(qualifiers = "+ldrtl")
-    fun rightToLeftHomeConnected() = captureRightToLeft("B4_home_connected") { connectedHome() }
+    fun rightToLeftHomeConnected() = captureRightToLeft("B4_home_connected") { ConnectedHome() }
 
     @Test
     @Config(qualifiers = "+ldrtl")
-    fun rightToLeftConnectFailed() = captureRightToLeft("B6b_connect_failed") { connectFailedHome() }
+    fun rightToLeftConnectFailed() = captureRightToLeft("B6b_connect_failed") { ConnectFailedHome() }
 
     @Test
     @Config(qualifiers = "+ldrtl")
-    fun rightToLeftProfiles() = captureRightToLeft("C2_profiles_list") { profilesList() }
+    fun rightToLeftProfiles() = captureRightToLeft("C2_profiles_list") { ProfilesList() }
 
     @Test
     @Config(qualifiers = "+ldrtl")
-    fun rightToLeftAddProxy() = captureRightToLeft("D1_add_proxy") { addProxyForm() }
+    fun rightToLeftAddProxy() = captureRightToLeft("D1_add_proxy") { AddProxyForm() }
 
     @Test
     @Config(qualifiers = "+ldrtl")
-    fun rightToLeftSettings() = captureRightToLeft("E1_settings") { settingsScreen() }
+    fun rightToLeftSettings() = captureRightToLeft("E1_settings") { SettingsSample() }
 
     @Composable
-    private fun connectedHome() {
+    private fun ConnectedHome() {
         val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
-        HomeScreen(
-            home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic),
-            HomeActions(),
-            nowMillis =
-            SAMPLE_TIME + 767_000,
-        )
+        val state = home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic)
+        HomeScreen(state, HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
     }
 
     @Composable
-    private fun connectFailedHome() =
+    private fun ConnectFailedHome() {
         HomeScreen(home(ConnectionState(profileId = "p1", error = ConnectionError("PROXY_UNREACHABLE"))), HomeActions())
+    }
 
     @Composable
-    private fun profilesList() =
+    private fun ProfilesList() {
         ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}, nowMillis = SAMPLE_TIME)
+    }
 
     @Composable
-    private fun addProxyForm() = AddEditProxyScreen(AddEditUiState(input = tokyoForm, dirty = true), AddEditActions())
+    private fun AddProxyForm() {
+        AddEditProxyScreen(AddEditUiState(input = tokyoForm, dirty = true), AddEditActions())
+    }
 
     @Composable
-    private fun settingsScreen() = SettingsScreen(SettingsUiState(loading = false, theme = ThemePreference.System), onThemeChange = {
-    }, onOpenAbout = {}, notificationsOn = true)
+    private fun SettingsSample() {
+        val state = SettingsUiState(loading = false, theme = ThemePreference.System)
+        SettingsScreen(state, onThemeChange = {}, onOpenAbout = {}, notificationsOn = true)
+    }
 
     /** [content] laid out right to left, as the test's @Config sets — which must be in force — captured in screenshots/rtl and checked. */
     private fun captureRightToLeft(name: String, content: @Composable () -> Unit) {

@@ -19,7 +19,9 @@ import java.security.MessageDigest;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.Properties;
 import java.util.Random;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
@@ -46,17 +48,24 @@ import javax.net.ssl.TrustManagerFactory;
  *   bulk HOST PORT up BYTES TIMEOUT_MS LINGER_MS     SENT n REPLY text | ERROR ...
  *   bulk HOST PORT down BYTES TIMEOUT_MS LINGER_MS   RECEIVED n | ERROR ...
  *   hold HOST PORT SECONDS                    ENDED ms closed|reset|data|timeout | ERROR ...
- *   rate HOST PORT up|down BYTES TIMEOUT_MS   RATE bytes ms | ERROR ...
+ *   rate HOST PORT up|down BYTES TIMEOUT_MS [via socks5|http]   RATE timed ms SETUP ms | ERROR ...
+ *   pace HOST PORT BYTES_PER_S SECONDS TIMEOUT_MS                PACED bytes ms | ERROR ...
  *   connect HOST PORT TIMEOUT_MS              CONNECTED ms | FAILED ms exception | UNRESOLVED exception
- *   many HOST PORT COUNT SECONDS              HELD opened OF count FAILED failures IN ms [first exception]
+ *   many HOST PORT COUNT SECONDS [load BYTES] HELD opened OF count FAILED failures IN ms [DRAINED n] [first exception]
  * </pre>
  *
- * rate (M10) times one bulk transfer, from the connection's start to the last byte read or the
- * server's count; connect resolves HOST, then times the connection's set-up alone (through ProxyFlow, it is accepted only
- * once the proxy's tunnel is open, ADR-0002, so a refusing proxy shows as a quick failure); many
- * opens COUNT connections one after another, each asking the bulk server to hold it for SECONDS,
- * prints how long opening them took, and closes each a moment before its hold would end, so a test
- * can read the engine's memory while all are open.
+ * rate (M10) times one bulk transfer, without its set-up: an upload from the request line sent to the server's count,
+ * a download from its first byte to its last ("timed" is the bytes that time covers); SETUP is what came before, from
+ * the start (the lookup, the connection, any proxy handshake, the request). With via, the client signs in to the lab's
+ * SOCKS5 or HTTP proxy itself (proxy.host and the protocol's port and sign-in, read from the lab's properties file, so
+ * no password is on a command line) and asks it for HOST:PORT by name, as ProxyFlow does: the same transfer without
+ * ProxyFlow, for while it is not connected. pace uploads BYTES_PER_S for SECONDS, evenly, so a test can read what a
+ * given rate costs ProxyFlow. connect resolves HOST, then times the connection's set-up alone (through ProxyFlow, it is
+ * accepted only once the proxy's tunnel is open, ADR-0002, so a refusing proxy shows as a quick failure). many looks
+ * HOST up once and opens COUNT connections one after another, each asking the bulk server to hold it for SECONDS — or,
+ * with load, to send it BYTES, which it leaves unread behind a small receive buffer, so they wait along the way,
+ * ProxyFlow's buffers among them — prints how long opening them took, and closes each a moment before SECONDS after it
+ * opened (with load, having read its BYTES first), so a test can read the engine's memory while all are open.
  *
  * bulk and hold talk to the lab's bulk server (scripts/e2e_servers.py): up sends BYTES after its
  * request line and prints the server's count, down reads BYTES, and both then keep the connection
@@ -100,11 +109,15 @@ public final class ShellClient {
             case "hold":
                 return hold(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]));
             case "rate":
-                return rate(a[1], Integer.parseInt(a[2]), a[3], Long.parseLong(a[4]), Integer.parseInt(a[5]));
+                return rate(a[1], Integer.parseInt(a[2]), a[3], Long.parseLong(a[4]), Integer.parseInt(a[5]),
+                        a.length > 7 && a[6].equals("via") ? a[7] : null);
+            case "pace":
+                return pace(a[1], Integer.parseInt(a[2]), Long.parseLong(a[3]), Integer.parseInt(a[4]), Integer.parseInt(a[5]));
             case "connect":
                 return connect(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]));
             case "many":
-                return many(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]), Integer.parseInt(a[4]));
+                return many(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]), Integer.parseInt(a[4]),
+                        a.length > 6 && a[5].equals("load") ? Long.parseLong(a[6]) : 0);
             default:
                 return "ERROR unknown command";
         }
@@ -151,12 +164,163 @@ public final class ShellClient {
         }
     }
 
-    private static String rate(String host, int port, String direction, long bytes, int timeout) throws Exception {
+    private static String rate(String host, int port, String direction, long bytes, int timeout, String via) throws Exception {
         long start = System.nanoTime();
-        String result = bulk(host, port, direction, bytes, timeout, 0);
-        long ms = (System.nanoTime() - start) / 1_000_000;
-        String expected = direction.equals("up") ? "SENT " + bytes + " REPLY GOT " + bytes : "RECEIVED " + bytes;
-        return result.equals(expected) ? "RATE " + bytes + " " + ms : "ERROR " + result;
+        try (Socket socket = new Socket()) {
+            if (via == null) {
+                socket.connect(new InetSocketAddress(host, port), timeout);
+                socket.setSoTimeout(timeout);
+            } else {
+                Properties lab = lab();
+                boolean socks = via.equals("socks5");
+                if (!socks && !via.equals("http")) return "ERROR via " + via + "?";
+                String proxy = lab.getProperty("proxy.host");
+                socket.connect(new InetSocketAddress(proxy, Integer.parseInt(lab.getProperty(socks ? "socks.port" : "http.port"))), timeout);
+                socket.setSoTimeout(timeout);
+                if (socks) {
+                    socks5(socket, lab.getProperty("socks.user"), lab.getProperty("socks.password"), host, port);
+                } else {
+                    httpConnect(socket, lab.getProperty("http.user"), lab.getProperty("http.password"), host, port);
+                }
+            }
+            OutputStream out = socket.getOutputStream();
+            InputStream in = socket.getInputStream();
+            byte[] buffer = new byte[65536];
+            for (int i = 0; i < buffer.length; i++) buffer[i] = (byte) i;
+            if (direction.equals("up")) {
+                out.write(("UP " + bytes + "\n").getBytes(StandardCharsets.US_ASCII));
+                out.flush();
+                long clock = System.nanoTime(); // the transfer from here; the set-up and the request line before it
+                long left = bytes;
+                while (left > 0) {
+                    int n = (int) Math.min(buffer.length, left);
+                    out.write(buffer, 0, n);
+                    left -= n;
+                }
+                out.flush();
+                String reply = line(in);
+                long end = System.nanoTime();
+                if (!reply.equals("GOT " + bytes)) return "ERROR the bulk server answered " + reply + " to " + bytes + " bytes";
+                return "RATE " + bytes + " " + (end - clock) / 1_000_000 + " SETUP " + (clock - start) / 1_000_000;
+            }
+            out.write(("DOWN " + bytes + "\n").getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            int first = in.read(buffer, 0, (int) Math.min(buffer.length, bytes));
+            if (first <= 0) return "ERROR the bulk server sent nothing";
+            long clock = System.nanoTime(); // from the first byte: the set-up and the first round trip before it
+            long received = first;
+            int n;
+            while (received < bytes && (n = in.read(buffer, 0, (int) Math.min(buffer.length, bytes - received))) != -1) received += n;
+            long end = System.nanoTime();
+            if (received != bytes) return "ERROR RECEIVED " + received + " of " + bytes;
+            return "RATE " + (bytes - first) + " " + (end - clock) / 1_000_000 + " SETUP " + (clock - start) / 1_000_000;
+        }
+    }
+
+    private static String pace(String host, int port, long rate, int seconds, int timeout) throws Exception {
+        long bytes = rate * seconds;
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), timeout);
+            socket.setSoTimeout(timeout);
+            OutputStream out = socket.getOutputStream();
+            out.write(("UP " + bytes + "\n").getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            byte[] chunk = new byte[16384];
+            long start = System.nanoTime();
+            long sent = 0;
+            while (sent < bytes) {
+                int n = (int) Math.min(chunk.length, bytes - sent);
+                out.write(chunk, 0, n);
+                sent += n;
+                long wait = start + sent * 1_000_000_000L / rate - System.nanoTime(); // until this many bytes are due
+                if (wait > 0) Thread.sleep(wait / 1_000_000, (int) (wait % 1_000_000));
+            }
+            out.flush();
+            String reply = line(socket.getInputStream());
+            long ms = (System.nanoTime() - start) / 1_000_000;
+            return reply.equals("GOT " + bytes) ? "PACED " + bytes + " " + ms : "ERROR the bulk server answered " + reply + " to " + bytes + " bytes";
+        }
+    }
+
+    /** The lab's setup (scripts/e2e_env.sh), which the shell user may read: the proxies' address, ports and sign-ins. */
+    private static Properties lab() throws IOException {
+        Properties lab = new Properties();
+        try (FileInputStream in = new FileInputStream(LAB_PROPERTIES)) {
+            lab.load(in);
+        }
+        return lab;
+    }
+
+    private static final String LAB_PROPERTIES = "/data/local/tmp/proxyflow-e2e.properties";
+
+    /** RFC 1928 and 1929: signs in by name and password, then asks for a tunnel to host:port by name, as ProxyFlow does. */
+    private static void socks5(Socket socket, String user, String password, String host, int port) throws IOException {
+        OutputStream out = socket.getOutputStream();
+        DataInputStream in = new DataInputStream(socket.getInputStream()); // unbuffered: nothing past the reply is read
+        out.write(new byte[] {5, 1, 2});
+        out.flush();
+        if (in.readUnsignedByte() != 5 || in.readUnsignedByte() != 2) throw new IOException("the proxy refused sign-in by name and password");
+        byte[] name = user.getBytes(StandardCharsets.UTF_8);
+        byte[] secret = password.getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream signIn = new ByteArrayOutputStream();
+        signIn.write(1);
+        signIn.write(name.length);
+        signIn.write(name, 0, name.length);
+        signIn.write(secret.length);
+        signIn.write(secret, 0, secret.length);
+        out.write(signIn.toByteArray());
+        out.flush();
+        if (in.readUnsignedByte() != 1 || in.readUnsignedByte() != 0) throw new IOException("the proxy refused the sign-in");
+        byte[] target = host.getBytes(StandardCharsets.US_ASCII);
+        ByteArrayOutputStream request = new ByteArrayOutputStream();
+        request.write(new byte[] {5, 1, 0, 3}, 0, 4);
+        request.write(target.length);
+        request.write(target, 0, target.length);
+        request.write(port >> 8);
+        request.write(port & 0xFF);
+        out.write(request.toByteArray());
+        out.flush();
+        if (in.readUnsignedByte() != 5) throw new IOException("not a SOCKS5 reply");
+        int reply = in.readUnsignedByte();
+        if (reply != 0) throw new IOException("the proxy answered " + reply + " to the CONNECT");
+        in.readUnsignedByte();
+        int type = in.readUnsignedByte();
+        int length;
+        if (type == 1) {
+            length = 4;
+        } else if (type == 4) {
+            length = 16;
+        } else if (type == 3) {
+            length = in.readUnsignedByte();
+        } else {
+            throw new IOException("SOCKS5 address type " + type);
+        }
+        in.readFully(new byte[length + 2]); // the bound address and port
+    }
+
+    /** An HTTP CONNECT to host:port by name, signed in (Basic), as ProxyFlow asks; the 200's head read to its end. */
+    private static void httpConnect(Socket socket, String user, String password, String host, int port) throws IOException {
+        String target = host + ":" + port;
+        String credentials = Base64.getEncoder().encodeToString((user + ":" + password).getBytes(StandardCharsets.UTF_8));
+        socket.getOutputStream().write(("CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\nProxy-Authorization: Basic "
+                + credentials + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+        socket.getOutputStream().flush();
+        InputStream in = socket.getInputStream();
+        StringBuilder head = new StringBuilder();
+        while (head.length() < 4 || !head.substring(head.length() - 4).equals("\r\n\r\n")) {
+            int b = in.read();
+            if (b == -1 || head.length() > 8192) throw new IOException("the proxy ended its answer early: " + head.toString().split("\r\n")[0]);
+            head.append((char) b);
+        }
+        String status = head.toString().split("\r\n")[0];
+        if (!status.startsWith("HTTP/1.1 200") && !status.startsWith("HTTP/1.0 200")) throw new IOException("the proxy answered " + status);
+    }
+
+    private static String line(InputStream in) throws IOException {
+        ByteArrayOutputStream reply = new ByteArrayOutputStream();
+        int b;
+        while ((b = in.read()) != -1 && b != '\n') reply.write(b);
+        return reply.toString("US-ASCII").trim();
     }
 
     private static String connect(String host, int port, int timeout) {
@@ -175,18 +339,22 @@ public final class ShellClient {
         }
     }
 
-    private static String many(String host, int port, int count, int seconds) throws Exception {
+    private static String many(String host, int port, int count, int seconds, long load) throws Exception {
+        // One lookup for them all, before the first connection: through ProxyFlow it answers one placeholder address.
+        InetAddress address = InetAddress.getByName(host);
         List<Socket> open = new ArrayList<>();
         List<Long> openedAt = new ArrayList<>();
         int failed = 0;
+        int drained = 0;
         String first = "";
         long start = System.nanoTime();
         try {
             for (int i = 0; i < count; i++) {
                 Socket socket = new Socket();
                 try {
-                    socket.connect(new InetSocketAddress(host, port), 15_000);
-                    socket.getOutputStream().write(("HOLD " + seconds + "\n").getBytes(StandardCharsets.US_ASCII));
+                    if (load > 0) socket.setReceiveBufferSize(LOAD_RECEIVE_BUFFER); // before connecting: the window it offers
+                    socket.connect(new InetSocketAddress(address, port), 15_000);
+                    socket.getOutputStream().write(((load > 0 ? "DOWN " + load : "HOLD " + seconds) + "\n").getBytes(StandardCharsets.US_ASCII));
                     socket.getOutputStream().flush();
                     open.add(socket);
                     openedAt.add(System.nanoTime());
@@ -197,19 +365,37 @@ public final class ShellClient {
                 }
             }
             long openingMs = (System.nanoTime() - start) / 1_000_000;
-            // Each closes MANY_CLOSE_EARLY_S before the server's hold would end, so the server logs it closed by the client,
+            // Each closes MANY_CLOSE_EARLY_S before SECONDS after it opened, so the server logs a hold closed by the client,
             // never ended early (the network-change evidence's sign, scripts/m7_evidence.py), and all are open together
-            // from the last one opened until the first closes.
+            // from the last one opened until the first closes. A loaded one reads its bytes first, so the server logs it
+            // sent in full (scripts/m7_evidence.py checks every download was).
+            byte[] buffer = new byte[65536];
             for (int i = 0; i < open.size(); i++) {
                 long waitMs = (openedAt.get(i) + (seconds - MANY_CLOSE_EARLY_S) * 1_000_000_000L - System.nanoTime()) / 1_000_000;
                 if (waitMs > 0) Thread.sleep(waitMs);
-                open.get(i).close();
+                Socket socket = open.get(i);
+                if (load > 0) {
+                    try {
+                        socket.setSoTimeout(30_000);
+                        long received = 0;
+                        int n;
+                        while (received < load && (n = socket.getInputStream().read(buffer, 0, (int) Math.min(buffer.length, load - received))) != -1) received += n;
+                        if (received == load) drained++;
+                    } catch (IOException e) {
+                        if (first.isEmpty()) first = "draining: " + e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()).replace('\n', ' ');
+                    }
+                }
+                socket.close();
             }
-            return "HELD " + open.size() + " OF " + count + " FAILED " + failed + " IN " + openingMs + (first.isEmpty() ? "" : " " + first);
+            return "HELD " + open.size() + " OF " + count + " FAILED " + failed + " IN " + openingMs + (load > 0 ? " DRAINED " + drained : "")
+                    + (first.isEmpty() ? "" : " " + first);
         } finally {
             for (Socket socket : open) socket.close();
         }
     }
+
+    /** A loaded connection's receive buffer: Android rounds it up to its minimum, a few KiB, far below what it is sent. */
+    private static final int LOAD_RECEIVE_BUFFER = 4096;
 
     private static final int MANY_CLOSE_EARLY_S = 2;
 

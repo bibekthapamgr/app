@@ -187,19 +187,22 @@ class VpnEndToEndTest {
     }
 
     /**
-     * M10, the brief's task 2: a profile of the other kind — SOCKS5 at the lab's HTTP proxy, HTTP at its SOCKS5 proxy —
-     * never connects, and says the server is not that kind of proxy (`PROTOCOL_ERROR`), with nothing changed on the phone.
+     * M10, the brief's task 2: a profile of the other kind never connects, with nothing changed on the phone. HTTP at the
+     * lab's SOCKS5 proxy: Dante closes at the request's first byte, and the server is said not to be that kind of proxy
+     * (`PROTOCOL_ERROR`). SOCKS5 at its HTTP proxy: Squid waits for the rest of a request line that never comes, so the
+     * handshake times out (`HANDSHAKE_TIMEOUT`, whose words say to check the protocol and port).
      */
     @Test(timeout = TEST_TIMEOUT_MS)
     fun aProfileOfTheOtherKindNeverConnects() {
-        val profiles = listOf(
-            app.save("SOCKS at Squid", ProxyProtocol.SOCKS5, env.proxyHost, env.httpPort, env.socksUser, env.socksPassword),
-            app.save("HTTP at Dante", ProxyProtocol.HTTP, env.proxyHost, env.socksPort, env.httpUser, env.httpPassword),
+        val cases = listOf(
+            app.save("SOCKS at Squid", ProxyProtocol.SOCKS5, env.proxyHost, env.httpPort, env.socksUser, env.socksPassword) to
+                "HANDSHAKE_TIMEOUT",
+            app.save("HTTP at Dante", ProxyProtocol.HTTP, env.proxyHost, env.socksPort, env.httpUser, env.httpPassword) to "PROTOCOL_ERROR",
         )
 
-        for (profile in profiles) {
+        for ((profile, code) in cases) {
             val ended = app.connectExpectingFailure(profile.id)
-            assertEquals("${profile.protocol} at the other kind of proxy: $ended", "PROTOCOL_ERROR", ended.error?.code)
+            assertEquals("${profile.protocol} at the other kind of proxy: $ended", code, ended.error?.code)
         }
 
         assertNeverConnected()

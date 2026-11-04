@@ -105,10 +105,31 @@ data class E2eConfig(
 object Shell {
     private val automation get() = InstrumentationRegistry.getInstrumentation().uiAutomation
 
+    /**
+     * Runs [command] as the shell user. A shell client ([FromShell]) never starts in an interrupted thread, and one that
+     * was running when its thread was interrupted fails its call: JUnit interrupts a test that ran out of time and runs
+     * its tear-down at once, which disconnects, and a client after that would look a lab name up outside the VPN, as M6
+     * would rightly report. The call itself can't be interrupted; [stopClients] ends the client it waits for.
+     */
     fun run(command: String): String {
+        val client = SHELL_CLIENT in command
+        if (client && Thread.currentThread().isInterrupted) throw InterruptedException("interrupted: no shell client started ($command)")
+        val text = exec(command)
+        if (client && Thread.currentThread().isInterrupted) throw InterruptedException("interrupted while a shell client ran ($command)")
+        return text
+    }
+
+    /** Ends every shell client still running, as a test that may have left one does before it disconnects. */
+    fun stopClients() {
+        exec("pkill -f $SHELL_CLIENT")
+    }
+
+    private fun exec(command: String): String {
         val output = automation.executeShellCommand(command)
         return ParcelFileDescriptor.AutoCloseInputStream(output).use { it.readBytes().decodeToString() }
     }
+
+    private const val SHELL_CLIENT = "app.proxyflow.e2e.ShellClient"
 
     /** A sh script, for pipes: the command line is split at spaces, so they become ${IFS}. */
     fun script(script: String): String = run("sh -c " + script.replace(" ", "\${IFS}"))

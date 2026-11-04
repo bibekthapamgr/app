@@ -37,7 +37,7 @@ Every line holds on the release candidate, or is a residual risk M8 accepted, or
 | Not debuggable; no cleartext; network security config | Holds | `check_release_manifest.py` |
 | What the APK ships for the @xml files | Holds | `check_release_manifest.py` (aapt2) |
 | `PendingIntent`s immutable | Holds | The notification's (service and activity), the tile's, the app's |
-| The notification's actions only on an unlocked phone (M10) | Holds | `VpnNotificationsTest` (Android 16 and 11), `VpnEndToEndTest` on 12+ |
+| The notification's actions only on an unlocked phone (M10) | Holds | `VpnNotificationsTest` (Robolectric, as on Android 15 and on Android 11), `VpnEndToEndTest` on 12+ |
 | Taps through another app's window dropped (S4) | Holds | `ObscuredTouchesTest`; Settings' Clear goes through the confirmation that drops them |
 | Tile only behind `BIND_QUICK_SETTINGS_TILE` | Holds (was ⏳ for M9) | `check_release_manifest.py`, `ManifestTest` |
 | The engine's JNI names survive R8 (M10) | Holds | `check_release_manifest.py` on the release APK |

@@ -50,7 +50,10 @@ class NotificationPermissionEndToEndTest {
             Lines.sent(line, env.destinationName, env.destinationPort)
             assertEquals("REPLY PROXYFLOW-DEST $line", FromShell.tcp(env.destinationName, env.destinationPort, line))
             assertEquals(ConnectionStatus.Connected, app.controller.state.value.status)
-            Log.i(LAB_TAG, "notifications: permission denied, connected, a line through the proxy")
+            // Connected, the VPN's foreground service running: Android posted none of ProxyFlow's notifications.
+            val shown = notifications.activeNotifications.map { it.id }
+            assertEquals("ProxyFlow's notifications Android shows while connected", emptyList<Int>(), shown)
+            Log.i(LAB_TAG, "notifications: permission denied, connected, a line through the proxy, none of ProxyFlow's notifications shown")
         } finally {
             app.disconnectAndSettle()
             app.deleteAllProfiles()

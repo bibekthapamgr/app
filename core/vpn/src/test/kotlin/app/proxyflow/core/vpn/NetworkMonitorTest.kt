@@ -12,6 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowNetwork
+import org.robolectric.shadows.ShadowNetworkCapabilities
 
 /**
  * The network monitor with Android's own classes (Robolectric): what it reads from the capabilities Android reports —
@@ -77,6 +78,9 @@ class NetworkMonitorTest {
         assertEquals(listOf(VpnSession.NetworkInfo("101", "wifi"), null), reports)
     }
 
-    private fun capabilities(transport: Int, vararg capabilities: Int): NetworkCapabilities =
-        NetworkCapabilities.Builder().addTransportType(transport).apply { capabilities.forEach { addCapability(it) } }.build()
+    /** Capabilities as Android reports them (Robolectric's shadow sets them: the public SDK has no builder for them). */
+    private fun capabilities(transport: Int, vararg capabilities: Int): NetworkCapabilities = ShadowNetworkCapabilities.newInstance().also {
+        shadowOf(it).addTransportType(transport)
+        for (capability in capabilities) shadowOf(it).addCapability(capability)
+    }
 }

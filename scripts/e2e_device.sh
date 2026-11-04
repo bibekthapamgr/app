@@ -12,6 +12,23 @@ set -uo pipefail
 API="$1"
 OUT="$RUNNER_TEMP/m5-api$API"
 mkdir -p "$OUT"
+# shellcheck source=scripts/adb_reboot.sh
+. "$(dirname "$0")/adb_reboot.sh"
+
+# What this script may take in all: the emulator step's limit (android.yml, 130 minutes) less the emulator's setup and
+# boot before it (up to 20) and 2 for the action to stop the emulator. Each part after the device tests is bounded by what
+# is left, keeping enough for the parts after it, so a slow run ends its own parts and cleans up — Always-on VPN off,
+# the device owner given up — before the step's limit stops it in the middle of one.
+SCRIPT_BUDGET_S="${E2E_SCRIPT_BUDGET_S:-$((108 * 60))}"
+left_s() { echo $((SCRIPT_BUDGET_S - SECONDS)); }
+# The time limit, in seconds, of a part that may take up to <max>, leaving <reserve> for what comes after it; 0 when that
+# leaves it less than <min>.
+part_limit() { # <max> <reserve> <min>
+    local limit=$(($(left_s) - $2))
+    if [ "$limit" -gt "$1" ]; then limit=$1; fi
+    if [ "$limit" -lt "$3" ]; then limit=0; fi
+    echo "$limit"
+}
 
 # The tests read the lab's addresses and the run's passwords from here (as the shell user), and the lab's CA
 # certificate, which the TLS tests trust only where a test says so (ADR-0011).
@@ -188,13 +205,8 @@ START=$SECONDS
 choose_uplink
 if [ -z "$UPLINK" ]; then
     # A boot that brought up no network at all (API 35, runs 41219399550 and 41238841652: no interface had an
-    # address, Wi-Fi or mobile data): the emulator boots once more.
-    timeout 60 adb reboot >/dev/null 2>&1 || true
-    timeout 300 adb wait-for-device || true
-    for _ in $(seq 1 120); do
-        if [ "$(timeout 10 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then break; fi
-        sleep 2
-    done
+    # address, Wi-Fi or mobile data): the emulator boots once more, and the new boot is waited for (adb_reboot.sh).
+    reboot_and_wait 540 || echo "::warning title=Emulator network (API $API)::The second boot did not complete within 9 minutes."
     sleep 10
     choose_uplink
     if [ -n "$UPLINK" ]; then UPLINK="$UPLINK, after a second boot (the first brought up no network)"; fi
@@ -304,18 +316,47 @@ kill "$LIVE_LOGCAT" 2>/dev/null || true
 # and their logcat, so the M5 to M7 evidence reads the tests alone; it has its own logcat (logcat-m8.txt). The captures
 # and the socket samples go on through it. Bounded, so the captures and samples pulled below are never lost to the
 # step's own time limit, and not run once the tests themselves ran out of time (m8_evidence.py then finds no steps).
+# What the parts after M8 need at least: M10's N (5 min with its kill), the pulls (about 10), M10's P and R (9, and 2 for
+# their kill) and the end (1).
+AFTER_M8_S=$((27 * 60))
+M8_LIMIT_S="$(part_limit "${M8_TIMEOUT_S:-600}" $((AFTER_M8_S + 8 * 60)) 300)"
 if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
     echo "::error title=M8 failure injection (API $API)::Not run: the device tests ran out of time."
+elif [ "$M8_LIMIT_S" = 0 ]; then
+    echo "::error title=M8 failure injection (API $API)::Not run: $(($(left_s) / 60)) minutes left of this script's ${SCRIPT_BUDGET_S} s, too few for it and the parts after it."
+    STATUS=1
 else
     # Stopped at its limit, it cleans up first (Always-on VPN off, the device owner given up): bash runs its trap once
     # the adb step it waits for ends — each has its own limit, the longest 150 s — and the clean-up's own adb calls take
     # up to about 4 minutes with adb wedged, so the kill comes 8 minutes later.
-    timeout --kill-after=8m "${M8_TIMEOUT:-10m}" bash scripts/m8_failure_injection.sh "$API" "$OUT"
+    timeout --kill-after=8m "${M8_LIMIT_S}s" bash scripts/m8_failure_injection.sh "$API" "$OUT"
     M8_STATUS=$?
     if [ "$M8_STATUS" = 124 ] || [ "$M8_STATUS" = 137 ] || [ "$M8_STATUS" = 143 ]; then
-        echo "::error title=M8 failure injection (API $API)::Stopped after ${M8_TIMEOUT:-10m}: the steps it took are in m8-steps.txt."
+        echo "::error title=M8 failure injection (API $API)::Stopped after ${M8_LIMIT_S} s: the steps it took are in m8-steps.txt."
     fi
     if [ "$M8_STATUS" != 0 ] && [ "$STATUS" = 0 ]; then STATUS=$M8_STATUS; fi
+fi
+# M10's N: Android 13 and later without the notification permission (scripts/m10_scenarios.sh notifications), while the
+# phone's captures and socket samples still run, so they cover it; adbd is the shell user's here (the VPN covers the
+# shell, not root), which the script checks. Not run once the tests ran out of time.
+m10_part() { # <part> <limit in seconds> <kill after>: runs it, its status merged into STATUS
+    local part_status
+    # Stopped at its limit, it cleans up first (power saving reset, Always-on VPN off, the device owner given up).
+    timeout --kill-after="$3" "${2}s" bash scripts/m10_scenarios.sh "$API" "$OUT" "$1"
+    part_status=$?
+    if [ "$part_status" = 124 ] || [ "$part_status" = 137 ] || [ "$part_status" = 143 ]; then
+        echo "::error title=M10 scenarios (API $API)::$1: stopped after $2 s: the steps it took are in m10-scenarios.txt."
+    fi
+    if [ "$part_status" != 0 ] && [ "$STATUS" = 0 ]; then STATUS=$part_status; fi
+}
+N_LIMIT_S="$(part_limit 240 $((22 * 60)) 120)"
+if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
+    echo "::error title=M10 scenarios (API $API)::Not run: the device tests ran out of time."
+elif [ "$N_LIMIT_S" = 0 ]; then
+    echo "::error title=M10 scenarios (API $API)::notifications: not run: $(($(left_s) / 60)) minutes left of this script's ${SCRIPT_BUDGET_S} s."
+    STATUS=1
+else
+    m10_part notifications "$N_LIMIT_S" 1m
 fi
 timeout 30 adb shell 'pkill -f pf-connecting.sh' >/dev/null 2>&1 || true
 timeout 120 adb pull /data/local/tmp/pf-connecting.txt "$OUT/phone-connecting.txt" >/dev/null 2>&1 || echo "no socket samples" > "$OUT/phone-connecting.txt"
@@ -352,20 +393,22 @@ if [ "$GUEST_CAPTURE" = 1 ]; then
         fi
     done
 fi
-# M10: the phone without the notification permission, then a restart with ProxyFlow as Always-on VPN and "Block
-# connections without VPN" on (scripts/m10_scenarios.sh), last of all — the restart ends the captures, the socket samples
-# (all pulled above) and logcat — while the lab's files are still on the phone. Not run once the tests ran out of time.
-# adbd as the shell user again first: the VPN covers the shell, not root.
+# M10's P and R: power saving with ProxyFlow started by Android for Always-on VPN, then a restart with it as Always-on VPN
+# and "Block connections without VPN" on (scripts/m10_scenarios.sh restart), last of all — the restart ends the captures,
+# the socket samples (all pulled above) and logcat — while the lab's files are still on the phone. adbd as the shell user
+# again first: the VPN covers the shell, not root (the script checks it, before and after the restart). Bounded by what is
+# left, 2 minutes kept for the end; not run once the tests ran out of time, or with too little left for it.
 if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
     echo "::error title=M10 scenarios (API $API)::Not run: the device tests ran out of time."
 else
     if [ "$GUEST_CAPTURE" = 1 ]; then restart_adbd unroot || true; fi
-    timeout --kill-after=2m "${M10_TIMEOUT:-16m}" bash scripts/m10_scenarios.sh "$API" "$OUT"
-    M10_STATUS=$?
-    if [ "$M10_STATUS" = 124 ] || [ "$M10_STATUS" = 137 ]; then
-        echo "::error title=M10 scenarios (API $API)::Stopped after ${M10_TIMEOUT:-16m}: the steps it took are in m10-scenarios.txt."
+    R_LIMIT_S="$(part_limit "${M10_RESTART_TIMEOUT_S:-960}" $((4 * 60)) $((9 * 60)))"
+    if [ "$R_LIMIT_S" = 0 ]; then
+        echo "::error title=M10 scenarios (API $API)::restart: not run: $(($(left_s) / 60)) minutes left of this script's ${SCRIPT_BUDGET_S} s, too few for power saving and a restart."
+        STATUS=1
+    else
+        m10_part restart "$R_LIMIT_S" 2m
     fi
-    if [ "$M10_STATUS" != 0 ] && [ "$STATUS" = 0 ]; then STATUS=$M10_STATUS; fi
 fi
 timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties /data/local/tmp/proxyflow-ca.pem /data/local/tmp/pf-client.apk \
     /data/local/tmp/pf-connecting.sh /data/local/tmp/pf-connecting.txt >/dev/null 2>&1 || true
