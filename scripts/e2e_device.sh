@@ -32,12 +32,13 @@ part_limit() { # <max> <reserve> <min>
 
 # The tests read the lab's addresses and the run's passwords from here (as the shell user), and the lab's CA
 # certificate, which the TLS tests trust only where a test says so (ADR-0011).
-adb push /tmp/pf/e2e.properties /data/local/tmp/proxyflow-e2e.properties >/dev/null
-adb shell chmod 644 /data/local/tmp/proxyflow-e2e.properties
-adb push /tmp/pf/pki/ca.crt /data/local/tmp/proxyflow-ca.pem >/dev/null
-adb shell chmod 644 /data/local/tmp/proxyflow-ca.pem
+timeout 60 adb push /tmp/pf/e2e.properties /data/local/tmp/proxyflow-e2e.properties >/dev/null
+timeout 30 adb shell chmod 644 /data/local/tmp/proxyflow-e2e.properties
+timeout 60 adb push /tmp/pf/pki/ca.crt /data/local/tmp/proxyflow-ca.pem >/dev/null
+timeout 30 adb shell chmod 644 /data/local/tmp/proxyflow-ca.pem
 
-# Every adb call that could wait for a wedged device is bounded, so the logs below are always collected.
+# Every adb call that could wait for a wedged device is bounded, so the logs below are always collected (M10-116: two
+# were not, so a wedged phone held API 29's job past the tests' own limit).
 restart_adbd() {
     # adbd restarts as the new user, and the old connection can still look online for a moment (run 41278339766,
     # attempt 3, API 35: "device offline" when the script then asked whether tcpdump still ran): wait until a command
@@ -76,11 +77,11 @@ restart_adbd() {
 # uplink the phone answers "Network is unreachable" itself. Mobile data did not come up on one
 # API 35 emulator (run 41219399550: one packet on its uplink all run, every connection "no route
 # to the proxy"), so it is switched off and on once, and then Wi-Fi is the fallback (from API 30
-# on only tcpdump inside the phone sees it, which runs from API 34 on: on API 30 to 33 the evidence
-# then fails, for want of a capture of the uplink; it says which captures cover it).
+# on only tcpdump inside the phone sees it, which runs on API 33 and from API 34 on: on API 30 to 32
+# the evidence then fails, for want of a capture of the uplink; it says which captures cover it).
 reaches_runner() {
     local out
-    out="$(adb shell 'toybox nc -w 3 10.0.2.2 1082 </dev/null; true' 2>&1 | tr -d '\r')"
+    out="$(timeout 15 adb shell 'toybox nc -w 3 10.0.2.2 1082 </dev/null; true' 2>&1 | tr -d '\r')"
     case "$out" in *[Rr]efused*) return 0 ;; esac
     return 1
 }
@@ -94,7 +95,7 @@ uplink_within() { # <seconds>
 }
 wifi_down() {
     local out
-    out="$(adb shell 'ip -o -4 addr show wlan0 2>/dev/null; true' 2>&1)"
+    out="$(timeout 15 adb shell 'ip -o -4 addr show wlan0 2>/dev/null; true' 2>&1)"
     case "$out" in *inet*) return 1 ;; esac
     return 0
 }
@@ -156,11 +157,10 @@ choose_uplink() {
     # its last nine runs, and the API 34 image's in five of its last six (M7: it dropped during the tests in four,
     # failing tests twice, and never came up in one), while Wi-Fi alone held on both: there Wi-Fi is the uplink, in
     # airplane mode, and tcpdump inside the phone captures it. The API 33 image's mobile data dropped during the
-    # tests in M10's runs too (41822664621: four attempts in one test; 41856359695: gone for the last minutes of the
-    # tests, every connection "Network is unreachable"), but its Wi-Fi is not in the emulator's capture, and tcpdump
-    # does not run inside the phone below API 34: over Wi-Fi, nothing would capture API 33's uplink (M10-89, run
-    # 41869234205). So it keeps mobile data, and a run whose mobile data drops fails, for the emulator (M10-88).
-    if [ "$API" = 34 ] || [ "$API" = 35 ]; then
+    # tests in three of M10's seven runs on it (41822664621, 41856359695, 41896912102: nine retries, seven tests failed
+    # "no route to the proxy"; M10-88, M10-113), and its Wi-Fi is not in the emulator's capture (M10-89): there Wi-Fi
+    # is the uplink too, captured by tcpdump inside the phone, started through su, adbd left as the shell user.
+    if [ "$API" = 33 ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
         wifi_in_airplane_mode
         if uplink_within 60; then
             UPLINK="$(uplink_name) (airplane mode, so the radio is off: mobile data is unreliable on this image)"
@@ -185,7 +185,7 @@ choose_uplink() {
             sleep 2
         done
     fi
-    if [ -n "$UPLINK" ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
+    if [ -n "$UPLINK" ] || [ "$API" = 33 ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
         : # chosen above
     elif cellular_up; then
         NOTE=""
@@ -220,11 +220,11 @@ if [ -z "$UPLINK" ]; then
 fi
 {
     echo "uplink: ${UPLINK:-none: the phone never reached the runner} ($((SECONDS - START)) s)"
-    echo "routes: $(adb shell ip route 2>&1 | tr -d '\r' | paste -sd ';' -)"
-    echo "addresses: $(adb shell ip -o -4 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
+    echo "routes: $(timeout 30 adb shell ip route 2>&1 | tr -d '\r' | paste -sd ';' -)"
+    echo "addresses: $(timeout 30 adb shell ip -o -4 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
     # IPv6 on the uplink: whether a direct IPv6 packet could leave the phone at all (the captures would show it).
-    echo "IPv6 addresses: $(adb shell ip -o -6 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
-    V6_ROUTES=$(adb shell ip -6 route show table all 2>&1 | tr -d '\r' | grep '^default' | paste -sd ';' -)
+    echo "IPv6 addresses: $(timeout 30 adb shell ip -o -6 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
+    V6_ROUTES=$(timeout 30 adb shell ip -6 route show table all 2>&1 | tr -d '\r' | grep '^default' | paste -sd ';' -)
     echo "IPv6 default routes: ${V6_ROUTES:-none}"
 } > "$OUT/guest-network.txt"
 if [ -z "$UPLINK" ]; then
@@ -235,18 +235,54 @@ fi
 # group (init kills that group's cgroup when adbd restarts as the shell user, which the tests
 # need: the VPN covers the shell, not root). The evidence counts these captures only if
 # tcpdump is still running after the tests.
-# Not below API 34: on API 29 adbd does not come back after adb root and unroot (run 41230555282: the device stayed
-# offline, so no test ran), and on API 30 to 33 it has not been tried, their uplink being mobile data, which the
-# emulator's own capture sees (Wi-Fi, which it does not see, is only their fallback: M10-89).
+# Not on API 29: adbd does not come back after adb root and unroot (run 41230555282: the device stayed offline, so no
+# test ran). On API 33, whose uplink is Wi-Fi, which the emulator's own capture does not record (M10-89), tcpdump is
+# started as root through su instead, adbd left as the shell user throughout (M10-113); on API 30 to 32, whose uplink
+# is mobile data, the emulator's own capture records it, and none runs in the phone.
+# How a command runs as root on the phone: "" once adbd is root (API 34 on), "su 0 " on API 33.
+AS_ROOT=""
 # The interfaces the phone's running tcpdump processes capture, from their command lines ("none" when none runs).
 tcpdump_interfaces() {
-    local found
-    found=$(timeout 30 adb shell 'for p in $(pidof tcpdump); do tr "\0" " " < /proc/$p/cmdline; echo; done' 2>/dev/null |
-        tr -d '\r' | sed -n 's/.*tcpdump -i \([a-z0-9]*\) .*/\1/p' | sort -u | paste -sd ' ' -)
+    local found="" pid
+    for pid in $(timeout 30 adb shell "${AS_ROOT}pidof tcpdump" 2>/dev/null | tr -d '\r'); do
+        found="$found $(timeout 10 adb shell "${AS_ROOT}cat /proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ' |
+            sed -n 's/.*tcpdump -i \([a-z0-9]*\) .*/\1/p')"
+    done
+    found="$(tr ' ' '\n' <<<"$found" | grep -v '^$' | sort -u | paste -sd ' ' -)"
     echo "${found:-none}"
 }
+# GUEST_CAPTURE: 0 none in the phone; 1 through adb root (API 34 on); 2 through su (API 33).
 GUEST_CAPTURE=0
-if [ "$API" -lt 34 ]; then
+# The first 400 bytes of each packet (IP, TCP, DNS queries and answers in full, long names included): over Wi-Fi, Google
+# Play's updates run through the VPN too, and a full capture grew too large to pull in time (run 41237942120, API 35).
+start_tcpdump() { # <interface>
+    timeout 30 adb shell "${AS_ROOT}setsid tcpdump -i $1 -s 400 -U -w /data/local/tmp/pf-$1.pcap </dev/null >/dev/null 2>&1 &"
+}
+uplink_interfaces() {
+    timeout 30 adb shell ip -o link show > "$OUT/guest-links.txt" 2>&1
+    awk -F': ' '{print $2}' "$OUT/guest-links.txt" | sed 's/@.*//' | tr -d '\r' | grep -E '^(eth|wlan|radio|rmnet)[0-9]+$' || true
+}
+if [ "$API" = 33 ]; then
+    AS_ROOT="su 0 "
+    {
+        echo "su: $(timeout 30 adb shell su 0 id 2>&1 | tr -d '\r')"
+        echo "tcpdump: $(timeout 30 adb shell 'command -v tcpdump || echo none' 2>&1 | tr -d '\r')"
+    } > "$OUT/guest-capture.txt" 2>&1
+    if grep -q 'uid=0' "$OUT/guest-capture.txt" && ! grep -q 'tcpdump: none' "$OUT/guest-capture.txt"; then
+        IFACES="$(uplink_interfaces)"
+        for iface in $IFACES; do start_tcpdump "$iface"; done
+        echo "$IFACES" > "$OUT/guest-interfaces.txt"
+        GUEST_CAPTURE=2
+        sleep 2
+        {
+            echo "tcpdump on: $(paste -sd ' ' "$OUT/guest-interfaces.txt")"
+            echo "tcpdump at the start: $(timeout 30 adb shell "${AS_ROOT}pidof tcpdump || echo none" 2>&1 | tr -d '\r')"
+            echo "tcpdump at the start on: $(tcpdump_interfaces)"
+        } >> "$OUT/guest-capture.txt"
+    else
+        echo "no su or no tcpdump in this image: the emulator's own capture (-tcpdump), which does not record Wi-Fi, is the only one" >> "$OUT/guest-capture.txt"
+    fi
+elif [ "$API" -lt 34 ]; then
     # What the emulator's own capture records of the uplink chosen above (M10-103, M10-107): mobile data always; Wi-Fi
     # on API 29 only, where it sits behind the same device (radio0); with both up, Android prefers Wi-Fi.
     case "$UPLINK" in
@@ -267,31 +303,25 @@ if [ "$API" -lt 34 ]; then
             fi
             ;;
     esac
-    echo "not on API $API, below 34: $SEEN (adbd did not survive adb root and unroot on API 29; not tried on 30 to 33)" > "$OUT/guest-capture.txt"
+    echo "not on API $API: $SEEN (adbd did not survive adb root and unroot on API 29; on 30 to 32 none runs in the phone)" > "$OUT/guest-capture.txt"
 else
     {
         echo "adb root: $(timeout 30 adb root 2>&1 | tr -d '\r')"
         sleep 3
         timeout 120 adb wait-for-device
-        echo "id: $(adb shell id 2>&1 | tr -d '\r')"
-        echo "tcpdump: $(adb shell 'command -v tcpdump || echo none' 2>&1 | tr -d '\r')"
+        echo "id: $(timeout 30 adb shell id 2>&1 | tr -d '\r')"
+        echo "tcpdump: $(timeout 30 adb shell 'command -v tcpdump || echo none' 2>&1 | tr -d '\r')"
     } > "$OUT/guest-capture.txt" 2>&1
     if grep -q 'uid=0' "$OUT/guest-capture.txt" && ! grep -q 'tcpdump: none' "$OUT/guest-capture.txt"; then
-        adb shell ip -o link show > "$OUT/guest-links.txt" 2>&1
-        IFACES="$(awk -F': ' '{print $2}' "$OUT/guest-links.txt" | sed 's/@.*//' | tr -d '\r' | grep -E '^(eth|wlan|radio|rmnet)[0-9]+$' || true)"
-        for iface in $IFACES; do
-            # The first 400 bytes of each packet (IP, TCP, DNS queries and answers in full, long names included): over
-            # Wi-Fi, Google Play's updates run through the VPN too, and a full capture grew too large to pull in time
-            # (run 41237942120, API 35).
-            adb shell "setsid tcpdump -i $iface -s 400 -U -w /data/local/tmp/pf-$iface.pcap </dev/null >/dev/null 2>&1 &"
-        done
+        IFACES="$(uplink_interfaces)"
+        for iface in $IFACES; do start_tcpdump "$iface"; done
         echo "$IFACES" > "$OUT/guest-interfaces.txt"
         GUEST_CAPTURE=1
         sleep 2
         # The root cgroup: /sys/fs/cgroup (cgroup v2) or /acct (v1).
-        adb shell 'for p in $(pidof tcpdump); do for c in /sys/fs/cgroup/cgroup.procs /acct/cgroup.procs; do [ -w "$c" ] && echo "$p" > "$c"; done; done' >/dev/null 2>&1 || true
+        timeout 30 adb shell 'for p in $(pidof tcpdump); do for c in /sys/fs/cgroup/cgroup.procs /acct/cgroup.procs; do [ -w "$c" ] && echo "$p" > "$c"; done; done' >/dev/null 2>&1 || true
         echo "tcpdump on: $(paste -sd ' ' "$OUT/guest-interfaces.txt")" >> "$OUT/guest-capture.txt"
-        echo "tcpdump at the start: $(adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
+        echo "tcpdump at the start: $(timeout 30 adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
         # Which interfaces those processes capture: one surviving process says nothing about the others.
         echo "tcpdump at the start on: $(tcpdump_interfaces)" >> "$OUT/guest-capture.txt"
     else
@@ -321,7 +351,7 @@ while true; do
 done
 SAMPLER
 timeout 30 adb push "$RUNNER_TEMP/pf-connecting.sh" /data/local/tmp/pf-connecting.sh >/dev/null 2>&1 || true
-adb shell "setsid sh /data/local/tmp/pf-connecting.sh > /data/local/tmp/pf-connecting.txt 2>/dev/null </dev/null &" || true
+timeout 30 adb shell "setsid sh /data/local/tmp/pf-connecting.sh > /data/local/tmp/pf-connecting.txt 2>/dev/null </dev/null &" || true
 
 # Bounded well inside the job's own limit, so that logcat, the captures and the evidence are still
 # collected when a test hangs (scripts/m5_evidence.py reads how far the tests got from logcat).
@@ -402,24 +432,48 @@ timeout 120 adb shell dumpsys package 2>/dev/null | tr -d '\r' |
     echo "addresses after the tests: $(timeout 30 adb shell ip -o -4 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
     echo "IPv6 addresses after the tests: $(timeout 30 adb shell ip -o -6 addr show 2>&1 | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' -)"
 } >> "$OUT/guest-network.txt"
-if [ "$GUEST_CAPTURE" = 1 ]; then
-    restart_adbd root || true
-    echo "tcpdump at the end: $(timeout 30 adb shell 'pidof tcpdump || echo none' 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
+if [ "$GUEST_CAPTURE" != 0 ]; then
+    # Root again for the end of the captures: adbd once more (API 34 on), su as throughout (API 33).
+    if [ "$GUEST_CAPTURE" = 1 ]; then restart_adbd root || true; fi
+    echo "tcpdump at the end: $(timeout 30 adb shell "${AS_ROOT}pidof tcpdump || echo none" 2>&1 | tr -d '\r')" >> "$OUT/guest-capture.txt"
     echo "tcpdump at the end on: $(tcpdump_interfaces)" >> "$OUT/guest-capture.txt"
-    timeout 30 adb shell 'pkill -INT tcpdump || killall -INT tcpdump' >/dev/null 2>&1 || true
+    timeout 30 adb shell "${AS_ROOT}pkill -INT tcpdump || ${AS_ROOT}killall -INT tcpdump" >/dev/null 2>&1 || true
     sleep 3
+    # Through su, adbd pulls as the shell user: root's captures made readable to it.
+    if [ "$GUEST_CAPTURE" = 2 ]; then timeout 30 adb shell "su 0 chmod 644 /data/local/tmp/pf-*.pcap" >/dev/null 2>&1 || true; fi
     echo "captured on the phone: $(timeout 30 adb shell 'ls -l /data/local/tmp/pf-*.pcap' 2>&1 | tr -d '\r' | awk '{print $NF, $5}' | paste -sd ';' -)" >> "$OUT/guest-capture.txt"
     for iface in $(cat "$OUT/guest-interfaces.txt"); do
-        # Once more after adb has the device again, should the first pull fail at once (the device offline for a
-        # moment); one that took its whole time limit is not tried again, so the step's own limit is not spent on it.
-        pull_started=$SECONDS
-        if ! timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1; then
-            if [ $((SECONDS - pull_started)) -lt 60 ] && timeout 60 adb wait-for-device >/dev/null 2>&1 &&
-                timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1; then
-                echo "pulled pf-$iface.pcap at the second try" >> "$OUT/guest-capture.txt"
-            else
-                echo "pull of pf-$iface.pcap failed or timed out" >> "$OUT/guest-capture.txt"
+        # Only a capture the phone has: tcpdump on an interface that was down at the start (eth0 in airplane mode) wrote none.
+        if ! timeout 30 adb shell "test -f /data/local/tmp/pf-$iface.pcap" >/dev/null 2>&1; then
+            echo "no pf-$iface.pcap on the phone" >> "$OUT/guest-capture.txt"
+            continue
+        fi
+        # adb pull, and again once adb has the device again should it fail at once (the device offline for a moment, or
+        # the transfer cut: run 41896912102, API 35, both pulls of a 249 MB capture failed within a minute, M10-112); a
+        # third time streamed through adb's shell (exec-out cat), its size checked against the phone's. One that took a
+        # minute or more is not tried again, so the step's own limit is not spent here.
+        want="$(timeout 30 adb shell "wc -c < /data/local/tmp/pf-$iface.pcap" 2>/dev/null | tr -d '\r[:space:]')"
+        how=""
+        why=""
+        for try in 1 2 3; do
+            started=$SECONDS
+            if [ "$try" -lt 3 ]; then
+                why="$(timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" 2>&1 >/dev/null)" && how="adb pull"
+            elif why="$(timeout 300 adb exec-out "cat /data/local/tmp/pf-$iface.pcap" 2>&1 >"$OUT/guest-$iface.pcap")"; then
+                got="$(wc -c < "$OUT/guest-$iface.pcap" | tr -d '[:space:]')"
+                if [ -n "$want" ] && [ "$got" = "$want" ]; then how="exec-out cat"; else why="exec-out cat gave $got of ${want:-?} bytes"; fi
             fi
+            if [ -n "$how" ] || [ $((SECONDS - started)) -ge 60 ]; then break; fi
+            # Before the next try: adb connects again, and adbd is root again if the capture needs it (API 34 on).
+            timeout 20 adb reconnect >/dev/null 2>&1 || true
+            timeout 60 adb wait-for-device >/dev/null 2>&1 || break
+            if [ "$GUEST_CAPTURE" = 1 ] && [ "$(timeout 10 adb shell id -u 2>/dev/null | tr -d '\r')" != 0 ]; then restart_adbd root || true; fi
+        done
+        if [ -n "$how" ]; then
+            if [ "$try" != 1 ]; then echo "pulled pf-$iface.pcap at try $try ($how)" >> "$OUT/guest-capture.txt"; fi
+        else
+            rm -f "$OUT/guest-$iface.pcap"
+            echo "pull of pf-$iface.pcap failed or timed out (try $try, adbd as uid $(timeout 10 adb shell id -u 2>/dev/null | tr -d '\r' || echo '?')): $(printf '%s' "$why" | tr -d '\r' | tail -1 | cut -c1-160)" >> "$OUT/guest-capture.txt"
         fi
     done
 fi

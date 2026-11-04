@@ -5,12 +5,12 @@
 # 1 from the old boot: waiting for the device and that property alone can pass on the old boot, before the phone has
 # gone down (M10's review). A new boot is told apart by the kernel's boot_id, which every boot draws anew.
 
-# The runner kernel's last lines about a process killed or crashed — out of memory, a segfault, a trap — with their
-# times (the emulator went away at a restart twice: M10-54, M10-97; M10-108), or "none".
+# The runner kernel's last lines about a process killed or crashed — out of memory, a segfault, a trap — newest first,
+# with their times (the emulator went away at a restart twice: M10-54, M10-97; M10-108), or "none".
 kernel_kills() {
     local lines
     lines="$(sudo -n dmesg -T 2>/dev/null | grep -i -E 'out of memory|killed process|segfault|traps:|general protection' |
-        tail -3 | cut -c1-160 | paste -sd '|' -)"
+        tail -3 | tac | cut -c1-160 | paste -sd '|' -)"
     echo "${lines:-none}"
 }
 

@@ -100,7 +100,7 @@ fun TextStyle.typedLeftToRight(): TextStyle = copy(textDirection = TextDirection
  * [text] the user wrote, set inside one of ProxyFlow's sentences: Unicode's first-strong isolate, so it keeps its own
  * direction — left to right when it has no letter — and leaves the sentence's order alone ("Switch to مكتب 2?"). The
  * text's own directional formatting characters (embeddings, overrides, isolates and their ends) are left out, so it
- * cannot end the isolate early and turn the rest of the sentence round (M10-94). The model's [isolatedText], which the
- * Quick Settings tile uses too.
+ * cannot end the isolate early and turn the rest of the sentence round (M10-94). It is the model's [isolatedText], which
+ * the Quick Settings tile uses too.
  */
 fun isolated(text: String): String = isolatedText(text)

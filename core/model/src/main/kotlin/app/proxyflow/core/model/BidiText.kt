@@ -8,7 +8,7 @@ package app.proxyflow.core.model
  * isolate early and turn the rest round (M10-94). In ProxyFlow's sentences (the design system's `isolated`), and in the
  * Quick Settings tile's subtitle, which Android 12 and later lay out in the phone's language's direction (M10-106).
  */
-fun isolatedText(text: String): String = "⁨" + text.filterNot(::isDirectionalFormatting) + "⁩"
+fun isolatedText(text: String): String = "\u2068" + text.filterNot(::isDirectionalFormatting) + "\u2069"
 
 /** U+202A–U+202E (LRE, RLE, PDF, LRO, RLO) and U+2066–U+2069 (LRI, RLI, FSI, PDI). */
-private fun isDirectionalFormatting(c: Char): Boolean = c in '‪'..'‮' || c in '⁦'..'⁩'
+private fun isDirectionalFormatting(c: Char): Boolean = c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069'

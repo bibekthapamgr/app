@@ -437,6 +437,7 @@ jobs:
       # 41850357364, the emulator in 41869234205, API 35's image in 41883778410), and the emulator step's own install
       # then fails with no test run (M10-105). Installed here first, each up to three times; that install then finds them.
       - name: The emulator and the system image, installed (each up to three times)
+        id: sdk
         run: |
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
@@ -446,9 +447,10 @@ jobs:
                 echo "$package: installed (try $try)"
                 break
               fi
-              echo "$package: try $try failed: $(grep -i -m1 'error' <<<"$out" | cut -c1-200)"
+              failed="$(grep -i -m1 'error' <<<"$out" | cut -c1-200)"
+              echo "$package: try $try failed: $failed"
               if [ "$try" = 3 ]; then
-                echo "::error title=Android SDK (API ${{ matrix.api-level }})::$package did not install in three tries"
+                echo "::error title=Android SDK (API ${{ matrix.api-level }})::$package did not install in three tries; the last: ${failed:-no error line}"
                 exit 1
               fi
               sleep 15
@@ -471,7 +473,7 @@ jobs:
       # uplink resolver is the lab's (10.99.0.54), which logs every name the phone looks up.
       - name: Keystore, storage, engine and VPN tests on an emulator (API ${{ matrix.api-level }}), its uplink captured
         id: emulator
-        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' && steps.sdk.outcome == 'success' }}
         # Inside the job's limit, so the evidence, the digest and the upload below still run if the emulator hangs: the
         # emulator's setup and boot (up to 20 min), then scripts/e2e_device.sh's own budget of 108 — the uplink, the
         # device tests (up to 55), M8's failure injection, M10's parts and the pulls between them, each bounded by what is

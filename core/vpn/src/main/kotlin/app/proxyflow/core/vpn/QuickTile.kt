@@ -44,15 +44,24 @@ internal object QuickTile {
         }
     }
 
+    /** What the tile shows as its second line, and what TalkBack reads with its name ([description]) and as its state. */
+    data class Shown(val subtitle: String, val description: String, val stateDescription: String)
+
     /**
-     * [line] as the tile's subtitle shows it: in a first-strong isolate ([isolatedText]), so it reads in its own
-     * direction whatever the system UI's (M10-106). From Android 12, the system UI lays the subtitle out in the phone's
-     * language's direction, which on a right-to-left phone would put a name's trailing full stop or leading digit at the
-     * wrong end ("2 Office", "Tokyo.") and ProxyFlow's own "Connecting…" turned round; Android 10 and 11 go by the
-     * first letter, which would turn round a name without one ("2606:4700::1111", an unnamed profile's server: M10-101).
-     * The isolate keeps each in order on all of them. TalkBack is given the line as it is.
+     * What the tile shows and says for [content]: the line — the profile's name, or ProxyFlow's [words] for it — set in
+     * a first-strong isolate ([isolatedText]), so it reads in its own direction whatever the system UI's (M10-106).
+     * Android 12 to 15 lay the subtitle out in the phone's language's direction, which on a right-to-left phone would
+     * put a name's trailing full stop or leading digit at the wrong end ("2 Office", "Tokyo.") and turn ProxyFlow's
+     * "Connecting…" round; Android 10 and 11, and Android 16's Compose tile, go by the first letter, which would turn round
+     * a name without one ("2606:4700::1111", an unnamed profile's server: M10-101). The state description is the same
+     * isolated line, so Android 16's tile, which leaves out a subtitle its state description already holds, reads it
+     * once (M10-115); [describe] gets the line as it is.
      */
-    fun subtitleOf(line: String): String = isolatedText(line)
+    fun shown(content: Content, words: (Line) -> String, describe: (String) -> String): Shown {
+        val line = if (content.line == Line.Profile) content.profileName.orEmpty() else words(content.line)
+        val isolatedLine = isolatedText(line)
+        return Shown(subtitle = isolatedLine, description = describe(line), stateDescription = isolatedLine)
+    }
 
     /**
      * @param hasProfile a profile exists to connect.

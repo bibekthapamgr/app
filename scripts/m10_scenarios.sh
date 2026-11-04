@@ -375,7 +375,7 @@ part_power() {
 
 # --- R: the restart with Always-on VPN and Android's blocking -------------------------------------------------------
 # The uplink the run chose (e2e_device.sh: guest-network.txt) has an address again after the restart: Wi-Fi in airplane
-# mode on API 34 and 35 sometimes needs switching off and on before it does.
+# mode on API 33 to 35 sometimes needs switching off and on before it does.
 uplink_iface() {
     case "$(sed -n 's/^uplink: //p' "$OUT/guest-network.txt" 2>/dev/null | head -1)" in
         Wi-Fi*) echo wifi ;;
