@@ -20,6 +20,9 @@ import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.DnsProblems
+import app.proxyflow.core.model.ExitReason
+import app.proxyflow.core.model.Interruption
+import app.proxyflow.core.model.KillSwitchStatus
 import app.proxyflow.core.model.LogDetail
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
@@ -31,6 +34,7 @@ import app.proxyflow.core.model.ProxyProtocol
 import app.proxyflow.core.model.ReconnectInfo
 import app.proxyflow.core.model.ReconnectReason
 import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.SystemKillSwitch
 import app.proxyflow.core.model.ThemePreference
 import app.proxyflow.core.model.TlsMode
 import app.proxyflow.core.model.TlsProblems
@@ -49,6 +53,7 @@ import app.proxyflow.feature.profiles.AddEditUiState
 import app.proxyflow.feature.profiles.ConnectionTestState
 import app.proxyflow.feature.profiles.ProfilesScreen
 import app.proxyflow.feature.profiles.ProfilesUiState
+import app.proxyflow.feature.settings.KillSwitchGuideScreen
 import app.proxyflow.feature.settings.SettingsScreen
 import app.proxyflow.feature.settings.SettingsUiState
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
@@ -65,7 +70,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Screenshots of every screen and state built so far (M2, M3, M5, M6, M7) in light and dark
+ * Screenshots of every screen and state built so far (M2, M3, M5 to M8) in light and dark
  * theme, named after the M1 design boards, kept in app/screenshots. CI runs
  * `./gradlew :app:verifyAndRecordRoborazziDebug`: any screen that no longer
  * matches its committed copy fails the build, and the new image is published on
@@ -101,9 +106,37 @@ class ScreenshotTest {
     @Test
     fun homeWithProfile() = captureBothThemes("B2_home_disconnected") { HomeScreen(home(ConnectionState.Idle), HomeActions()) }
 
+    /** B2 with Android's kill switch on, as Android last said (M8): apps have no internet while ProxyFlow is off. */
+    @Test
+    fun homeKillSwitchOn() = captureBothThemes("B2_home_kill_switch_on") {
+        HomeScreen(home(ConnectionState.Idle, killSwitch = killSwitchOn), HomeActions())
+    }
+
+    /** M8: the last process ended while connected (Android freed memory), seen on the next start. */
+    @Test
+    fun homeInterrupted() = captureBothThemes("B2_home_interrupted") {
+        val interruption = Interruption(
+            profileId = "p1",
+            connectedSinceMillis = SAMPLE_TIME - 3_600_000,
+            endedAtMillis = SAMPLE_TIME,
+            reason = ExitReason.LowMemory,
+            detectedAtMillis = SAMPLE_TIME + 60_000,
+            killSwitch = KillSwitchStatus.AlwaysOnOnly,
+        )
+        val alwaysOnOnly = killSwitchOn.copy(blocksWithoutVpn = false)
+        HomeScreen(home(ConnectionState.Idle, killSwitch = alwaysOnOnly, interruption = interruption), HomeActions())
+    }
+
     @Test
     fun homeConnecting() = captureBothThemes("B3_home_connecting") {
         HomeScreen(home(ConnectionState(ConnectionStatus.Connecting, "p1", tokyo.name, step = ConnectStep.ProxyHandshake)), HomeActions())
+    }
+
+    /** B3 when Android started ProxyFlow as Always-on VPN (M8): the interface is up first and holds apps' traffic. */
+    @Test
+    fun homeConnectingHeld() = captureBothThemes("B3b_home_connecting_held") {
+        val held = ConnectionState(ConnectionStatus.Connecting, "p1", tokyo.name, step = ConnectStep.ProxyHandshake, held = true)
+        HomeScreen(home(held, killSwitch = killSwitchOn), HomeActions())
     }
 
     @Test
@@ -194,6 +227,12 @@ class ScreenshotTest {
     @Test
     fun homeVpnRevoked() = captureBothThemes("B6d_vpn_revoked") {
         HomeScreen(home(ConnectionState(profileId = "p1", error = ConnectionError(ConnectionError.VPN_REVOKED))), HomeActions())
+    }
+
+    /** Android started ProxyFlow as Always-on VPN, but no proxy was chosen (M8). */
+    @Test
+    fun homeAlwaysOnWithoutAProfile() = captureBothThemes("B6b_always_on_no_profile") {
+        HomeScreen(home(ConnectionState(error = ConnectionError(ConnectionError.ALWAYS_ON_NO_PROFILE))), HomeActions())
     }
 
     @Test
@@ -348,6 +387,18 @@ class ScreenshotTest {
         SettingsScreen(SettingsUiState(loading = false, theme = ThemePreference.System), onThemeChange = {}, onOpenAbout = {})
     }
 
+    /** E1 with Android's kill switch on, as Android said while ProxyFlow was last connected (M8). */
+    @Test
+    fun settingsKillSwitchOn() = captureBothThemes("E1b_settings_kill_switch_on") {
+        SettingsScreen(SettingsUiState(loading = false, killSwitch = killSwitchOn), onThemeChange = {}, onOpenAbout = {})
+    }
+
+    /** E2: how to turn on Android's kill switch, which only the user can (M8). */
+    @Test
+    fun killSwitchGuide() = captureBothThemes("E2_kill_switch_guide") {
+        KillSwitchGuideScreen(SettingsUiState(loading = false), onOpenVpnSettings = {}, onBack = {})
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun themeChooser() {
@@ -412,7 +463,18 @@ class ScreenshotTest {
         dialog: HomeDialog? = null,
         diagnostics: RoutingDiagnostics? = null,
         traffic: TrafficStats? = null,
-    ) = HomeUiState.Ready(tokyo, connection, canConnect = true, dialog = dialog, diagnostics = diagnostics, traffic = traffic)
+        killSwitch: SystemKillSwitch? = null,
+        interruption: Interruption? = null,
+    ) = HomeUiState.Ready(
+        tokyo,
+        connection,
+        canConnect = true,
+        dialog = dialog,
+        diagnostics = diagnostics,
+        traffic = traffic,
+        killSwitch = killSwitch,
+        interruption = interruption,
+    )
 
     /** A screen with a dialog open, in the light theme (dialogs draw in their own window, so the whole screen is captured). */
     @OptIn(ExperimentalRoborazziApi::class)
@@ -443,6 +505,9 @@ class ScreenshotTest {
     private companion object {
         const val DIR = "screenshots"
         const val SAMPLE_TIME = 1_793_000_000_000L
+
+        /** Android's kill switch as Android said while ProxyFlow was last connected. */
+        val killSwitchOn = SystemKillSwitch(alwaysOn = true, blocksWithoutVpn = true, checkedAtMillis = SAMPLE_TIME)
 
         /** What a session of 12 minutes carried. */
         val sampleTraffic = TrafficStats(bytesUp = 4_820_000, bytesDown = 61_300_000, activeConnections = 14, sinceMillis = SAMPLE_TIME)

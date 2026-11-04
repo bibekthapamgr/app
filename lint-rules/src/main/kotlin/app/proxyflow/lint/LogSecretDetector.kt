@@ -17,6 +17,7 @@ import org.jetbrains.uast.UParenthesizedExpression
 import org.jetbrains.uast.UPolyadicExpression
 import org.jetbrains.uast.UQualifiedReferenceExpression
 import org.jetbrains.uast.USimpleNameReferenceExpression
+import org.jetbrains.uast.util.isConstructorCall
 import org.jetbrains.uast.visitor.AbstractUastVisitor
 
 /**
@@ -24,9 +25,9 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor
  * writes to logcat — `android.util.Log`, the VPN layer's own log (`VpnLog.add`, and the session's
  * `log` function), `println` — may not pass:
  *
- * - a value whose name says it is a credential, a server or a destination (`password`, `username`,
- *   `secret`, `credential`, `host`, `server`, `endpoint`, `address`, `destination`, `sni`, `url`,
- *   `payload`), wherever it appears in the statement;
+ * - a value whose name says it is a credential, a server or a destination (`password`, `pass`, `pwd`,
+ *   `username`, `secret`, `token`, `credential`, `host`, `server`, `endpoint`, `address`, `ip`,
+ *   `domain`, `destination`, `target`, `sni`, `url`, `payload`), wherever it appears in the statement;
  * - bytes or characters (`ByteArray`, `CharArray`, `ByteBuffer`), the engine's secret, credentials
  *   read from storage or a profile being edited, wherever they appear;
  * - a whole profile, or any of its fields but its random `id` and its `protocol`;
@@ -34,6 +35,10 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor
  *   class name (`e.javaClass.simpleName`) is fine.
  *
  * Codes, counts, states and ids are what logs hold.
+ *
+ * The same rules apply to an exception's message (M8, [EXCEPTION_ISSUE]): a Throwable constructed with one,
+ * `error(…)`, and the lazy message of `require`, `check`, `requireNotNull` and `checkNotNull`. An uncaught
+ * exception's message goes to Android's crash report and the phone's log; a cause passed on is the cause's own.
  */
 class LogSecretDetector :
     Detector(),
@@ -42,6 +47,20 @@ class LogSecretDetector :
 
     override fun createUastHandler(context: JavaContext): UElementHandler = object : UElementHandler() {
         override fun visitCallExpression(node: UCallExpression) {
+            val message = exceptionMessage(context, node)
+            if (message != null) {
+                for (argument in message) {
+                    val found = findSecret(argument) ?: continue
+                    context.report(
+                        EXCEPTION_ISSUE,
+                        node,
+                        context.getLocation(found.first),
+                        "This exception's message may carry ${found.second}: say what failed with codes, counts and fixed words",
+                    )
+                    return
+                }
+                return
+            }
             if (!writesToLog(node)) return
             for (argument in node.valueArguments) {
                 val found = findSecret(argument) ?: continue
@@ -53,6 +72,29 @@ class LogSecretDetector :
                 )
                 return
             }
+        }
+    }
+
+    /**
+     * The arguments that make up an exception's message: those of a Throwable's constructor but its cause, `error`'s,
+     * and the lazy message of the preconditions (not their condition). Null when [node] makes no exception message.
+     */
+    private fun exceptionMessage(context: JavaContext, node: UCallExpression): List<UExpression>? {
+        val method = node.resolve()
+        // A constructor call, or a constructor's delegation to its superclass's: `: Exception("…")` in a class header,
+        // `super(…)`, `this(…)`, which UAST may give as a call of the constructor rather than as a constructor call.
+        if (node.isConstructorCall() || method?.isConstructor == true) {
+            val created = method?.containingClass ?: return null
+            if (!context.evaluator.inheritsFrom(created, "java.lang.Throwable", false)) return null
+            return node.valueArguments.filterNot { it.getExpressionType()?.isThrowable() == true }
+        }
+        val name = node.methodName ?: return null
+        val owner = method?.containingClass?.qualifiedName ?: return null
+        if (!owner.startsWith("kotlin.PreconditionsKt")) return null
+        return when (name) {
+            "error" -> node.valueArguments
+            in PRECONDITIONS -> node.valueArguments.drop(1)
+            else -> null
         }
     }
 
@@ -174,13 +216,32 @@ class LogSecretDetector :
             implementation = Implementation(LogSecretDetector::class.java, Scope.JAVA_FILE_SCOPE),
         )
 
+        val EXCEPTION_ISSUE: Issue = Issue.create(
+            id = "ExceptionSecret",
+            briefDescription = "An exception's message may carry a secret",
+            explanation = "An exception's message ends up in Android's crash report and the phone's log when nothing " +
+                "catches it, and Android writes it to the log before any app code runs (M8, threat model I-3). It holds " +
+                "what failed in codes, counts and fixed words: never a username or password, the engine's secret, a " +
+                "server's name or address, a destination, bytes apps sent, a whole profile, or another exception's message " +
+                "(pass that exception on as the cause instead).",
+            category = Category.SECURITY,
+            priority = 9,
+            severity = Severity.ERROR,
+            implementation = Implementation(LogSecretDetector::class.java, Scope.JAVA_FILE_SCOPE),
+        )
+
+        private val PRECONDITIONS = setOf("require", "check", "requireNotNull", "checkNotNull")
+
         private val LOG_METHODS = setOf("v", "d", "i", "w", "e", "wtf", "println")
 
-        /** Words of identifiers (compared without a plural "s"). */
+        /**
+         * Words of identifiers, compared without a plural "s" — so "pass" is "pas" and "address" "addres" ("passes", a
+         * count of passes, is "passe" and not one of them).
+         */
         private val DENIED_WORDS = setOf(
-            "password", "passwd", "username", "user", "secret", "credential", "host", "hostname", "server", "endpoint",
-            "addres", "addresse",
-            "address", "destination", "dst", "sni", "url", "uri", "payload", "packet",
+            "password", "passwd", "pas", "pwd", "username", "user", "secret", "token", "credential",
+            "host", "hostname", "server", "endpoint", "addres", "addresse", "address", "ip", "domain",
+            "destination", "dst", "target", "sni", "url", "uri", "payload", "packet",
         )
 
         /** Between the words of an identifier: before an upper-case letter, at an underscore or a digit run. */

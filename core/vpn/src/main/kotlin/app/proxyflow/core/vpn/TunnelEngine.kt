@@ -65,6 +65,13 @@ interface TunnelEngine {
     /** Proxy-level failures in a row as the running engine counts them (a success resets it); 0 when none runs. */
     fun consecutiveProxyFailures(): Long = 0
 
+    /**
+     * A SOCKS5 proxy's connection requests left unanswered in a row, and to how many different sites, as the running
+     * engine counts them (M8): anything that works, and any answer from the proxy, starts the count over. Zero when
+     * none runs.
+     */
+    fun unansweredRequests(): UnansweredRequests = UnansweredRequests()
+
     /** Ends every connection of the running engine — apps reconnect at once, on the phone's new network; how many it ended. */
     fun resetFlows(): Int = 0
 }
@@ -79,7 +86,16 @@ sealed interface EngineSignal {
 
     /** A connection to one site failed while the proxy worked (for the log, counted per minute). */
     data class ConnectionFailure(val code: String) : EngineSignal
+
+    /**
+     * A SOCKS5 proxy answered the sign-in but not the connection request in time (M8): the site's failure, unless
+     * several in a row to different sites go unanswered ([TunnelEngine.unansweredRequests]).
+     */
+    data class Unanswered(val error: ConnectionError) : EngineSignal
 }
+
+/** See [TunnelEngine.unansweredRequests]. */
+data class UnansweredRequests(val inARow: Long = 0, val sites: Int = 0)
 
 /**
  * The engine's traffic counters since it started (M7): bytes relayed for the apps' TCP connections,
@@ -164,7 +180,7 @@ class ProxyTunnelEngine(
         val platform = AndroidEnginePlatform(
             protector = protect,
             trustManager = trust(),
-            onEvent = { event -> signalOf(event.type, event.code, event.detail)?.let(signals) },
+            onEvent = { event -> signalOf(event.type, event.code, event.detail, event.unanswered)?.let(signals) },
         )
         // The engine's MTU must be the interface's: gVisor reads whole packets of up to that size.
         engine.start(tun.fd, profile.toEngineProfile().copy(mtu = config.mtu), secret, platform)
@@ -190,6 +206,11 @@ class ProxyTunnelEngine(
     override fun consecutiveProxyFailures(): Long =
         runCatching { engine.status() }.getOrNull()?.takeIf { it.state == EngineState.Running }?.consecutiveProxyFailures ?: 0
 
+    override fun unansweredRequests(): UnansweredRequests =
+        runCatching { engine.status() }.getOrNull()?.takeIf { it.state == EngineState.Running }
+            ?.let { UnansweredRequests(it.unansweredRequests, it.unansweredSites) }
+            ?: UnansweredRequests()
+
     override fun resetFlows(): Int = runCatching { engine.resetFlows() }.getOrDefault(0)
 
     private fun statsWhile(vararg states: EngineState) = runCatching { engine.stats() }.getOrNull()?.takeIf { it.state in states }
@@ -205,10 +226,11 @@ class ProxyTunnelEngine(
         const val CANCELED = "CANCELED"
 
         /** What an engine event means for the session, or null when it means nothing to it. */
-        fun signalOf(type: String, code: String?, detail: String?): EngineSignal? = when {
+        fun signalOf(type: String, code: String?, detail: String?, unanswered: Boolean = false): EngineSignal? = when {
             type == ENGINE_FAILED -> EngineSignal.Failed(ConnectionError(code ?: ConnectionError.ENGINE_STOPPED, detail))
             type != CONN_FAIL || code == null || code == CANCELED -> null
             code in RetryPolicy.PROXY_LEVEL -> EngineSignal.ProxyFailure(ConnectionError(code, detail))
+            unanswered -> EngineSignal.Unanswered(ConnectionError(code, detail))
             else -> EngineSignal.ConnectionFailure(code)
         }
     }

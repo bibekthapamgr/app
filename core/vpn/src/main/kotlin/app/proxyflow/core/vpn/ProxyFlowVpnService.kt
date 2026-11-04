@@ -191,6 +191,13 @@ class ProxyFlowVpnService :
 
     override fun clearProblem() = notifications.clearProblem()
 
+    // Android answers for the app whose VPN runs; without one it says false either way (M8, ADR-0013).
+    override fun systemKillSwitch(): KillSwitchReading? = try {
+        KillSwitchReading(alwaysOn = isAlwaysOn, blocksWithoutVpn = isLockdownEnabled)
+    } catch (e: RuntimeException) {
+        null // the system server could not answer
+    }
+
     override fun stop(): Int {
         val startId = lastStartId
         val generation = synchronized(statusLock) {

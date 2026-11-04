@@ -19,6 +19,8 @@ open class ProxyFlowApplication :
 
     override fun onCreate() {
         super.onCreate()
+        // Before anything else can fail: Android's crash report gets exceptions with their messages sanitized (M8).
+        CrashReports.install()
         if (BuildConfig.DEBUG) enableStrictMode()
         container = createContainer()
     }

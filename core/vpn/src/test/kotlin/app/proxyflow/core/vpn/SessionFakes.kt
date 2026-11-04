@@ -50,6 +50,9 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
     /** Proxy-level failures in a row, as the engine would count them. */
     @Volatile var inARow = 0L
 
+    /** A SOCKS5 proxy's unanswered connection requests in a row, and their sites, as the engine would count them (M8). */
+    @Volatile var unanswered = UnansweredRequests()
+
     /** The running engine's traffic counters (null: none). Each engine starts from none: stop() clears them. */
     @Volatile var trafficNow: EngineTraffic? = null
 
@@ -114,6 +117,8 @@ class FakeEngine(private val log: CallLog) : TunnelEngine {
     override fun traffic(): EngineTraffic? = if (running) trafficNow else null
 
     override fun consecutiveProxyFailures(): Long = if (running) inARow else 0
+
+    override fun unansweredRequests(): UnansweredRequests = if (running) unanswered else UnansweredRequests()
 
     override fun resetFlows(): Int {
         log.add("reset flows")
@@ -181,6 +186,10 @@ class FakeHost(private val log: CallLog) : VpnHost {
     @Volatile var lastConfig: TunConfig? = null
         private set
 
+    /** What Android says of its kill switch (M8); null: Android can't say. Each question is counted. */
+    @Volatile var killSwitch: KillSwitchReading? = KillSwitchReading(alwaysOn = false, blocksWithoutVpn = false)
+    val killSwitchQuestions = AtomicInteger()
+
     override fun hasConsent() = consent
 
     override fun establish(config: TunConfig): TunInterface? {
@@ -209,7 +218,11 @@ class FakeHost(private val log: CallLog) : VpnHost {
         return listOfNotNull(tuns.lastOrNull { !it.closed }?.let { VpnNetwork(id = NETWORK_ID, interfaceName = it.name, ready = true) })
     }
 
+    /** Thrown by [socketGuard]: a platform call failing where nothing expects it. */
+    @Volatile var guardError: RuntimeException? = null
+
     override fun socketGuard(): SocketGuard {
+        guardError?.let { throw it }
         guardsOpen.incrementAndGet()
         return object : SocketGuard {
             override fun track(fd: Int) {
@@ -238,6 +251,12 @@ class FakeHost(private val log: CallLog) : VpnHost {
 
     override fun clearProblem() {
         log.add("clear problem")
+    }
+
+    override fun systemKillSwitch(): KillSwitchReading? {
+        killSwitchQuestions.incrementAndGet()
+        // Android answers only for the app whose VPN runs (ProxyFlowVpnService): none open, it says false either way.
+        return if (tuns.any { !it.closed }) killSwitch else KillSwitchReading(alwaysOn = false, blocksWithoutVpn = false)
     }
 
     override fun stop(): Int {

@@ -25,6 +25,8 @@ import app.proxyflow.feature.profiles.AddEditProxyDestination
 import app.proxyflow.feature.profiles.addEditProxyScreen
 import app.proxyflow.feature.profiles.navigateToAddEditProxy
 import app.proxyflow.feature.profiles.profilesScreen
+import app.proxyflow.feature.settings.killSwitchGuideScreen
+import app.proxyflow.feature.settings.navigateToKillSwitchGuide
 import app.proxyflow.feature.settings.settingsScreen
 import app.proxyflow.navigation.TopLevelDestination
 import app.proxyflow.navigation.isTopLevel
@@ -32,7 +34,8 @@ import app.proxyflow.navigation.navigateToTopLevel
 
 /**
  * The app shell: bottom navigation for the four top-level screens and one
- * navigation graph. Add/Edit proxy and About are full screen, without the bar.
+ * navigation graph. Add/Edit proxy, About and the system kill switch guide are
+ * full screen, without the bar.
  */
 @Composable
 fun ProxyFlowApp(
@@ -73,6 +76,7 @@ fun ProxyFlowApp(
                 onChangeProfile = { navController.navigateToTopLevel(TopLevelDestination.Profiles) },
                 onEditProfile = { id -> navController.navigateToAddEditProxy(id) },
                 onOpenLogs = { navController.navigateToTopLevel(TopLevelDestination.Logs) },
+                onOpenKillSwitchGuide = { navController.navigateToKillSwitchGuide() },
             )
             profilesScreen(
                 viewModelFactory = viewModelFactory,
@@ -85,7 +89,12 @@ fun ProxyFlowApp(
                 onDone = { navController.popBackStack<AddEditProxyDestination>(inclusive = true) },
             )
             logsScreen(viewModelFactory = viewModelFactory, appVersion = version)
-            settingsScreen(viewModelFactory = viewModelFactory, onOpenAbout = { navController.navigateToAbout() })
+            settingsScreen(
+                viewModelFactory = viewModelFactory,
+                onOpenAbout = { navController.navigateToAbout() },
+                onOpenKillSwitchGuide = { navController.navigateToKillSwitchGuide() },
+            )
+            killSwitchGuideScreen(viewModelFactory = viewModelFactory, onBack = { navController.popBackStack() })
             aboutScreen(version = version, onBack = { navController.popBackStack() })
         }
     }

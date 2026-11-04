@@ -26,6 +26,15 @@ class StatusContentTest {
         )
     }
 
+    /** M8: an Always-on VPN start holds traffic during its check, so the way out is Disconnect, as while reconnecting. */
+    @Test
+    fun anAlwaysOnStartHoldingTrafficOffersDisconnectNotCancel() {
+        assertEquals(
+            StatusContent(Title.CONNECTING, Text.HOLDING, listOf(Action.DISCONNECT)),
+            StatusContent.of(state(ConnectionStatus.Connecting, step = ConnectStep.ProxyHandshake).copy(held = true)),
+        )
+    }
+
     @Test
     fun reconnectingSaysTrafficIsPausedAndOffersDisconnect() {
         assertEquals(

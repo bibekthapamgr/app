@@ -11,6 +11,8 @@
     <string name="vpn_notification_connecting">Connecting…</string>
     <string name="vpn_notification_checking_proxy">Checking proxy — TLS and sign-in</string>
     <string name="vpn_notification_starting_protection">Starting the VPN</string>
+    <!-- M8: Android started ProxyFlow as Always-on VPN; its interface is up before the proxy is checked. -->
+    <string name="vpn_notification_holding">Always-on VPN · ProxyFlow sends nothing around your proxy meanwhile.</string>
     <string name="vpn_notification_reconnecting">Reconnecting… traffic paused</string>
     <string name="vpn_notification_reconnecting_text">ProxyFlow sends nothing around your proxy.</string>
     <string name="vpn_notification_reconnecting_attempt">Attempt %1$d of %2$d · ProxyFlow sends nothing around your proxy meanwhile.</string>
@@ -23,9 +25,11 @@
     <string name="vpn_notification_blocked_text">ProxyFlow couldn\'t connect to your proxy. Apps stay offline until you try again or disconnect.</string>
     <string name="vpn_notification_blocked_profile_deleted">The profile this connection used was deleted. Apps stay offline until you disconnect.</string>
     <string name="vpn_notification_disconnected">Not connected</string>
-    <string name="vpn_notification_disconnected_text">Apps are using your normal network</string>
+    <string name="vpn_notification_disconnected_text">Apps use your normal network unless Android\'s system kill switch is on</string>
     <string name="vpn_notification_revoked">Disconnected by Android</string>
-    <string name="vpn_notification_revoked_text">Another VPN app was turned on or the permission was removed. Your apps now use the normal network.</string>
+    <string name="vpn_notification_revoked_text">Another VPN app was turned on or the permission was removed. Your apps no longer go through your proxy.</string>
+    <string name="vpn_notification_no_profile">Choose a proxy for Always-on VPN</string>
+    <string name="vpn_notification_no_profile_text">Android started ProxyFlow as your Always-on VPN, but no proxy is chosen, so ProxyFlow didn\'t connect. Open ProxyFlow and choose one. With \u201cBlock connections without VPN\u201d on, apps have no internet until then.</string>
 
     <string name="vpn_action_cancel">Cancel</string>
     <string name="vpn_action_disconnect">Disconnect</string>

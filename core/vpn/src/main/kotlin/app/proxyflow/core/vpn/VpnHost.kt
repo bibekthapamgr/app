@@ -41,12 +41,21 @@ interface VpnHost {
     fun clearProblem()
 
     /**
+     * What Android says of its kill switch for ProxyFlow (`VpnService.isAlwaysOn()`, `isLockdownEnabled()`; M8,
+     * ADR-0013). Android answers only while ProxyFlow's VPN interface exists: call it then. Null when Android can't say.
+     */
+    fun systemKillSwitch(): KillSwitchReading? = null
+
+    /**
      * Leaves the foreground, removes the status notification and stops the
      * service, unless a newer start reached it meanwhile (`stopSelfResult`).
      * Returns the start the stop is for: a start up to it is over.
      */
     fun stop(): Int
 }
+
+/** Android's kill switch as Android reports it: Always-on VPN for ProxyFlow, and with it "Block connections without VPN". */
+data class KillSwitchReading(val alwaysOn: Boolean, val blocksWithoutVpn: Boolean)
 
 /**
  * One VPN network as ConnectivityManager reports it.

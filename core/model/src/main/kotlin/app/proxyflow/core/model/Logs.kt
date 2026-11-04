@@ -60,6 +60,15 @@ enum class LogEvent(val key: String) {
 
     /** Connections to sites that failed while the proxy itself worked, counted per minute. */
     ConnectionProblems("connection_problems"),
+
+    /**
+     * ProxyFlow's process ended while connected, without the connection being stopped (M8): logged by the next process,
+     * with Android's reason and, where Android says, the time it ended.
+     */
+    SessionInterrupted("session_interrupted"),
+
+    /** What Android said about its kill switch (Always-on VPN, Block connections without VPN), when that changed (M8). */
+    SystemKillSwitch("system_kill_switch"),
     ;
 
     companion object {
@@ -86,6 +95,7 @@ enum class LogFilter {
         val CONNECTION = setOf(
             LogEvent.ConnectRequested, LogEvent.StageReached, LogEvent.Connected, LogEvent.ConnectFailed, LogEvent.ReconnectStarted,
             LogEvent.Reconnected, LogEvent.NetworkChanged, LogEvent.Stopped, LogEvent.Revoked, LogEvent.SessionSummary,
+            LogEvent.SessionInterrupted, LogEvent.SystemKillSwitch,
         )
         val BLOCKED =
             setOf(LogEvent.Blocked, LogEvent.ReconnectStarted, LogEvent.ReconnectAttemptFailed, LogEvent.ReconnectGaveUp, LogEvent.Offline)
@@ -120,9 +130,20 @@ object LogDetail {
     const val BY = "by"
     const val DETAIL = "detail"
 
+    /** M8: Android's kill switch as Android reported it ("yes" or "no"). */
+    const val ALWAYS_ON = "always_on"
+    const val BLOCKS_WITHOUT_VPN = "blocks_without_vpn"
+
+    /** M8: whether an interrupted session's end time is Android's ("exact") or unknown, so the entry's time is when it was found. */
+    const val END_TIME = "end_time"
+
+    /** M8: distinct sites among a SOCKS5 proxy's unanswered connection requests in a row. */
+    const val SITES = "sites"
+
     val ALLOWED = setOf(
         PROTOCOL, TLS, SIGN_IN, SWITCH, SETUP_MS, ATTEMPT, MAX_ATTEMPTS, NEXT_TRY_MS, REASON, COUNT, WINDOW_S, DURATION_MS, BYTES_UP,
         BYTES_DOWN, OPENED, FAILED, UDP_BLOCKED, PINGS_DROPPED, RECONNECTS, NETWORK, RESET, CONSECUTIVE, OUTAGE_MS, BY, DETAIL,
+        ALWAYS_ON, BLOCKS_WITHOUT_VPN, END_TIME, SITES,
     )
 }
 

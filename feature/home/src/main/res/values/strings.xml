@@ -13,7 +13,7 @@
     <string name="home_status_offline">Waiting for network</string>
 
     <!-- B2 -->
-    <string name="home_normal_network">Apps are using your normal network</string>
+    <string name="home_normal_network">Apps use your normal network unless Android\'s system kill switch is on</string>
     <string name="home_proxy_label">Proxy</string>
     <!-- TLS between this phone and the proxy, never HTTPS to sites (ADR-0005, ADR-0011). -->
     <string name="home_tls">TLS to proxy</string>
@@ -32,6 +32,8 @@
     <string name="home_step_current">In progress</string>
     <string name="home_step_pending">Not started</string>
     <string name="home_connecting_note">Your phone\'s network is unchanged until the VPN starts. If the proxy check fails, nothing is switched over.</string>
+    <!-- M8: Android started ProxyFlow as Always-on VPN, whose interface comes up before the proxy is checked. -->
+    <string name="home_connecting_held_note">Android started ProxyFlow as your Always-on VPN: apps\' traffic is held until ProxyFlow reaches your proxy, never sent around it.</string>
     <string name="home_cancel">Cancel</string>
 
     <!-- B4: the session's traffic (ADR-0012), what goes through the proxy and the diagnostics (ADR-0011). Counts only, never destinations. -->
@@ -139,7 +141,7 @@
     <string name="home_error_offline_message">ProxyFlow will connect when a network is available. Traffic stays blocked meanwhile.</string>
 
     <!-- B6b (pre-flight failures) and the blocked layout -->
-    <string name="home_not_connected_note">You\'re not connected — apps are still using your normal network.</string>
+    <string name="home_not_connected_note">You\'re not connected: apps use your normal network unless Android\'s system kill switch is on.</string>
     <string name="home_blocked_note">Apps can\'t go online until this is fixed — ProxyFlow sends nothing around your proxy.</string>
     <string name="home_code">Code: %1$s</string>
     <string name="home_try_again">Try again</string>
@@ -153,7 +155,7 @@
     <!-- B6d -->
     <string name="home_error_vpn_revoked_title">Disconnected by Android</string>
     <string name="home_error_vpn_revoked_message">Another VPN app was turned on, or ProxyFlow\'s VPN permission was removed.</string>
-    <string name="home_revoked_note">Your apps are now using your normal network.</string>
+    <string name="home_revoked_note">Your apps no longer go through your proxy.</string>
     <string name="home_reconnect">Reconnect</string>
 
     <!-- B9 -->
@@ -212,4 +214,54 @@
     <string name="home_error_profile_deleted_message">The profile this connection used was deleted, so its proxy isn\'t used any more. Traffic stays blocked until you stop the connection.</string>
     <string name="home_error_internal_title">Couldn\'t connect</string>
     <string name="home_error_internal_message">Something on this phone stopped the connection from starting. Try again.</string>
+
+    <!-- M8: Android's system kill switch (boards B2, B6d; the guide is E2 in feature/settings). As Android last said:
+         it tells ProxyFlow only while ProxyFlow's VPN runs. -->
+    <string name="home_no_network_kill_switch">Android\'s system kill switch was on when last checked: if it still is, apps have no internet</string>
+    <string name="home_kill_switch_off">Android said at %1$s that its system kill switch is off: while it is, apps use your normal network if ProxyFlow stops while connected.</string>
+    <string name="home_kill_switch_always_on_only">Android said at %1$s that Always-on VPN is on without blocking: while it is, apps use your normal network if ProxyFlow stops while connected, until it connects again.</string>
+    <string name="home_kill_switch_unknown">If ProxyFlow stops while connected, only Android\'s system kill switch keeps apps off your normal network.</string>
+    <string name="home_kill_switch_on">Android said at %1$s that its system kill switch is on: while it is, apps have no internet when ProxyFlow isn\'t connected. To use your normal network, turn it off in Android\'s VPN settings.</string>
+    <string name="home_kill_switch_set_up">Set up system kill switch</string>
+    <string name="home_kill_switch_details">About the system kill switch</string>
+    <string name="home_prevent_title">Prevent this next time</string>
+    <string name="home_prevent_message">Turn on Always-on VPN with \u201cBlock connections without VPN\u201d so Android blocks traffic when ProxyFlow isn\'t running.</string>
+    <string name="home_not_connected_note_always_on">Apps have no internet if \u201cBlock connections without VPN\u201d is on in Android\'s VPN settings; otherwise they use your normal network.</string>
+    <string name="home_not_connected_note_kill_switch">You\'re not connected. Android\'s system kill switch was on when ProxyFlow last checked: if it still is, apps have no internet.</string>
+    <string name="home_stop_message_kill_switch">Android\'s system kill switch was on when ProxyFlow last checked: if it still is, apps will have no internet until you connect again.</string>
+
+    <!-- M8: the last process ended while connected, without the connection being stopped. -->
+    <string name="home_interrupted_title">ProxyFlow was stopped while connected</string>
+    <string name="home_interrupted_at">%1$s at %2$s.</string>
+    <string name="home_interrupted_unknown_time">%1$s some time after it connected at %2$s.</string>
+    <string name="home_interrupted_leak">Android removed the VPN with it: from then on apps used your normal network, unless Android\'s system kill switch was on.</string>
+    <string name="home_interrupted_restart_leak">After a restart ProxyFlow connects by itself only as your Always-on VPN: until then, apps use your normal network unless Android\'s system kill switch is on.</string>
+    <string name="home_interrupted_blocked">Android\'s system kill switch was on when ProxyFlow last checked before that: if it still was, apps had no internet until ProxyFlow connected again.</string>
+    <string name="home_interrupted_connected_again">ProxyFlow is connected again.</string>
+    <string name="home_interrupted_dismiss">OK</string>
+    <string name="home_exit_low_memory">Android closed ProxyFlow to free memory</string>
+    <string name="home_exit_crash">ProxyFlow stopped because of an error</string>
+    <string name="home_exit_native_crash">ProxyFlow\'s packet engine stopped because of an error</string>
+    <string name="home_exit_not_responding">Android closed ProxyFlow because it stopped responding</string>
+    <string name="home_exit_killed">ProxyFlow\'s process was ended</string>
+    <string name="home_exit_force_stopped">ProxyFlow was force-stopped</string>
+    <string name="home_exit_updated">ProxyFlow was updated</string>
+    <string name="home_exit_permission_changed">Android closed ProxyFlow after one of its permissions changed</string>
+    <string name="home_exit_phone_restarted">Your phone restarted</string>
+    <string name="home_exit_other">Android closed ProxyFlow</string>
+    <string name="home_exit_unknown">ProxyFlow stopped</string>
+
+    <!-- M8: H1 also covers H2 (another app is Always-on VPN): Android's consent screen then closes without asking. -->
+    <string name="home_error_vpn_permission_always_on">If Android didn\'t ask, another app may be set as Always-on VPN: turn that off in VPN settings, then try again.</string>
+    <string name="home_open_vpn_settings">Open VPN settings</string>
+
+    <!-- M8: reconnecting on its own, two more reasons (board B5). -->
+    <string name="home_reconnect_unanswered_title">Your proxy isn\'t answering</string>
+    <string name="home_reconnect_always_on_title">Starting as Always-on VPN</string>
+    <string name="home_reconnect_unanswered_message">Your proxy stopped answering connection requests to several sites. ProxyFlow is reconnecting; apps stay paused until it answers.</string>
+    <string name="home_reconnect_always_on_message">Android started ProxyFlow as your Always-on VPN. Apps stay paused until ProxyFlow reaches your proxy.</string>
+
+    <!-- M8: Android started ProxyFlow as Always-on VPN, but no proxy is chosen. -->
+    <string name="home_error_always_on_no_profile_title">Choose a proxy for Always-on VPN</string>
+    <string name="home_error_always_on_no_profile_message">Android started ProxyFlow as your Always-on VPN, but no proxy was chosen, so ProxyFlow didn\'t connect. Connect once with the proxy Always-on VPN should use.</string>
 </resources>

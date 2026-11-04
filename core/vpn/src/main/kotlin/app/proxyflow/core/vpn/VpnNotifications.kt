@@ -84,16 +84,23 @@ internal class VpnNotifications(private val context: Context) {
 
     private fun restart(): PendingIntent = ProxyFlowVpnService.pendingAction(context, ProxyFlowVpnService.ACTION_RESTART, REQUEST_RESTART)
 
-    /** The alert after Android revoked the VPN (board B6d). Without the notification permission there is none; the app shows B6d. */
+    /**
+     * The alert after Android revoked the VPN (board B6d), or after Android started ProxyFlow for Always-on VPN with no
+     * profile chosen (M8). Without the notification permission there is none; the app shows either on Home.
+     */
     fun problem(state: ConnectionState) {
-        if (state.error?.code != ConnectionError.VPN_REVOKED) return
+        val (titleId, textId) = when (state.error?.code) {
+            ConnectionError.VPN_REVOKED -> R.string.vpn_notification_revoked to R.string.vpn_notification_revoked_text
+            ConnectionError.ALWAYS_ON_NO_PROFILE -> R.string.vpn_notification_no_profile to R.string.vpn_notification_no_profile_text
+            else -> return
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             return
         }
-        val title = context.getString(R.string.vpn_notification_revoked)
-        val text = context.getString(R.string.vpn_notification_revoked_text)
+        val title = context.getString(titleId)
+        val text = context.getString(textId)
         val builder = NotificationCompat.Builder(context, PROBLEMS_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_proxyflow)
             .setContentTitle(title)
@@ -106,7 +113,7 @@ internal class VpnNotifications(private val context: Context) {
         try {
             manager.notify(PROBLEM_ID, builder.build())
         } catch (e: SecurityException) {
-            // The permission was withdrawn after the check; the app still shows B6d.
+            // The permission was withdrawn after the check; the app still shows it on Home.
         }
     }
 
@@ -129,6 +136,7 @@ internal class VpnNotifications(private val context: Context) {
     private fun textOf(text: StatusContent.Text): Int = when (text) {
         StatusContent.Text.CHECKING_PROXY -> R.string.vpn_notification_checking_proxy
         StatusContent.Text.STARTING_PROTECTION -> R.string.vpn_notification_starting_protection
+        StatusContent.Text.HOLDING -> R.string.vpn_notification_holding
         StatusContent.Text.RECONNECTING -> R.string.vpn_notification_reconnecting_text
         StatusContent.Text.RECONNECTING_ATTEMPT -> R.string.vpn_notification_reconnecting_attempt
         StatusContent.Text.CONNECTED -> R.string.vpn_notification_connected_text

@@ -120,7 +120,7 @@ class VpnConsentTest {
         waitForText("Connect").performClick()
 
         waitForText("Username or password rejected", CONNECT_TIMEOUT_MS)
-        waitForText("You're not connected — apps are still using your normal network.")
+        waitForText("You're not connected: apps use your normal network unless Android's system kill switch is on.")
         assertEquals(ConnectionError("AUTH_FAILED"), app.controller.state.value.error?.copy(detail = null))
         assertTrue("never Connected: ${history.states}", history.neverConnected())
         assertNothingStarted()

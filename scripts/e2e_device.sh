@@ -22,16 +22,27 @@ adb shell chmod 644 /data/local/tmp/proxyflow-ca.pem
 
 # Every adb call that could wait for a wedged device is bounded, so the logs below are always collected.
 restart_adbd() {
-    timeout 30 adb "$1" >/dev/null 2>&1 || return 1
     # adbd restarts as the new user, and the old connection can still look online for a moment (run 41278339766,
     # attempt 3, API 35: "device offline" when the script then asked whether tcpdump still ran): wait until a command
-    # really runs as that user.
-    local want=0
+    # really runs as that user. adb itself can lose the device across the restart (run 41690836372, API 35: "adb root"
+    # failed and the device stayed offline, so the phone's captures were never pulled): then it connects again and
+    # tries once more, up to three times — all within 4 minutes (a call starts only if it can end in time), so the
+    # step's own time limit is never spent here.
+    local want=0 deadline=$((SECONDS + 240)) _try _
     if [ "$1" = unroot ]; then want=2000; fi
-    for _ in $(seq 1 60); do
-        sleep 2
-        timeout 10 adb wait-for-device >/dev/null 2>&1 || continue
-        if [ "$(timeout 10 adb shell id -u 2>/dev/null | tr -d '\r')" = "$want" ]; then return 0; fi
+    for _try in 1 2 3; do
+        [ $((deadline - SECONDS)) -ge 30 ] || break
+        if timeout 30 adb "$1" >/dev/null 2>&1; then
+            for _ in $(seq 1 30); do
+                [ $((deadline - SECONDS)) -ge 22 ] || break
+                sleep 2
+                timeout 10 adb wait-for-device >/dev/null 2>&1 || continue
+                if [ "$(timeout 10 adb shell id -u 2>/dev/null | tr -d '\r')" = "$want" ]; then return 0; fi
+            done
+        fi
+        [ $((deadline - SECONDS)) -ge 80 ] || break
+        timeout 20 adb reconnect >/dev/null 2>&1 || true
+        timeout 60 adb wait-for-device >/dev/null 2>&1 || true
     done
     return 1
 }
@@ -279,6 +290,24 @@ fi
 
 timeout 120 adb logcat -d -v threadtime -v UTC > "$OUT/logcat.txt" 2>&1 || true
 kill "$LIVE_LOGCAT" 2>/dev/null || true
+
+# M8: failure injection (process death, Android's Always-on VPN with Block connections without VPN), after the tests
+# and their logcat, so the M5 to M7 evidence reads the tests alone; it has its own logcat (logcat-m8.txt). The captures
+# and the socket samples go on through it. Bounded, so the captures and samples pulled below are never lost to the
+# step's own time limit, and not run once the tests themselves ran out of time (m8_evidence.py then finds no steps).
+if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
+    echo "::error title=M8 failure injection (API $API)::Not run: the device tests ran out of time."
+else
+    # Stopped at its limit, it cleans up first (Always-on VPN off, the device owner given up): bash runs its trap once
+    # the adb step it waits for ends — each has its own limit, the longest 150 s — and the clean-up's own adb calls take
+    # up to about 4 minutes with adb wedged, so the kill comes 8 minutes later.
+    timeout --kill-after=8m "${M8_TIMEOUT:-10m}" bash scripts/m8_failure_injection.sh "$API" "$OUT"
+    M8_STATUS=$?
+    if [ "$M8_STATUS" = 124 ] || [ "$M8_STATUS" = 137 ] || [ "$M8_STATUS" = 143 ]; then
+        echo "::error title=M8 failure injection (API $API)::Stopped after ${M8_TIMEOUT:-10m}: the steps it took are in m8-steps.txt."
+    fi
+    if [ "$M8_STATUS" != 0 ] && [ "$STATUS" = 0 ]; then STATUS=$M8_STATUS; fi
+fi
 timeout 30 adb shell 'pkill -f pf-connecting.sh' >/dev/null 2>&1 || true
 timeout 120 adb pull /data/local/tmp/pf-connecting.txt "$OUT/phone-connecting.txt" >/dev/null 2>&1 || echo "no socket samples" > "$OUT/phone-connecting.txt"
 timeout 60 adb shell pm list packages -U 2>/dev/null | tr -d '\r' > "$OUT/packages-uids.txt" || true
@@ -301,8 +330,17 @@ if [ "$GUEST_CAPTURE" = 1 ]; then
     sleep 3
     echo "captured on the phone: $(timeout 30 adb shell 'ls -l /data/local/tmp/pf-*.pcap' 2>&1 | tr -d '\r' | awk '{print $NF, $5}' | paste -sd ';' -)" >> "$OUT/guest-capture.txt"
     for iface in $(cat "$OUT/guest-interfaces.txt"); do
-        timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1 ||
-            echo "pull of pf-$iface.pcap failed or timed out" >> "$OUT/guest-capture.txt"
+        # Once more after adb has the device again, should the first pull fail at once (the device offline for a
+        # moment); one that took its whole time limit is not tried again, so the step's own limit is not spent on it.
+        pull_started=$SECONDS
+        if ! timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1; then
+            if [ $((SECONDS - pull_started)) -lt 60 ] && timeout 60 adb wait-for-device >/dev/null 2>&1 &&
+                timeout 300 adb pull "/data/local/tmp/pf-$iface.pcap" "$OUT/guest-$iface.pcap" >/dev/null 2>&1; then
+                echo "pulled pf-$iface.pcap at the second try" >> "$OUT/guest-capture.txt"
+            else
+                echo "pull of pf-$iface.pcap failed or timed out" >> "$OUT/guest-capture.txt"
+            fi
+        fi
     done
 fi
 timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties /data/local/tmp/proxyflow-ca.pem /data/local/tmp/pf-client.apk \

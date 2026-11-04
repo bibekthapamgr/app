@@ -57,6 +57,13 @@ data class RetryPolicy(
         /** Proxy-level failures in a row that make a connected session reconnect (docs/m1/04 §4). */
         const val ESCALATION_FAILURES = 3
 
+        /**
+         * A SOCKS5 proxy's connection requests left unanswered in a row that make a connected session reconnect (M8),
+         * when they went to at least [UNANSWERED_SITES] different sites: one slow site never does.
+         */
+        const val UNANSWERED_ESCALATION = 3L
+        const val UNANSWERED_SITES = 2
+
         fun recoverable(code: String?): Boolean = code in RECOVERABLE
     }
 }

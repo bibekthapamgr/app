@@ -83,6 +83,41 @@ class LogSecretDetectorTest : LintDetectorTest() {
         ).expectErrorCount(5)
     }
 
+    /** M8 review: more names a credential or a destination goes by. */
+    fun testMoreNamesOfCredentialsAndDestinationsAreErrors() {
+        check(
+            """
+            package test
+            import android.util.Log
+            class Probe {
+                fun f(target: String, pass: String, pwd: String, token: String, clientIp: String, domains: List<String>) {
+                    Log.i("probe", "to " + target)
+                    Log.i("probe", "with ${'$'}pass")
+                    Log.i("probe", pwd)
+                    Log.i("probe", "bearer ${'$'}token")
+                    Log.i("probe", clientIp)
+                    Log.i("probe", "names ${'$'}domains")
+                }
+            }
+            """,
+        ).expectErrorCount(6)
+    }
+
+    /** Words are whole words of the name: these hold none. */
+    fun testWordsInsideOtherWordsAreFine() {
+        check(
+            """
+            package test
+            import android.util.Log
+            class Counter {
+                fun f(passes: Int, bypassed: Int, skipped: Int, ipv6Count: Int) {
+                    Log.i("counter", "passes ${'$'}passes, bypassed ${'$'}bypassed, skipped ${'$'}skipped, v6 ${'$'}ipv6Count")
+                }
+            }
+            """,
+        ).expectClean()
+    }
+
     fun testOtherFunctionsAreNotLogs() {
         check(
             """
@@ -98,9 +133,71 @@ class LogSecretDetectorTest : LintDetectorTest() {
         ).expectClean()
     }
 
-    private fun check(source: String) = lint()
+    // --- ExceptionSecret (M8): an exception's message reaches Android's crash report and the phone's log ---------
+
+    fun testExceptionMessagesWithSecretsAreErrors() {
+        check(
+            """
+            package test
+            class Form {
+                fun f(username: String, host: String, e: Exception, count: Int) {
+                    if (count < 0) throw IllegalArgumentException("bad user " + username)
+                    require(count > 0) { "cannot reach ${'$'}host" }
+                    check(count < 10) { "failed: ${'$'}{e.message}" }
+                    error("signing in as ${'$'}username")
+                }
+            }
+            """,
+            LogSecretDetector.EXCEPTION_ISSUE,
+        ).expectErrorCount(4)
+    }
+
+    fun testExceptionMessagesOfCodesAndCausesAreFine() {
+        check(
+            """
+            package test
+            class CredentialUnreadableException(val permanent: Boolean, message: String, cause: Throwable? = null) :
+                Exception(message, cause)
+            class Cipher {
+                fun f(user: ByteArray, pass: ByteArray, e: Exception, version: Int) {
+                    require(user.size <= 255 && pass.size <= 255) { "credential too long" }
+                    check(version > 0)
+                    if (version != 1) throw CredentialUnreadableException(permanent = true, "unknown format ${'$'}version")
+                    throw IllegalStateException("decryption failed: ${'$'}{e.javaClass.simpleName}", e)
+                }
+            }
+            """,
+            LogSecretDetector.EXCEPTION_ISSUE,
+        ).expectClean()
+    }
+
+    /** An exception class's own message, passed to its superclass in the class header, is checked as any other. */
+    fun testASuperclassCallInAClassHeaderIsChecked() {
+        check(
+            """
+            package test
+            class ProxyUnreachable(host: String) : IllegalStateException("cannot reach " + host)
+            class TargetRefused(target: String, cause: Throwable) : RuntimeException("refused: ${'$'}target", cause)
+            class Failed(code: String, cause: Throwable) : RuntimeException("failed: ${'$'}code", cause)
+            """,
+            LogSecretDetector.EXCEPTION_ISSUE,
+        ).expectErrorCount(2)
+    }
+
+    fun testOnlyExceptionsMessagesAreChecked() {
+        check(
+            """
+            package test
+            class Model(val host: String)
+            fun make(host: String) = Model(host)
+            """,
+            LogSecretDetector.EXCEPTION_ISSUE,
+        ).expectClean()
+    }
+
+    private fun check(source: String, issue: Issue = LogSecretDetector.ISSUE) = lint()
         .files(kotlin(source).indented(), *STUBS)
-        .issues(LogSecretDetector.ISSUE)
+        .issues(issue)
         .allowMissingSdk()
         .testModes(TestMode.DEFAULT)
         .run()

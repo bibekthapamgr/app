@@ -64,6 +64,18 @@ enum class ReconnectReason {
 
     /** The phone moved to another network while ProxyFlow was already reconnecting: the attempts start over. */
     NetworkChanged,
+
+    /**
+     * A SOCKS5 proxy left connection requests to different sites unanswered several times in a row, with nothing
+     * working between them (M8): its own way out is probably broken.
+     */
+    ProxyUnanswered,
+
+    /**
+     * Android started ProxyFlow for Always-on VPN and connecting failed in a way that may pass (M8, ADR-0013):
+     * traffic is held from the start, and attempts go on as after a connection that broke.
+     */
+    AlwaysOnStart,
 }
 
 /**
@@ -94,6 +106,12 @@ data class ConnectionError(val code: String, val detail: String? = null) {
 
         /** The profile a connection used was deleted while traffic was held: it stays held until the user stops. */
         const val PROFILE_DELETED = "PROFILE_DELETED"
+
+        /**
+         * Android started ProxyFlow for Always-on VPN, but no profile is chosen (M8): ProxyFlow never picks one for the
+         * user, so it connects nothing and says so.
+         */
+        const val ALWAYS_ON_NO_PROFILE = "ALWAYS_ON_NO_PROFILE"
         const val INTERNAL = "INTERNAL"
 
         /**
@@ -126,6 +144,9 @@ data class ConnectionError(val code: String, val detail: String? = null) {
  * @param error why the last attempt ended (with [ConnectionStatus.Disconnected]) or why
  *   traffic is blocked (with [ConnectionStatus.Blocked]); null after a normal disconnect.
  * @param reconnect set while ProxyFlow reconnects on its own (board B5).
+ * @param held while [ConnectionStatus.Connecting]: the VPN interface is already up and holds apps' traffic — Android
+ *   started ProxyFlow as Always-on VPN (M8, ADR-0013 §3) — so cancelling sends apps to the normal network, unlike a
+ *   connect that changes nothing on the phone until it passes.
  */
 data class ConnectionState(
     val status: ConnectionStatus = ConnectionStatus.Disconnected,
@@ -136,6 +157,7 @@ data class ConnectionState(
     val connectedSinceMillis: Long? = null,
     val error: ConnectionError? = null,
     val reconnect: ReconnectInfo? = null,
+    val held: Boolean = false,
 ) {
     /** Connecting or up: a new connect for the same profile has nothing to do. */
     val active: Boolean get() = status != ConnectionStatus.Disconnected

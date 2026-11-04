@@ -4,18 +4,24 @@ import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.proxyflow.core.data.ConnectionController
+import app.proxyflow.core.data.InMemoryProtectionStore
 import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.data.ProtectionStore
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.Interruption
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.SystemKillSwitch
 import app.proxyflow.core.model.TrafficStats
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 sealed interface HomeUiState {
     data object Loading : HomeUiState
@@ -32,6 +38,10 @@ sealed interface HomeUiState {
      * @param diagnostics while connected, what the connection did so far (B4, ADR-0011); null until read.
      * @param traffic while there is a connected session (B4, and on through B5 and B7), what it carried
      *   so far (ADR-0012); null until read.
+     * @param killSwitch Android's kill switch as Android last reported it while ProxyFlow was connected (M8); null
+     *   when it never did.
+     * @param interruption the last process ended while connected, without the connection being stopped, and the user
+     *   has not acknowledged it yet (M8).
      */
     data class Ready(
         val profile: ProxyProfile,
@@ -40,11 +50,18 @@ sealed interface HomeUiState {
         val dialog: HomeDialog? = null,
         val diagnostics: RoutingDiagnostics? = null,
         val traffic: TrafficStats? = null,
+        val killSwitch: SystemKillSwitch? = null,
+        val interruption: Interruption? = null,
     ) : HomeUiState {
         val status: ConnectionStatus get() = connection.status
 
-        /** Why the last attempt with [profile] ended, or why its traffic is blocked; null when there is nothing to say. */
-        val error: ConnectionError? get() = connection.error?.takeIf { connection.profileId == profile.id }
+        /**
+         * Why the last attempt with [profile] ended, or why its traffic is blocked; null when there is nothing to say.
+         * Android starting ProxyFlow for Always-on VPN with no profile chosen concerns no profile, and is shown too.
+         */
+        val error: ConnectionError? get() = connection.error?.takeIf {
+            connection.profileId == profile.id || it.code == ConnectionError.ALWAYS_ON_NO_PROFILE
+        }
     }
 }
 
@@ -59,7 +76,11 @@ sealed interface HomeDialog {
     data object ConfirmStop : HomeDialog
 }
 
-class HomeViewModel(profiles: ProfileRepository, private val connection: ConnectionController) : ViewModel() {
+class HomeViewModel(
+    private val profiles: ProfileRepository,
+    private val connection: ConnectionController,
+    protection: ProtectionStore = InMemoryProtectionStore(),
+) : ViewModel() {
     private val dialog = MutableStateFlow<HomeDialog?>(null)
     private var notificationRequestTaken = false
 
@@ -73,8 +94,12 @@ class HomeViewModel(profiles: ProfileRepository, private val connection: Connect
         )
     }
 
+    // Android's kill switch as last reported, and an interruption not acknowledged yet (M8).
+    private val kept =
+        combine(protection.killSwitch, protection.interruption) { killSwitch, interruption -> Kept(killSwitch, interruption) }
+
     val uiState: StateFlow<HomeUiState> =
-        combine(profiles.profiles, profiles.activeProfileId, live, dialog) { list, activeId, now, dialog ->
+        combine(profiles.profiles, profiles.activeProfileId, live, dialog, kept) { list, activeId, now, dialog, kept ->
             val current = now.connection
             val active = list.firstOrNull { it.id == activeId } ?: list.firstOrNull()
             val running = current.profile?.takeIf { current.active }
@@ -82,7 +107,16 @@ class HomeViewModel(profiles: ProfileRepository, private val connection: Connect
             if (shown == null) {
                 HomeUiState.NoProfile
             } else {
-                HomeUiState.Ready(shown, current, connection.canConnect, dialog, now.diagnostics, now.traffic)
+                HomeUiState.Ready(
+                    shown,
+                    current,
+                    connection.canConnect,
+                    dialog,
+                    now.diagnostics,
+                    now.traffic,
+                    killSwitch = kept.killSwitch,
+                    interruption = kept.interruption,
+                )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), HomeUiState.Loading)
 
@@ -100,7 +134,7 @@ class HomeViewModel(profiles: ProfileRepository, private val connection: Connect
         if (consent != null) {
             dialog.value = HomeDialog.VpnExplainer(consent)
         } else {
-            connection.connect(ready.profile.id)
+            connectNow(ready.profile.id)
         }
     }
 
@@ -108,11 +142,32 @@ class HomeViewModel(profiles: ProfileRepository, private val connection: Connect
     fun onConsentResult(granted: Boolean) {
         val ready = uiState.value as? HomeUiState.Ready ?: return
         if (granted) {
-            connection.connect(ready.profile.id)
+            connectNow(ready.profile.id)
         } else {
             dialog.value = HomeDialog.VpnPermissionDenied
         }
     }
+
+    /**
+     * Connecting the profile Home shows is the user's choice of it (M8): Always-on VPN later connects it, and never a
+     * profile the user didn't pick. A notice of an interrupted connection Home shows has been seen once the user
+     * connects again; one not shown yet stays.
+     */
+    private fun connectNow(profileId: String) {
+        connection.connect(profileId)
+        dismissInterruption()
+        viewModelScope.launch {
+            if (profiles.chosenProfileId.first() != profileId) profiles.setActive(profileId)
+        }
+    }
+
+    /** The notice that ProxyFlow was stopped while connected, acknowledged (M8): the one Home shows, if it still is. */
+    fun dismissInterruption() {
+        (uiState.value as? HomeUiState.Ready)?.interruption?.let(connection::dismissInterruption)
+    }
+
+    /** Home is shown: while ProxyFlow is connected, Android is asked about its kill switch again (M8). */
+    fun checkKillSwitch() = connection.checkSystemKillSwitch()
 
     /** Disconnect (B4) and Cancel (B3). */
     fun disconnect() = connection.disconnect()
@@ -151,6 +206,8 @@ class HomeViewModel(profiles: ProfileRepository, private val connection: Connect
     }
 
     private data class Live(val connection: ConnectionState, val diagnostics: RoutingDiagnostics?, val traffic: TrafficStats?)
+
+    private data class Kept(val killSwitch: SystemKillSwitch?, val interruption: Interruption?)
 
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L

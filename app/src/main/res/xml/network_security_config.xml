@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  M8, secure defaults written out (docs/m8/security-review.md): no cleartext through Android's own HTTP stacks, and
+  only the system's certificate authorities, never one the user or a device admin installed. ProxyFlow's TLS to a
+  proxy checks the proxy's certificate with Android's trust manager, which follows this file (ADR-0011).
+  scripts/check_release_manifest.py fails the build if this file allows more.
+
+  It does not govern the engine's plain sockets: a proxy without TLS (HTTP CONNECT or SOCKS5) is the user's choice,
+  shown as such in the app, and carries what apps send, whose HTTPS stays encrypted end to end.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -117,6 +117,8 @@ class ReconnectTest {
                 LogEvent.StageReached,
                 LogEvent.StageReached,
                 LogEvent.Connected,
+                // M8: what Android said of its kill switch, the first time (FakeHost: off).
+                LogEvent.SystemKillSwitch,
             ),
             entries.map { it.event },
         )
@@ -762,6 +764,16 @@ class ReconnectTest {
         assertEquals(EngineSignal.ConnectionFailure("TARGET_REFUSED"), ProxyTunnelEngine.signalOf("conn_fail", "TARGET_REFUSED", null))
         assertNull("a set-up the engine cancelled is no failure", ProxyTunnelEngine.signalOf("conn_fail", "CANCELED", null))
         assertNull(ProxyTunnelEngine.signalOf("conn_open", null, null))
+        // M8: a SOCKS5 request the proxy left unanswered is its own signal; a proxy-level failure stays one.
+        assertEquals(
+            EngineSignal.Unanswered(ConnectionError("TARGET_UNREACHABLE", "no reply")),
+            ProxyTunnelEngine.signalOf("conn_fail", "TARGET_UNREACHABLE", "no reply", unanswered = true),
+        )
+        assertEquals(
+            EngineSignal.ProxyFailure(ConnectionError("HANDSHAKE_TIMEOUT", null)),
+            ProxyTunnelEngine.signalOf("conn_fail", "HANDSHAKE_TIMEOUT", null, unanswered = true),
+        )
+        assertNull(ProxyTunnelEngine.signalOf("conn_fail", "CANCELED", null, unanswered = true))
     }
 
     // --- helpers ---

@@ -4,4 +4,7 @@
     <string name="pf_show_password">Show password</string>
     <string name="pf_hide_password">Hide password</string>
     <string name="pf_loading">Loading</string>
+    <!-- M8, tapjacking: a tap on an action such as Disconnect while another app draws over ProxyFlow. -->
+    <string name="pf_obscured_touch_refused">ProxyFlow ignored that tap: another app is showing something over the screen. Close it and tap again.</string>
+    <string name="pf_no_vpn_settings">This phone has no VPN settings screen ProxyFlow can open: look for VPN in Android\'s settings.</string>
 </resources>

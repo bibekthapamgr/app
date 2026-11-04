@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.testing.DumpOnFailureRule
@@ -68,7 +69,8 @@ class StateRestorationTest {
     fun chosenThemeIsSavedAndShownAfterRecreation() {
         val themeRowSaysDark = hasText("Theme") and hasText("Dark")
         compose.tab("Settings").performClick()
-        compose.onNodeWithText("Theme").performClick()
+        // Below the kill switch section (M8): on a small screen the row is scrolled to first.
+        compose.onNodeWithText("Theme").performScrollTo().performClick()
         compose.onNodeWithText("Dark").performClick()
         // DataStore writes on its own thread; wait until the row shows the stored value.
         compose.waitUntil(timeoutMillis = 5_000) { compose.onAllNodes(themeRowSaysDark).fetchSemanticsNodes().isNotEmpty() }
@@ -77,6 +79,6 @@ class StateRestorationTest {
         compose.waitForApp()
 
         compose.tab("Settings").assertIsSelected()
-        compose.onNode(themeRowSaysDark).assertIsDisplayed()
+        compose.onNode(themeRowSaysDark).performScrollTo().assertIsDisplayed()
     }
 }

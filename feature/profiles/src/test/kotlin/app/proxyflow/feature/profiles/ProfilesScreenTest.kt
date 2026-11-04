@@ -87,7 +87,8 @@ class ProfilesScreenTest {
         compose.onNodeWithText("Delete").performClick()
         compose.onNodeWithText("Disconnect and delete \"Office HTTP\"?").assertIsDisplayed()
         compose.onNodeWithText(
-            "ProxyFlow is using this proxy. Deleting it ends the connection first, and your apps go back to your normal network.",
+            "ProxyFlow is using this proxy. Deleting it ends the connection first: apps then use your normal network unless " +
+                "Android's system kill switch is on.",
             substring = true,
         ).assertIsDisplayed()
         compose.onNodeWithText("Disconnect and delete").performClick()

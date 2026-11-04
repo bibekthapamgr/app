@@ -33,7 +33,7 @@ stateDiagram-v2
 Rules that apply to every state:
 
 - **Connected** is shown only after the first successful proxy handshake, never just because the TUN interface exists.
-- **Connecting** runs a pre-flight handshake with the proxy *before* the VPN interface is established. If it fails, nothing was changed on the phone: the user sees the specific error in the B6b layout ("You're not connected — apps are still using your normal network").
+- **Connecting** runs a pre-flight handshake with the proxy *before* the VPN interface is established. If it fails, nothing was changed on the phone: the user sees the specific error in the B6b layout ("You're not connected: apps use your normal network unless Android's system kill switch is on"; until M8, "You're not connected — apps are still using your normal network").
 - Once connected, in **Reconnecting, Error and Offline** the VPN interface stays up and the engine refuses new flows → traffic is blocked (B5, B6a, B6c, B7). Leaving these states always requires an explicit user action labelled "Stop and use normal network".
 - **Revoked** is outside ProxyFlow's control: Android removed the VPN. Only Always-on + "Block connections without VPN" keeps traffic blocked (`02-traffic-support-matrix.md` §4).
 
@@ -104,7 +104,7 @@ Rules that apply to every state:
 | | |
 |---|---|
 | Trigger | Disconnect on B4, the notification action, the Quick Settings tile (B11, built in M9), or "Stop and use normal network" from a blocked state |
-| Screens | B2 Disconnected ("Apps are using your normal network") |
+| Screens | B2 Disconnected ("Apps use your normal network unless Android's system kill switch is on"; until M8, "Apps are using your normal network") |
 | Happy path | Engine stopped (all flows closed, goroutines released — E12), TUN fd closed, foreground service stopped, notification removed |
 | Branches | If OS lockdown is on, apps have no network after disconnect — B2 says so and links to E2 |
 | Acceptance | Stop completes in < 2 s with 200 open flows and apps see their connections end at once (lab E12: `Stop()` took 24 ms with 200 flows open, goroutines 608 → 2, and the last app saw its connection end 17 ms after the stop signal); no leaked file descriptors (instrumentation check on devices); session summary written to Logs |
