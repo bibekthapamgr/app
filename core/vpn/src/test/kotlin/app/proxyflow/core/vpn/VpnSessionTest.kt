@@ -278,6 +278,46 @@ class VpnSessionTest {
         assertEquals("no second interface", 1, log.count("establish"))
     }
 
+    /**
+     * D9 during a first connect says the new settings are checked instead and the phone's network stays as it is: the
+     * reconnect holds nothing, and a failure of the new settings ends the attempt — never Reconnecting or Blocked.
+     */
+    @Test
+    fun aReconnectDuringTheFirstCheckHoldsNothing() {
+        val profile = save(name = "Tokyo")
+        engine.gate = CountDownLatch(1)
+        session.connect(profile.id)
+        awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}")
+        runBlocking { profiles.repository.save(profile.id, input(name = "Tokyo", server = "edited.example.com")) }
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        session.reconnect(profile.id)
+        eventually("the new settings are checked") { "probe edited.example.com" in engine.servers }
+        engine.gate?.countDown()
+
+        val ended = awaitError()
+        assertEquals(ConnectionStatus.Disconnected, ended.status)
+        assertTrue("nothing established: ${log.all}", host.tuns.isEmpty())
+        assertTrue(state.history.none { it.status == ConnectionStatus.Reconnecting || it.status == ConnectionStatus.Blocked })
+    }
+
+    /** The same while Android routes apps into the first interface: it is closed, not kept holding traffic. */
+    @Test
+    fun aReconnectWhileAndroidRoutesTheFirstInterfaceReleasesIt() {
+        val profile = save(name = "Tokyo")
+        host.routes = false
+        session.connect(profile.id)
+        awaitLog("start ${profile.id} fd=100 mtu=9000")
+        assertEquals(ConnectionStatus.Connecting, state.value.status)
+        runBlocking { profiles.repository.save(profile.id, input(name = "Tokyo", server = "edited.example.com")) }
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        session.reconnect(profile.id)
+
+        val ended = awaitError()
+        assertEquals(ConnectionStatus.Disconnected, ended.status)
+        assertTrue("the first interface is closed, not kept holding traffic", host.tuns.single().closed)
+        assertTrue(state.history.none { it.status == ConnectionStatus.Reconnecting || it.status == ConnectionStatus.Blocked })
+    }
+
     @Test
     fun reconnectingAProfileWithoutItsConnectionDoesNothing() {
         val first = save(name = "Tokyo")

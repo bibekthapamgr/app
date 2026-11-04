@@ -89,6 +89,11 @@ OVERRIDES: dict[str, tuple[str, str, str]] = {
 # by the local directory ("=> /…/engine (devel)"). ProxyFlow's own code, not a third-party notice.
 OWN_GO_MODULE = "github.com/bibekthapamgr/app/engine"
 
+
+def is_checkout_engine(directory: str) -> bool:
+    """The checkout's engine directory, as gomobile's bind replaces the engine's module with it ("/…/engine")."""
+    return directory.startswith(("/", ".")) and directory.rstrip("/").rsplit("/", 1)[-1] == "engine"
+
 Fetch = Callable[[str], "bytes | None"]
 
 
@@ -222,8 +227,9 @@ def go_entries(facts: list[str]) -> tuple[list[dict], list[str]]:
         else:
             linked.append((parts[0], parts[1], None))
     for module, version, replaced in linked:
-        # ProxyFlow's own code: the engine's module, built from the checkout. Replaced by another module, it is not.
-        if module == OWN_GO_MODULE or (replaced == OWN_GO_MODULE and module.startswith(("/", "."))):
+        # ProxyFlow's own code: the engine's module, built from the checkout's engine directory. Replaced by another module
+        # or another directory, it is not.
+        if module == OWN_GO_MODULE or (replaced == OWN_GO_MODULE and is_checkout_engine(module)):
             continue
         if module.startswith(("/", ".")):
             problems.append(f"the engine links {replaced} from the directory {module}, which docs/m4/dependency-review.md hasn't reviewed")

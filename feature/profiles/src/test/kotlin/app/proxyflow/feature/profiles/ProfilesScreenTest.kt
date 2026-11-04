@@ -216,6 +216,11 @@ class ProfilesScreenTest {
         compose.onNodeWithText("Use this proxy").performClick()
         compose.onNodeWithText("ProxyFlow is still checking Office HTTP. Switching checks Backup SOCKS instead", substring = true)
             .assertIsDisplayed()
+        // The first connect finishes while the question is open: it says what switching does now.
+        state = connected
+        compose.onNodeWithText("ProxyFlow is using Office HTTP. Switching ends any open connections through it", substring = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow is still checking", substring = true).assertDoesNotExist()
         compose.onNodeWithText("Switch").performClick()
         assertEquals(listOf("p2", "p2"), used)
 

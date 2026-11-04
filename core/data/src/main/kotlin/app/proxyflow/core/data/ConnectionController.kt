@@ -39,16 +39,17 @@ interface ConnectionController {
     fun restart() = Unit
 
     /**
-     * Runs the connection of [profileId] again with the profile as it is saved now (board D9, "Save and reconnect"):
-     * its flows end and traffic is held until the new settings are checked. Nothing happens without a connection for it.
+     * Runs the connection of [profileId] again with the profile as it is saved now (board D9, "Save and reconnect"): once
+     * connected, its flows end and traffic is held until the new settings are checked; during a first connect, they are
+     * checked instead, holding nothing (`ConnectionState.holdsTrafficOnSwitch`). Nothing happens without a connection for it.
      */
     fun reconnect(profileId: String) = Unit
 
     /**
      * The user picked [profileId] (board B8, "Use this proxy"): while a connection exists for another profile, it switches
-     * to [profileId] (J11) — the old proxy's flows end and apps' traffic is held until the new proxy is checked, never sent
-     * around a proxy (ADR-0010 §5). Without one, nothing starts: connecting stays the user's own step. The session decides,
-     * in order with what it was asked before.
+     * to [profileId] (J11) — once connected, the old proxy's flows end and apps' traffic is held until the new proxy is
+     * checked, never sent around a proxy (ADR-0010 §5); during a first connect, the new proxy is checked instead. Without
+     * one, nothing starts: connecting stays the user's own step. The session decides, in order with what it was asked before.
      */
     fun switchIfConnected(profileId: String) = Unit
 

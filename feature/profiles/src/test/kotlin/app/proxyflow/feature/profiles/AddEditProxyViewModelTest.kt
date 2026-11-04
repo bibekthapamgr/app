@@ -647,6 +647,36 @@ class AddEditProxyViewModelTest {
         assertTrue("traffic held", held.uiState.value.confirmReconnectHolds)
     }
 
+    /**
+     * D9's question follows the connection while it is open: a first connect that finishes changes its words, and once no
+     * connection runs on this profile it closes, nothing saved; Save then saves without asking.
+     */
+    @Test
+    fun theReconnectQuestionFollowsTheConnectionWhileItIsOpen() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        connection.current.value = ConnectionState(ConnectionStatus.Connecting, saved.id, "Office", saved)
+        val vm = viewModel(editing(saved.id))
+        vm.onPortChange("1081")
+        vm.onPasswordChange("secret")
+        vm.save()
+        assertFalse(vm.uiState.value.confirmReconnectHolds)
+
+        connection.current.value = ConnectionState(ConnectionStatus.Connected, saved.id, "Office", saved, connectedSinceMillis = 1)
+        assertEquals("Office", vm.uiState.value.confirmReconnect)
+        assertTrue("connected now: traffic is held while the new settings are checked", vm.uiState.value.confirmReconnectHolds)
+
+        val other = saved.copy(id = "other", name = "Elsewhere")
+        connection.current.value = ConnectionState(ConnectionStatus.Connected, other.id, "Elsewhere", other, connectedSinceMillis = 2)
+        assertNull("another profile's connection: nothing to reconnect", vm.uiState.value.confirmReconnect)
+        assertFalse(vm.uiState.value.saved)
+        assertEquals("nothing saved", 1080, repository.get(saved.id)?.port)
+
+        vm.save()
+        assertTrue(vm.uiState.value.saved)
+        assertEquals(1081, repository.get(saved.id)?.port)
+        assertTrue("nothing reconnected", connection.calls.isEmpty())
+    }
+
     /** A connection blocked because its profile was deleted isn't this form's: Save makes a new profile and asks nothing. */
     @Test
     fun aConnectionWhoseProfileWasDeletedIsNotAskedAbout() = runTest {

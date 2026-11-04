@@ -337,13 +337,19 @@ class ScreenshotTest {
     }
 
     /** "Use this proxy" while connected through another profile (M9, J11): the switch is asked first. */
-    @OptIn(ExperimentalRoborazziApi::class)
     @Test
-    fun switchConfirmation() {
+    fun switchConfirmation() = captureSwitchQuestion("C2_switch_confirm_light", holdsTraffic = true)
+
+    /** The same during a first connect: switching checks the other proxy instead, and the question says so. */
+    @Test
+    fun switchConfirmationWhileChecking() = captureSwitchQuestion("C2_switch_confirm_checking_light", holdsTraffic = false)
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    private fun captureSwitchQuestion(name: String, holdsTraffic: Boolean) {
         compose.setContent {
             ProxyFlowTheme {
                 ProfilesScreen(
-                    profilesState.copy(connectedProfileId = "p1", connectionHoldsTraffic = true),
+                    profilesState.copy(connectedProfileId = "p1", connectionHoldsTraffic = holdsTraffic),
                     onAddProxy = {},
                     onEditProxy = {},
                     onUseProxy = {},
@@ -355,8 +361,8 @@ class ScreenshotTest {
         compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
         compose.onNodeWithText("Use this proxy").performClick()
         compose.waitForIdle() // let the dialog draw before the screen is captured
-        captureScreenRoboImage("$DIR/C2_switch_confirm_light.png")
-        assertAccessible("C2_switch_confirm_light")
+        captureScreenRoboImage("$DIR/$name.png")
+        assertAccessible(name)
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
@@ -451,6 +457,21 @@ class ScreenshotTest {
     fun reconnectWithChanges() = captureDialog("D9_reconnect_with_changes") {
         AddEditProxyScreen(
             AddEditUiState(isEdit = true, input = tokyoForm.copy(port = "1444"), dirty = true, confirmReconnect = tokyo.name),
+            AddEditActions(),
+        )
+    }
+
+    /** D9 during a first connect: saving checks the new settings instead. */
+    @Test
+    fun reconnectWithChangesWhileChecking() = captureDialog("D9_reconnect_checking") {
+        AddEditProxyScreen(
+            AddEditUiState(
+                isEdit = true,
+                input = tokyoForm.copy(port = "1444"),
+                dirty = true,
+                confirmReconnect = tokyo.name,
+                confirmReconnectHolds = false,
+            ),
             AddEditActions(),
         )
     }

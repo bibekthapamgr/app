@@ -2,6 +2,7 @@ package app.proxyflow.feature.profiles
 
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -226,6 +227,17 @@ class AddEditProxyScreenTest {
     @Test
     fun backWaitsWhileSaving() {
         var backs = 0
+        // What Android's Back reaches when the form lets it go (the screen behind it, the activity): recorded instead.
+        var passedOn = 0
+        compose.runOnUiThread {
+            compose.activity.onBackPressedDispatcher.addCallback(
+                object : OnBackPressedCallback(true) {
+                    override fun handleOnBackPressed() {
+                        passedOn++
+                    }
+                },
+            )
+        }
         var state by mutableStateOf(AddEditUiState(isEdit = true, dirty = true, saving = true))
         compose.setContent { ProxyFlowTheme { AddEditProxyScreen(state, AddEditActions(onBack = { backs++ })) } }
         for (saving in listOf(state, state.copy(dirty = false))) {
@@ -234,6 +246,7 @@ class AddEditProxyScreenTest {
             compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
             compose.waitForIdle()
             assertEquals(0, backs)
+            assertEquals("Android's Back went past the form", 0, passedOn)
             compose.onNodeWithText("Discard changes?").assertDoesNotExist()
         }
     }

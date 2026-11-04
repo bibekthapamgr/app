@@ -28,18 +28,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 
 /**
@@ -154,28 +150,15 @@ class VpnRuntime(
         // The phone's network, for the life of the process: the session reconnects when it changes (ADR-0012).
         if (!NetworkMonitor(appContext).start(session::underlyingNetwork)) log.add("network changes are not reported")
 
-        // A deleted profile's credentials must not stay in use: the connection using it stops its engine (J11).
-        // Room is watched only while a connection exists.
-        // A failure reading Room is logged, never left to end the process the VPN runs in.
-        scope.launch {
-            mutableState.map { s -> s.profileId?.takeIf { s.active } }.distinctUntilChanged().collectLatest { id ->
-                if (id == null) return@collectLatest
-                val gone = profiles.profiles.catch { e -> log.add("profiles can't be read (${e.javaClass.simpleName})") }
-                    .firstOrNull { list -> list.none { it.id == id } }
-                if (gone != null) session.profileDeleted(id)
-            }
-        }
-        // A rename shows at once on the connection using the profile — Home, the tile, the notification: a name is not
-        // a setting the engine runs (M9). Watched the same way.
-        scope.launch {
-            mutableState.map { s -> s.profileId?.takeIf { s.active } }.distinctUntilChanged().collectLatest { id ->
-                if (id == null) return@collectLatest
-                profiles.profiles.catch { e -> log.add("profiles can't be read (${e.javaClass.simpleName})") }
-                    .mapNotNull { list -> list.firstOrNull { it.id == id }?.name }
-                    .distinctUntilChanged()
-                    .collect { name -> session.profileRenamed(id, name) }
-            }
-        }
+        // The profile a connection runs on: deleted, its credentials must not stay in use; renamed, the new name shows at
+        // once (J11, M9). Room is read only while a connection exists, and a failure reading it is logged.
+        scope.watchConnectionProfile(
+            state = mutableState,
+            profiles = profiles.profiles,
+            deleted = session::profileDeleted,
+            renamed = session::profileRenamed,
+            log = log::add,
+        )
     }
 
     /** The profile Home shows and connects while nothing runs: the active one, for the Quick Settings tile (B11, M9). */

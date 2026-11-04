@@ -178,9 +178,10 @@ class HomeViewModel(
 
     /**
      * B8: [id] becomes the profile Home shows and connects, the user's choice (M8). While a connection runs on another
-     * profile it switches to [id] (J11): the old proxy's flows end and apps' traffic is held until the new proxy is
-     * checked, never sent around a proxy (ADR-0010 §5). The choice is saved first, then the session is asked to switch
-     * and decides in order with what it was asked before; both happen even if Home closes in between.
+     * profile it switches to [id] (J11): once connected, the old proxy's flows end and apps' traffic is held until the new
+     * proxy is checked, never sent around a proxy (ADR-0010 §5); during a first connect, the new proxy is checked instead.
+     * The choice is saved first, then the session is asked to switch and decides in order with what it was asked before;
+     * both happen even if Home closes in between.
      */
     fun chooseProfile(id: String) {
         viewModelScope.launch {

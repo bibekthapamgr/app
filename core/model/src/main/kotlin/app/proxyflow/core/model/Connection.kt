@@ -165,8 +165,9 @@ data class ConnectionState(
     /**
      * A switch or a reconnect now keeps apps' traffic with ProxyFlow: held on the VPN interface until the next proxy is
      * checked, blocked if it fails, never sent around a proxy (ADR-0010 §5). True once connected, and while an Always-on
-     * start holds traffic (M8). During a first connect apps use the normal network until it is connected, and a switch
-     * only checks another proxy instead.
+     * start holds traffic (M8). During a first connect nothing is held yet: apps keep the phone's network as it is — the
+     * normal network, or none with Android's "Block connections without VPN" — until it is connected, and a switch only
+     * checks another proxy instead.
      */
     val holdsTrafficOnSwitch: Boolean get() = active && (status != ConnectionStatus.Connecting || held)
 

@@ -242,8 +242,9 @@ class VpnSession(
 
     /**
      * Runs the connect sequence again for [profileId] while a connection exists for it — with the profile as it is saved
-     * now, after an edit (board D9, J11): as a switch, flows end and the interface holds traffic until the new settings
-     * are checked. Nothing happens without a connection, or for another profile's.
+     * now, after an edit (board D9, J11): as a switch, so once connected flows end and the interface holds traffic until
+     * the new settings are checked; during a first connect the attempt starts again with them, holding nothing. Nothing
+     * happens without a connection, or for another profile's.
      */
     fun reconnect(profileId: String) = send(Event.Reconnect(profileId))
 

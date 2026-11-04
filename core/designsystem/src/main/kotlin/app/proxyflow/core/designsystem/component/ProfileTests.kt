@@ -2,6 +2,7 @@ package app.proxyflow.core.designsystem.component
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -10,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -40,15 +42,15 @@ fun PfProfileTestLine(profile: ProxyProfile, lastTest: ProfileTest?, testing: Bo
     val announced = if (testing || justEnded) modifier.semantics { liveRegion = LiveRegionMode.Polite } else modifier
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     val style = MaterialTheme.typography.bodySmall
+    // The icon stays beside the first line when a large font wraps the words over several.
+    val line = if (style.lineHeight.isSp) with(LocalDensity.current) { style.lineHeight.toDp() } else ICON_SIZE
+    val icon = Modifier.padding(top = ((line - ICON_SIZE) / 2).coerceAtLeast(0.dp)).size(ICON_SIZE)
+    val words = Modifier.padding(top = ((ICON_SIZE - line) / 2).coerceAtLeast(0.dp))
     when {
-        testing -> Row(
-            announced,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        testing -> Row(announced, horizontalArrangement = Arrangement.spacedBy(Spacing.xs), verticalAlignment = Alignment.Top) {
             // The words say it: the indicator itself is not announced as well.
-            CircularProgressIndicator(Modifier.size(ICON_SIZE), strokeWidth = 2.dp)
-            Text(stringResource(R.string.pf_test_running), style = style, color = quiet)
+            CircularProgressIndicator(icon, strokeWidth = 2.dp)
+            Text(stringResource(R.string.pf_test_running), modifier = words, style = style, color = quiet)
         }
         lastTest == null -> Text(stringResource(R.string.pf_test_never), modifier = announced, style = style, color = quiet)
         else -> {
@@ -64,14 +66,9 @@ fun PfProfileTestLine(profile: ProxyProfile, lastTest: ProfileTest?, testing: Bo
                     ago,
                 )
             }
-            Row(announced, horizontalArrangement = Arrangement.spacedBy(Spacing.xs), verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    if (passed) PfIcons.Check else PfIcons.Close,
-                    contentDescription = null,
-                    tint = color,
-                    modifier = Modifier.size(ICON_SIZE),
-                )
-                Text(text, style = style.copy(fontWeight = FontWeight.Medium), color = color)
+            Row(announced, horizontalArrangement = Arrangement.spacedBy(Spacing.xs), verticalAlignment = Alignment.Top) {
+                Icon(if (passed) PfIcons.Check else PfIcons.Close, contentDescription = null, tint = color, modifier = icon)
+                Text(text, modifier = words, style = style.copy(fontWeight = FontWeight.Medium), color = color)
             }
         }
     }

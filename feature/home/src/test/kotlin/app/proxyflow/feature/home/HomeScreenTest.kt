@@ -666,6 +666,12 @@ class HomeScreenTest {
         compose.onNodeWithText("ProxyFlow is still checking a proxy. Choosing another one checks that one instead", substring = true)
             .assertIsDisplayed()
         compose.onNodeWithText("Choosing another one reconnects", substring = true).assertDoesNotExist()
+
+        // An Always-on start holding traffic (M8): picking reconnects with traffic held, as once connected.
+        state = disconnected.copy(connection = ConnectionState(ConnectionStatus.Connecting, "p1", "Office", profile, held = true))
+        compose.onNodeWithText("ProxyFlow is using a proxy now. Choosing another one reconnects through it", substring = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow is still checking a proxy", substring = true).assertDoesNotExist()
     }
 
     private fun ready(

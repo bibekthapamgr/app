@@ -147,6 +147,29 @@ class ProfilesViewModelTest {
         assertEquals("p2", vm.uiState.value.activeProfileId)
     }
 
+    /** The list knows which profile a connection runs on, and what a switch would do in its state (J11). */
+    @Test
+    fun theListKnowsTheConnectionAndWhatASwitchWouldDo() = runTest {
+        val connection = RecordingConnection()
+        val vm = viewModel(connection = connection)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
+        repository.save(null, ProxyProfileInput(server = "a.example.com", port = "1080"))
+        assertNull(vm.uiState.value.connectedProfileId)
+        assertFalse(vm.uiState.value.connectionHoldsTraffic)
+
+        connection.current.value = ConnectionState(ConnectionStatus.Connecting, "p1")
+        assertEquals("p1", vm.uiState.value.connectedProfileId)
+        assertFalse("a first connect holds nothing yet", vm.uiState.value.connectionHoldsTraffic)
+        connection.current.value = ConnectionState(ConnectionStatus.Connecting, "p1", held = true)
+        assertTrue("an Always-on start holding traffic", vm.uiState.value.connectionHoldsTraffic)
+        connection.current.value = ConnectionState(ConnectionStatus.Connected, "p1")
+        assertTrue(vm.uiState.value.connectionHoldsTraffic)
+
+        connection.current.value = ConnectionState()
+        assertNull(vm.uiState.value.connectedProfileId)
+        assertFalse(vm.uiState.value.connectionHoldsTraffic)
+    }
+
     /** A choice that can't be saved switches nothing, and the screen says so: the list and the connection agree. */
     @Test
     fun aChoiceThatCantBeSavedSwitchesNothing() = runTest {

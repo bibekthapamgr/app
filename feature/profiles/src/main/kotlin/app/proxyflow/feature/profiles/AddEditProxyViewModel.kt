@@ -71,8 +71,9 @@ data class AddEditUiState(
      */
     val confirmReconnect: String? = null,
     /**
-     * What D9's reconnect does, as the connection was when Save was tapped ([ConnectionState.holdsTrafficOnSwitch]): true,
-     * traffic is held until the new settings are checked; false, a first connect checks them instead.
+     * What D9's reconnect does as the connection is now ([ConnectionState.holdsTrafficOnSwitch]), kept up to date while the
+     * question is open: true, traffic is held until the new settings are checked; false, a first connect checks them
+     * instead.
      */
     val confirmReconnectHolds: Boolean = true,
 )
@@ -143,6 +144,20 @@ class AddEditProxyViewModel(
                 }
                 refresh()
             }
+            // D9's question follows the connection while it is open: worded for its state now, and closed, not applied,
+            // once no connection runs on this profile.
+            viewModelScope.launch {
+                connection.state.collect { now ->
+                    state.update { s ->
+                        val running = runningHere(now, s.isEdit)
+                        when {
+                            s.confirmReconnect == null -> s
+                            running == null -> s.copy(confirmReconnect = null)
+                            else -> s.copy(confirmReconnectHolds = running.holdsTrafficOnSwitch)
+                        }
+                    }
+                }
+            }
         } else {
             refresh()
         }
@@ -169,7 +184,7 @@ class AddEditProxyViewModel(
     /**
      * Saves the form. When a connection runs on this profile and the changes are to how it reaches its proxy — its server,
      * TLS or sign-in — the user is asked first (board D9), in the words for what the reconnect does as the connection is
-     * then ([ConnectionState.holdsTrafficOnSwitch]): the connection then runs again with them ([saveAndReconnect]).
+     * ([ConnectionState.holdsTrafficOnSwitch]): the connection then runs again with them ([saveAndReconnect]).
      */
     fun save() = save(reconnect = false)
 
@@ -187,11 +202,7 @@ class AddEditProxyViewModel(
         if (current.loading || current.loadFailed || current.saving || current.saved || !passesValidation()) return
         // A profile that no longer exists is saved as a new one, under a new id.
         val id = profileId.takeIf { current.isEdit }
-        // A connection blocked because its profile was deleted is not this form's: saving makes a new profile, under a
-        // new id, and that connection's way out is Home's Stop.
-        val running = connection.state.value.takeIf {
-            id != null && it.active && it.profileId == id && it.error?.code != ConnectionError.PROFILE_DELETED
-        }
+        val running = runningHere(connection.state.value, current.isEdit)
         if (!reconnect && running != null && changesTheConnection(running, current.input)) {
             state.update {
                 it.copy(
@@ -224,6 +235,14 @@ class AddEditProxyViewModel(
                 state.update { it.copy(saving = false, saveFailed = true) }
             }
         }
+    }
+
+    /**
+     * The connection [now] if it runs on this form's profile, or null. A connection blocked because the profile was
+     * deleted is not this form's: saving makes a new profile, under a new id, and that connection's way out is Home's Stop.
+     */
+    private fun runningHere(now: ConnectionState, isEdit: Boolean): ConnectionState? = now.takeIf {
+        isEdit && it.active && it.profileId == profileId && it.error?.code != ConnectionError.PROFILE_DELETED
     }
 
     /** Whether saving [input] changes how the connection [running] reaches its proxy: its server, TLS, or sign-in. */
