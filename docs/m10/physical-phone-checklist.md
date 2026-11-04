@@ -9,7 +9,7 @@ The M1 feasibility report made one condition of its GO recommendation: the lab c
 | | |
 |---|---|
 | The phone | Any Android 10 (API 29) or later; the model, Android version and security patch go in §5. A mid-range phone is what the throughput bar is for |
-| ProxyFlow | The release candidate's APK, or the debug APK, from the M10 CI run (artifact `android-reports`), installed with "Install unknown apps" allowed for your file manager |
+| ProxyFlow | The release candidate signed for testing: `app-release-test-signed.apk`, in the CI artifact `android-reports` of the verified run (`app/build/outputs/test-signed/`) — the release build, signed with a key made for that run alone, since Android installs no unsigned APK. Install it with "Install unknown apps" allowed for your file manager; uninstall it before installing ProxyFlow from Google Play later (another key) |
 | Your proxy | The HTTP proxy (with CONNECT) or SOCKS5 proxy you pay for, with its sign-in; both kinds if you have them |
 | A laptop | With Wireshark (or tcpdump), able to share its connection as a Wi-Fi hotspot (Windows: Mobile hotspot; macOS: Internet Sharing; Linux: NetworkManager's hotspot) |
 

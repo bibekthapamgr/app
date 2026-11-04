@@ -203,6 +203,24 @@ jobs:
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: ./gradlew :app:bundleRelease 2>&1 | tee "$RUNNER_TEMP/gradle-5b-bundle.log"
 
+      # M10: the release APK signed with a key made for this run alone, so the owner's phone checks can install what
+      # ships (Android installs no unsigned APK; docs/m10/physical-phone-checklist.md). Never for Google Play, which
+      # takes the App Bundle signed in M11; kept apart, so the checks below see the release APK alone.
+      - name: Release APK signed for testing (a key of this run alone)
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: |
+          apk="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | sort | head -1)"
+          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          pass="$(openssl rand -hex 16)"
+          keytool -genkeypair -keystore "$RUNNER_TEMP/test-signing.p12" -storetype PKCS12 -storepass "$pass" -alias test \
+            -keyalg RSA -keysize 3072 -validity 30 -dname "CN=ProxyFlow test build, O=not for distribution" >/dev/null 2>&1
+          mkdir -p app/build/outputs/test-signed
+          "$tools/zipalign" -f -p 4 "$apk" "$RUNNER_TEMP/release-aligned.apk"
+          "$tools/apksigner" sign --ks "$RUNNER_TEMP/test-signing.p12" --ks-pass "pass:$pass" \
+            --out app/build/outputs/test-signed/app-release-test-signed.apk "$RUNNER_TEMP/release-aligned.apk"
+          "$tools/apksigner" verify app/build/outputs/test-signed/app-release-test-signed.apk
+          rm -f "$RUNNER_TEMP/test-signing.p12"
+
       # M8: also what the release APK ships for the manifest's @xml files, read back with aapt2 and checked by content
       # in every configuration it ships.
       - name: Release manifest and APK (permissions, backups, debuggable, cleartext, trust, exported components, @xml files)
@@ -275,6 +293,7 @@ jobs:
             app/build/outputs/roborazzi/
             app/build/outputs/apk/
             app/build/outputs/bundle/
+            app/build/outputs/test-signed/
             core/data/schemas/
           if-no-files-found: warn
 

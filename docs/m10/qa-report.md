@@ -74,11 +74,20 @@ Every row runs against real proxies on each of the eight emulators (the lab's Da
 
 ### 3.8 Accessibility and localization (task 8)
 
-{TASK8}
+| Check | How | Result |
+|---|---|---|
+| Every control TalkBack reaches has a name it reads out and a 48 × 48 dp touch target | `Accessibility.kt`, in every screenshot test (M9), now including the M10 images: the sign-in banner (B5) and the six right-to-left screens | {A11Y} |
+| Text that grows | M9's twelve screens on a 320 dp phone at 200 % font, each with its main action on screen | Unchanged screens pass; the sign-in banner is drawn at 100 % |
+| Contrast | The design tokens' colour pairs, `design/tools/check_contrast.py`, in CI | Pass (no colour changed in M10) |
+| Status never by colour alone | Icons and words with every status, the sign-in banner included (an Info banner with its title) | Pass |
+| Right to left | ProxyFlow declares `supportsRtl`, so a phone set to Arabic, Hebrew, Persian or Urdu mirrors its screens, English words and all: six screens (Home disconnected, connected, a failed connect; the profile list; the proxy form; Settings) are screenshot tests laid out right to left (`screenshots/rtl`), each checking the layout is | The back arrow and the list chevron did not turn round: fixed (M10-2). Everything else mirrors as Android does |
+| Words in code | Every word a screen shows comes from a string resource: a scan of the screens' code for literal text found it only in the design system's previews, which ship to no user | Pass |
+| Languages | English only until decision D8 (first translations: Nepali, Japanese); amounts of data and seconds are SI symbols in code (M10-5) | Accepted for V1 |
+| Pseudo-locales | Tried and dropped: the build's resource compiler could not pseudo-localize the merged resources (M10-6) | — |
 
 ### 3.9 Defects: filed, prioritized, resolved, regression-tested (task 9)
 
-{TASK9}
+Every defect is in `docs/m10/defect-register.md` with its severity, where it was found, the fix and the test that now guards it. {DEFECTS_SUMMARY} Each fix has a regression test that fails without it (the reviews mutation-tested them), and every commit runs the whole suite again: the verified commit's three attempts are the regression run.
 
 ## 4. Known limitations, and where the app says them
 
@@ -103,8 +112,23 @@ Each limitation of V1, where the documents describe it, and what the app says of
 
 ## 5. The release candidate
 
-{RC}
+The verified commit's release build, version **0.10.0 (10)**, application ID `app.proxyflow.android`, minSdk 29, targetSdk 36:
+
+| Artifact | Where | Notes |
+|---|---|---|
+| App Bundle (`app-release.aab`), what Google Play takes | CI artifact `android-reports` of the verified run, `app/build/outputs/bundle/release/` | New in M10 (ADR-0015 §8): from the same R8-minified release build; {AAB_SIZE} |
+| Release APK (`app-release-unsigned.apk`) | the same artifact, `app/build/outputs/apk/release/` | {APK_SIZE}; checked by `scripts/check_release_manifest.py` (permissions, no backups, not debuggable, no cleartext, the system trust store only, exported components, the tile's and the VPN's binding permissions) and OSV against the libraries it ships |
+| The release APK signed for testing (`app-release-test-signed.apk`) | the same artifact, `app/build/outputs/test-signed/` | The same release APK, signed with a key made for that CI run alone, so the owner's phone checks install what ships (`docs/m10/physical-phone-checklist.md`); not for distribution |
+
+The bundle and the release APK are unsigned: signing — the upload key and Play App Signing — is M11's, with the store listing (decisions D8 and D9). The candidate is what M11 signs, unchanged, unless M11's own work or the owner's phone checks change the code.
 
 ## 6. Open for the owner
 
-{OPEN}
+| # | For the owner | Why it matters | Blocks |
+|---|---|---|---|
+| 1 | Run `docs/m10/physical-phone-checklist.md` on your phone with your proxy, and send the filled-in results (§5) | M1's condition 1 (E01, E07–E10 on a physical phone with packet capture) is the GO recommendation's last open condition; the battery bar and a mid-range phone's throughput can only be measured there; M1's condition 4 (switch to the hev engine if a phone misses the bars) is decided on these figures | M11's production release (not closed testing) |
+| 2 | D2: plaintext proxies in the Play build | Google Play's policy on apps that send credentials (ADR-0005) | M11's store listing |
+| 3 | D6: the pre-flight and Test connection target | What the privacy policy names as contacted on every connect and test | — (one constant) |
+| 4 | D7: TLS on or off by default in the form | — | — |
+| 5 | D8: the app's licence and the first translations (Nepali, Japanese) | The store listing's licence and languages; translations move the units to resources (M10-5) | M11's store listing |
+| 6 | D9: the public privacy policy's address and the support contact | Google Play requires both (`docs/m9/privacy-policy.md` is ready) | M11's store listing |
