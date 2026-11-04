@@ -48,6 +48,7 @@ Then the checks only a phone can make:
 | **Private DNS strict** (`docs/m6/routing-and-limitations.md` §4: not automated in CI) | Android Settings → Network → Private DNS → Private DNS provider hostname `dns.google`; connected, open a site | It loads; the capture shows no connection from the phone to `dns.google` (port 853) — its encrypted DNS goes through the proxy like any TCP | — |
 | **A Wi-Fi with a sign-in page** (hotel, airport, café) | Join it, ProxyFlow connected | Home says "This network asks you to sign in"; nothing loads until you sign in (Android's notification); after signing in, ProxyFlow connects by itself if it was reconnecting, or after Connect | Whether Android's sign-in page opened while ProxyFlow was connected |
 | **Restart with Always-on VPN** | Android Settings → Network → VPN → ProxyFlow → Always-on VPN on, Block connections without VPN on. Restart the phone, unlock it | ProxyFlow connects by itself after the restart (Home shows Connected without a tap); before it does, nothing loads | Seconds from unlock to Connected |
+| **The lock screen** (threat model I-11; M10-17) | Android Settings → Notifications → Notifications on lock screen → show all. Connect ProxyFlow, lock the phone (with a PIN or pattern), pull down the shade | The notification names no profile; tapping its Disconnect, or the Quick Settings tile, asks you to unlock first, and ProxyFlow stays connected until you do | Android version (Android 10 and 11 unlock through a screen of ProxyFlow's that shows nothing) |
 | **Your phone's battery saving** | Leave it connected overnight, screen off, on battery | In the morning Home still shows Connected, or says Android stopped ProxyFlow (with the time); Logs agrees | Your phone's brand: some (Samsung, Xiaomi, Huawei and others) stop background apps more than Android does; "Unrestricted" battery use for ProxyFlow (Settings → Apps → ProxyFlow → Battery) is the setting that helps |
 
 ## 4. If a check fails
@@ -76,4 +77,5 @@ Copy Logs (Logs → Copy) right after, keep the capture, and note what you did. 
 | Private DNS strict | | |
 | Sign-in page | | |
 | Restart with Always-on VPN | | |
+| The lock screen | | |
 | Battery saving overnight | | |

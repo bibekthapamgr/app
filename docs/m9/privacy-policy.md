@@ -46,7 +46,7 @@ Internet and network state: to reach your proxy, and to notice when the phone ch
 
 Foreground service: to keep the connection running while you use other apps.
 
-Notifications (Android 13 and later, optional): for the connection status and its Disconnect button. Profile names are hidden on the lock screen.
+Notifications (Android 13 and later, optional): for the connection status and its Disconnect button, which works only once the phone is unlocked. They name no profile, so the lock screen shows none.
 
 ## Changes and contact
 

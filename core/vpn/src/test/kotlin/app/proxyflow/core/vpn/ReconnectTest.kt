@@ -1007,6 +1007,24 @@ class ReconnectTest {
         assertFalse(host.tuns.single().closed)
     }
 
+    /** The tile's Disconnect while traffic is held, and the page going then, release nothing (M10, review C). */
+    @Test
+    fun theTilesDisconnectAndThePageGoingReleaseNothingHeld() {
+        policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000, 60_000), jitter = 0.0)
+        val profile = connect()
+        session.underlyingNetwork(WIFI)
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        escalate()
+        await { it.status == ConnectionStatus.Reconnecting && it.networkSignIn }
+
+        session.disconnectIfConnected() // the tile, while traffic is held
+        session.underlyingNetwork(WIFI)
+        val retried = await { it.status == ConnectionStatus.Reconnecting && !it.networkSignIn }
+        assertEquals(profile.id, retried.profileId)
+        assertFalse("still held: neither the tile nor the page going released it", host.tuns.single().closed)
+    }
+
     /** Without a connection, a sign-in page is said (a connect would fail for it) and nothing else changes. */
     @Test
     fun aSignInPageIsSaidWithoutAConnection() {

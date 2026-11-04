@@ -53,7 +53,7 @@
     <string name="privacy_permission_vpn">VPN: Android asks you the first time you connect. It lets ProxyFlow send apps\' traffic to your proxy.</string>
     <string name="privacy_permission_internet">Internet and network state: to reach your proxy, and to notice when the phone changes network.</string>
     <string name="privacy_permission_service">Foreground service: to keep the connection running while you use other apps.</string>
-    <string name="privacy_permission_notifications">Notifications (Android 13 and later, optional): for the connection status and its Disconnect button. Profile names are hidden on the lock screen.</string>
+    <string name="privacy_permission_notifications">Notifications (Android 13 and later, optional): for the connection status and its Disconnect button, which works only once the phone is unlocked. They name no profile, so the lock screen shows none.</string>
     <string name="privacy_changes_title">Changes and contact</string>
     <string name="privacy_changes">If a later version changes what ProxyFlow keeps or sends, its privacy policy will say so. ProxyFlow\'s developer can be reached through the contact details on its Google Play page.</string>
 
