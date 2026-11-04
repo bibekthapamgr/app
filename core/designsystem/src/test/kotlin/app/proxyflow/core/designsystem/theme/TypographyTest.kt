@@ -27,6 +27,24 @@ class TypographyTest {
         }
     }
 
+    /**
+     * What the user wrote is not ProxyFlow's English (defect M10-83): a name shown alone takes the direction of its own
+     * words, still at the layout's start; what is typed takes its own direction and that direction's start, as Android's
+     * fields do; and a name set inside a sentence is a first-strong isolate, which keeps its order and the sentence's.
+     */
+    @Test
+    fun theUsersOwnTextTakesItsOwnDirection() {
+        for ((layout, start) in listOf(LayoutDirection.Ltr to TextAlign.Left, LayoutDirection.Rtl to TextAlign.Right)) {
+            val name = proxyFlowTypography(layout).titleMedium.inItsOwnDirection()
+            assertEquals(TextDirection.Content, name.textDirection)
+            assertEquals("a name stays at the layout's start ($layout)", start, name.textAlign)
+            val typed = proxyFlowTypography(layout).bodyLarge.typedInItsOwnDirection()
+            assertEquals(TextDirection.Content, typed.textDirection)
+            assertEquals(TextAlign.Start, typed.textAlign)
+        }
+        assertEquals("\u2068مكتب 2\u2069", isolated("مكتب 2"))
+    }
+
     /** Only the direction and the alignment change: the sizes are still design/tokens'. */
     @Test
     fun theScaleKeepsItsSizes() {

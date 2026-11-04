@@ -55,6 +55,7 @@ import app.proxyflow.core.designsystem.component.proxyCheckErrorMessage
 import app.proxyflow.core.designsystem.component.proxyCheckErrorTitle
 import app.proxyflow.core.designsystem.theme.MonoSmall
 import app.proxyflow.core.designsystem.theme.Spacing
+import app.proxyflow.core.designsystem.theme.isolated
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
@@ -212,7 +213,7 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
         val body = if (state.confirmReconnectHolds) R.string.edit_reconnect_body else R.string.edit_reconnect_checking_body
         PfConfirmDialog(
             title = stringResource(R.string.edit_reconnect_title),
-            text = stringResource(body, name),
+            text = stringResource(body, isolated(name)),
             confirmLabel = stringResource(R.string.edit_reconnect_confirm),
             dismissLabel = stringResource(R.string.edit_keep_editing),
             onConfirm = actions.onSaveAndReconnect,

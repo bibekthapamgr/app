@@ -21,7 +21,6 @@ import sys
 import xml.etree.ElementTree as ET
 
 ESCAPABLE = set("'\"\\nt@?#")
-XLIFF_G = "{urn:oasis:names:tc:xliff:document:1.2}g"
 HEX4 = re.compile(r"[0-9a-fA-F]{4}")
 
 
@@ -79,12 +78,13 @@ def problems_in_segments(segments: list[str]) -> list[str]:
 
 
 def segments_of(element: ET.Element) -> list[str]:
-    """A string's text, split where a style span starts or ends; an <xliff:g> splits nothing, a span inside one does."""
+    """A string's text, split where a style span starts or ends: an element without a namespace (<b>, <i>, <a>). One
+    with a namespace, as <xliff:g>, splits nothing; a span inside one does."""
     segments = [element.text or ""]
 
     def walk(node: ET.Element) -> None:
         for child in node:
-            if child.tag == XLIFF_G:
+            if child.tag.startswith("{"):
                 segments[-1] += child.text or ""
                 walk(child)
             else:

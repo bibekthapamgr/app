@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import app.proxyflow.core.designsystem.R
 import app.proxyflow.core.designsystem.icon.PfIcons
 import app.proxyflow.core.designsystem.theme.Spacing
+import app.proxyflow.core.designsystem.theme.typedInItsOwnDirection
 
 /**
  * Single-line text field with a label, optional hint, and an error message
@@ -73,6 +75,8 @@ fun PfTextField(
             keyboardOptions = keyboardOptions,
             visualTransformation = visualTransformation,
             trailingIcon = trailingIcon,
+            // What is typed takes its own direction, whatever the screen's (M10-64): it is the user's, not ProxyFlow's English.
+            textStyle = LocalTextStyle.current.typedInItsOwnDirection(),
             modifier = modifier.fillMaxWidth(),
         )
     }

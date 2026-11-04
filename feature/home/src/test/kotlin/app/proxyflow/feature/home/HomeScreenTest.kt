@@ -20,6 +20,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.designsystem.theme.isolated
 import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
@@ -97,7 +98,7 @@ class HomeScreenTest {
     fun connectingShowsTheCheckBeforeAnythingChangesAndCanBeCancelled() {
         show(ready(ConnectionState(ConnectionStatus.Connecting, "p1", "Office", step = ConnectStep.ProxyHandshake)))
         compose.onNodeWithText("Connecting…").assertIsDisplayed()
-        compose.onNodeWithText("Connecting to Office").assertIsDisplayed()
+        compose.onNodeWithText("Connecting to ${isolated("Office")}").assertIsDisplayed()
         // One row per stage (ADR-0012): the ones before the current stage done, the ones after not started.
         val rows = listOf("Getting ready", "VPN permission", "Checking proxy — TLS and sign-in", "Proxy accepted — starting the VPN")
         assertEquals(listOf("Done", "Done", "In progress", "Not started"), rows.map { stateOf(it) })
@@ -133,7 +134,7 @@ class HomeScreenTest {
         compose.onNodeWithText("Connected").assertIsDisplayed()
         compose.onNodeWithText("01:02:03").assertIsDisplayed()
         scrolledTo("Apps' TCP connections go through your proxy").assertIsDisplayed()
-        scrolledTo("Office · HTTP").assertIsDisplayed()
+        scrolledTo("${isolated("Office")} · HTTP").assertIsDisplayed()
         // Before the first reading, what goes through the proxy and what doesn't.
         scrolledTo("Via proxy").assertIsDisplayed()
         scrolledTo("Resolved by proxy").assertIsDisplayed()
@@ -191,7 +192,7 @@ class HomeScreenTest {
         val tlsProfile = profile.copy(tlsMode = TlsMode.Tls)
         val diagnostics = RoutingDiagnostics(tls = TlsProblems(failures = 2, lastCode = "TLS_UNTRUSTED"))
         show(HomeUiState.Ready(tlsProfile, ConnectionState(ConnectionStatus.Connected, "p1", "Office"), true, diagnostics = diagnostics))
-        scrolledTo("Office · HTTP · TLS to proxy").assertIsDisplayed()
+        scrolledTo("${isolated("Office")} · HTTP · TLS to proxy").assertIsDisplayed()
         scrolledTo("2 failed").assertIsDisplayed()
         scrolledTo("Certificate not trusted").assertIsDisplayed()
         scrolledTo("No failures").assertIsDisplayed() // DNS

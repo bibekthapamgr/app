@@ -6,7 +6,7 @@ ProxyFlow declares Android 10 to 16 (minSdk 29, targetSdk 36). Every one of thos
 
 ## 1. Every declared Android version, in CI
 
-All are Google's `google_apis` x86_64 system images, booted fresh for each job with `-no-snapshot`, on GitHub's `ubuntu-24.04` runners, against the lab of `scripts/e2e_env.sh`. The uplink is chosen per image by `scripts/e2e_device.sh` (mobile data where it holds, Wi-Fi in airplane mode on API 34 and 35, whose mobile data drops during runs — M10-4); the captures are the emulator's own of its uplink (`-tcpdump`), and from API 34, where `adb root` survives, tcpdump inside the phone on every uplink interface as well.
+All are Google's `google_apis` x86_64 system images, booted fresh for each job with `-no-snapshot`, on GitHub's `ubuntu-24.04` runners, against the lab of `scripts/e2e_env.sh`. The uplink is chosen per image by `scripts/e2e_device.sh` (mobile data where it holds, Wi-Fi in airplane mode on API 33 to 35, whose mobile data drops during runs — M10-4, M10-88); the captures are the emulator's own of its uplink (`-tcpdump`), and from API 34, where `adb root` survives, tcpdump inside the phone on every uplink interface as well.
 
 {LEVELS}
 

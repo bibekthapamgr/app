@@ -152,8 +152,11 @@ choose_uplink() {
     # The API 35 image's mobile data came up late or never, or dropped or appeared during the tests, in five of
     # its last nine runs, and the API 34 image's in five of its last six (M7: it dropped during the tests in four,
     # failing tests twice, and never came up in one), while Wi-Fi alone held on both: there Wi-Fi is the uplink, in
-    # airplane mode, and tcpdump inside the phone captures it.
-    if [ "$API" = 34 ] || [ "$API" = 35 ]; then
+    # airplane mode, and tcpdump inside the phone captures it. The API 33 image's mobile data dropped during the
+    # tests in M10's runs too (41822664621: four attempts in one test; 41856359695: gone for the last minutes of the
+    # tests, every connection "Network is unreachable"): Wi-Fi there too, which before API 34 runs through the
+    # emulator's own network stack, so its -tcpdump still sees the uplink (the evidence checks the capture covers it).
+    if [ "$API" = 33 ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
         wifi_in_airplane_mode
         if uplink_within 60; then
             UPLINK="$(uplink_name) (airplane mode, so the radio is off: mobile data is unreliable on this image)"
@@ -178,7 +181,7 @@ choose_uplink() {
             sleep 2
         done
     fi
-    if [ -n "$UPLINK" ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
+    if [ -n "$UPLINK" ] || [ "$API" = 33 ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
         : # chosen above
     elif cellular_up; then
         NOTE=""

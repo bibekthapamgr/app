@@ -19,6 +19,7 @@ import androidx.compose.ui.test.printToString
 import androidx.lifecycle.SavedStateHandle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.designsystem.theme.isolated
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
@@ -213,7 +214,7 @@ class AddEditProxyScreenTest {
             }
         }
         compose.onNodeWithText("Reconnect with changes?").assertIsDisplayed()
-        compose.onNodeWithText("ProxyFlow is using Office.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow is using ${isolated("Office")}.", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Nothing is sent around your proxy.", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Keep editing").performClick()
         compose.onNodeWithText("Save and reconnect").performClick()
@@ -263,8 +264,8 @@ class AddEditProxyScreenTest {
             }
         }
         compose.onNodeWithText("Reconnect with changes?").assertIsDisplayed()
-        compose.onNodeWithText("ProxyFlow is still checking Office. Saving checks the new settings instead", substring = true)
-            .assertIsDisplayed()
+        val checking = "ProxyFlow is still checking ${isolated("Office")}. Saving checks the new settings instead"
+        compose.onNodeWithText(checking, substring = true).assertIsDisplayed()
         compose.onNodeWithText("apps can't go online", substring = true).assertDoesNotExist()
     }
 

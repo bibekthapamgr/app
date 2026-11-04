@@ -32,11 +32,12 @@ private val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp
 /**
  * The scale, laid out in [layoutDirection] (defect M10-64). On a phone set to a right-to-left language the screens
  * mirror; ProxyFlow's words are English (until decision D8), and Compose would lay each sentence out right to left too —
- * its full stop at the line's start, a unit before its number ("MB 61.3"), a range turned round. So every text is laid
- * out left to right, as English is written, whatever the screen's direction — a name in a right-to-left script keeps its
- * own order inside it, and a line that starts with one is not turned round — and its lines keep to the layout's start
- * edge, as the mirrored screen around them does: a paragraph's direction sets its alignment otherwise, and an English
- * line would sit at the far side of its space. Translations (D8) will need each language's own direction instead.
+ * its full stop at the line's start, a unit before its number ("MB 61.3"), a range turned round. So ProxyFlow's own text
+ * is laid out left to right, as English is written, whatever the screen's direction, and its lines keep to the layout's
+ * start edge, as the mirrored screen around them does: a paragraph's direction sets its alignment otherwise, and an
+ * English line would sit at the far side of its space. What the user wrote — a profile's name, what they type — is not
+ * ProxyFlow's English: it takes its own direction ([inItsOwnDirection], [isolated], and the fields'
+ * [typedInItsOwnDirection]). Translations (D8) will need each language's own direction instead.
  */
 internal fun proxyFlowTypography(layoutDirection: LayoutDirection): Typography = Scale.laidOut(layoutDirection)
 
@@ -71,3 +72,21 @@ private fun Typography.laidOut(layoutDirection: LayoutDirection): Typography = c
     labelMedium = labelMedium.laidOut(layoutDirection),
     labelSmall = labelSmall.laidOut(layoutDirection),
 )
+
+/**
+ * For text the user wrote shown on its own (a profile's name): the direction of its own words, whatever their script —
+ * "مكتب 2" reads as written — still at the layout's start edge.
+ */
+fun TextStyle.inItsOwnDirection(): TextStyle = copy(textDirection = TextDirection.Content)
+
+/**
+ * For a text field's input: the direction of what is typed, and its lines at that direction's start, as Android's own
+ * fields do — so typing in a right-to-left script edits as it should, and a space typed at the end of English shows.
+ */
+fun TextStyle.typedInItsOwnDirection(): TextStyle = copy(textDirection = TextDirection.Content, textAlign = TextAlign.Start)
+
+/**
+ * [text] the user wrote, set inside one of ProxyFlow's sentences: Unicode's first-strong isolate, so it keeps its own
+ * direction and leaves the sentence's order alone ("Switch to مكتب 2?").
+ */
+fun isolated(text: String): String = "\u2068$text\u2069"

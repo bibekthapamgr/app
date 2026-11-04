@@ -78,6 +78,8 @@ import app.proxyflow.core.designsystem.component.shortWhen
 import app.proxyflow.core.designsystem.icon.PfIcons
 import app.proxyflow.core.designsystem.theme.MonoSmall
 import app.proxyflow.core.designsystem.theme.Spacing
+import app.proxyflow.core.designsystem.theme.inItsOwnDirection
+import app.proxyflow.core.designsystem.theme.isolated
 import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionStatus
@@ -483,7 +485,7 @@ private fun ConnectingContent(state: HomeUiState.Ready, actions: HomeActions) {
     StatusHeader(
         stringResource(R.string.home_status_connecting),
         StatusTone.Transition,
-        stringResource(R.string.home_connecting_to, state.profile.displayName),
+        stringResource(R.string.home_connecting_to, isolated(state.profile.displayName)),
     )
     // One row per stage of the attempt (ADR-0012): done, in progress, or not started yet.
     PfCard(modifier = Modifier.fillMaxWidth()) {
@@ -518,7 +520,7 @@ private fun ReconnectingContent(state: HomeUiState.Ready, actions: HomeActions) 
     StatusHeader(
         stringResource(R.string.home_status_reconnecting),
         StatusTone.Transition,
-        stringResource(R.string.home_reconnecting_to, state.profile.displayName),
+        stringResource(R.string.home_reconnecting_to, isolated(state.profile.displayName)),
     )
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { PfLoadingIndicator() }
     Note(stringResource(R.string.home_reconnecting_note))
@@ -553,7 +555,7 @@ private fun ConnectedContent(state: HomeUiState.Ready, actions: HomeActions, now
         modifier = Modifier.fillMaxWidth(),
     )
     Text(
-        listOf(state.profile.displayName, protocolLabel(state.profile)).joinToString(" · "),
+        listOf(isolated(state.profile.displayName), protocolLabel(state.profile)).joinToString(" · "),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
@@ -1101,7 +1103,7 @@ private fun PickerRow(profile: ProxyProfile, selected: Boolean, lastTest: Profil
     ) {
         RadioButton(selected = selected, onClick = null)
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            Text(profile.displayName, style = MaterialTheme.typography.titleMedium)
+            Text(profile.displayName, style = MaterialTheme.typography.titleMedium.inItsOwnDirection())
             Text(
                 listOf(
                     profile.protocol.name,
@@ -1126,7 +1128,7 @@ private fun ProfileCard(profile: ProxyProfile, onChangeProfile: () -> Unit) {
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                Text(profile.displayName, style = MaterialTheme.typography.titleMedium)
+                Text(profile.displayName, style = MaterialTheme.typography.titleMedium.inItsOwnDirection())
                 Text(
                     listOf(
                         profile.protocol.name,

@@ -358,7 +358,11 @@ class App {
             }
             retries++
             val waited = ended.profile?.let { awaitProxy(it.host, it.port) }
-            Log.i(TAG, "uplink dropped: connecting again (retry $retries; the proxy answered this process again after $waited ms)")
+            val answered = when {
+                waited == null || waited < 0 -> "did not answer this process within ${UPLINK_WAIT_MS / 1000} s"
+                else -> "answered this process again after $waited ms"
+            }
+            Log.i(TAG, "uplink dropped: connecting again (retry $retries; the proxy $answered)")
             ended = connectAndAwait(profileId, "Connected or a failed attempt") { it.profileId == profileId && it.connectedOrFailed() }
         }
         logAndroidsView()
