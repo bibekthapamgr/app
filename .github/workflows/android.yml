@@ -392,6 +392,16 @@ jobs:
         with:
           persist-credentials: false
 
+      # The emulator wants 1.2 times its data partition free (7.4 GB on API 31) before it starts, and its capture grows
+      # past a gigabyte. One runner had 6.6 GB left by then (run 41875419181, API 31: "Not enough space to create userdata
+      # partition", so no test ran): toolchains no job here uses are removed first, the free space logged before and after.
+      - name: Room on the runner's disk for the emulator and its capture
+        run: |
+          echo "free before: $(df -Ph / | awk 'NR==2 {print $4 " of " $2}')"
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift /usr/local/share/powershell \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          echo "free after: $(df -Ph / | awk 'NR==2 {print $4 " of " $2}')"
+
       # Whenever the engine job built it, even if another engine check failed.
       - name: The engine AAR from the engine job
         continue-on-error: true

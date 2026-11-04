@@ -49,6 +49,6 @@ reboot_and_wait() { # <seconds>
         sleep 2
     done
     # What was last seen, for the error: whether adb ever left the old boot, the boot id now, the boot's progress.
-    REBOOT_SEEN="$REBOOT_SEEN; adb $([ -n "$REBOOT_WENT_DOWN" ] && echo "left the old boot" || echo "never left the old boot"); boot id now: ${new:-unreadable}; sys.boot_completed: ${completed:-unset}; adb state: $(timeout 5 adb get-state 2>&1 | tr -d '\r' | head -c 80)"
+    REBOOT_SEEN="$REBOOT_SEEN; adb $([ -n "$REBOOT_WENT_DOWN" ] && echo "left the old boot" || echo "never left the old boot"); boot id now: ${new:-unreadable}; sys.boot_completed: ${completed:-unset}; adb state: $(timeout 5 adb get-state 2>&1 | tr -d '\r' | head -c 80); emulator process: $(pgrep -f 'qemu-system|emulator64|/emulator ' >/dev/null 2>&1 && echo running || echo "none on this host"); the runner's disk: $(df -Ph / 2>/dev/null | awk 'NR==2 {print $4 " free of " $2}')"
     return 1
 }
