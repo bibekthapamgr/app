@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.annotation.StringRes
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -19,7 +20,10 @@ import app.proxyflow.core.model.ConnectionStatus
  * (low importance, silent) carries the foreground notification: Connecting,
  * Reconnecting, Connected (with its timer) or Blocked. "Connection problems"
  * (high importance) alerts when Android revoked the VPN. Tapping opens the
- * app; lock screens get a version without the profile name (threat model I-11).
+ * app. It names no profile, so no lock screen shows one whatever Android's
+ * setting for notification content (threat model I-11), and its actions run
+ * only on an unlocked phone: Disconnect sends apps to the normal network
+ * (M10, ADR-0015 §9).
  */
 internal class VpnNotifications(private val context: Context) {
     private val manager = NotificationManagerCompat.from(context)
@@ -54,7 +58,6 @@ internal class VpnNotifications(private val context: Context) {
                     context.getString(textOf(content.text))
                 },
             )
-            .setSubText(state.profileName)
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
@@ -71,18 +74,31 @@ internal class VpnNotifications(private val context: Context) {
         }
         for (action in content.actions) {
             when (action) {
-                StatusContent.Action.CANCEL -> builder.addAction(0, context.getString(R.string.vpn_action_cancel), disconnect())
-                StatusContent.Action.RESTART -> builder.addAction(0, context.getString(R.string.vpn_action_restart), restart())
-                StatusContent.Action.DISCONNECT -> builder.addAction(0, context.getString(R.string.vpn_action_disconnect), disconnect())
+                StatusContent.Action.CANCEL -> builder.addAction(unlockedOnly(R.string.vpn_action_cancel, disconnect()))
+                StatusContent.Action.RESTART -> builder.addAction(unlockedOnly(R.string.vpn_action_restart, restart()))
+                StatusContent.Action.DISCONNECT -> builder.addAction(unlockedOnly(R.string.vpn_action_disconnect, disconnect()))
             }
         }
         return builder.build()
     }
 
-    private fun disconnect(): PendingIntent =
-        ProxyFlowVpnService.pendingAction(context, ProxyFlowVpnService.ACTION_DISCONNECT, REQUEST_DISCONNECT)
+    /** An action Android runs only once the phone is unlocked: its own flag from Android 12, an activity before (see [action]). */
+    private fun unlockedOnly(@StringRes label: Int, intent: PendingIntent): NotificationCompat.Action =
+        NotificationCompat.Action.Builder(0, context.getString(label), intent).setAuthenticationRequired(true).build()
 
-    private fun restart(): PendingIntent = ProxyFlowVpnService.pendingAction(context, ProxyFlowVpnService.ACTION_RESTART, REQUEST_RESTART)
+    private fun disconnect(): PendingIntent = action(ProxyFlowVpnService.ACTION_DISCONNECT, REQUEST_DISCONNECT)
+
+    private fun restart(): PendingIntent = action(ProxyFlowVpnService.ACTION_RESTART, REQUEST_RESTART)
+
+    /**
+     * The intent of an action: the service's own from Android 12, where the action's flag has Android ask for the unlock
+     * first; before it, [NotificationActionActivity], which Android starts only on an unlocked phone.
+     */
+    private fun action(action: String, requestCode: Int): PendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        ProxyFlowVpnService.pendingAction(context, action, requestCode)
+    } else {
+        NotificationActionActivity.pendingAction(context, action, requestCode)
+    }
 
     /**
      * The alert after Android revoked the VPN (board B6d), or after Android started ProxyFlow for Always-on VPN with no

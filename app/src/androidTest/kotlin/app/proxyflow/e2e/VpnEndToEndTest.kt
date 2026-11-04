@@ -3,6 +3,7 @@ package app.proxyflow.e2e
 import android.app.Notification
 import android.content.Intent
 import android.net.VpnService
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.system.Os
@@ -83,13 +84,20 @@ class VpnEndToEndTest {
         }
         val status = checkNotNull(app.notification(ProxyFlowVpnService.STATUS_NOTIFICATION_ID))
         assertEquals(listOf("Disconnect"), status.actions?.map { it.title.toString() })
-        // Threat model I-11: the lock screen gets a version without the profile name.
-        assertEquals(profile.displayName, status.extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString())
+        // Threat model I-11: no version of it names the profile, so no lock screen shows it whatever Android's setting
+        // for notification content (M10); a private version leaves even the status off a lock screen that hides content.
         assertEquals(Notification.VISIBILITY_PRIVATE, status.visibility)
         val public = checkNotNull(status.publicVersion) { "no public version" }
-        val publicText = listOf(Notification.EXTRA_TITLE, Notification.EXTRA_TEXT, Notification.EXTRA_SUB_TEXT)
-            .mapNotNull { public.extras.getCharSequence(it)?.toString() }
-        assertTrue("the public version names no profile: $publicText", publicText.none { profile.displayName in it })
+        for (version in listOf(status, public)) {
+            val text = listOf(Notification.EXTRA_TITLE, Notification.EXTRA_TEXT, Notification.EXTRA_SUB_TEXT, Notification.EXTRA_INFO_TEXT)
+                .mapNotNull { version.extras.getCharSequence(it)?.toString() }
+            assertTrue("the notification names no profile: $text", text.none { profile.displayName in it })
+        }
+        // Disconnect sends apps to the normal network: only an unlocked phone may (Android 12+: Android's own flag; on 10
+        // and 11 through an activity, which Android starts only unlocked: VpnNotificationsTest).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            assertTrue("Disconnect needs the phone unlocked", status.actions.orEmpty().all { it.isAuthenticationRequired })
+        }
         assertReachesDestination("socks5")
 
         app.disconnectAndSettle()

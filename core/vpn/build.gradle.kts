@@ -19,6 +19,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 kotlin {
@@ -33,4 +36,8 @@ dependencies {
 
     testImplementation(project(":core:testing"))
     testImplementation(libs.junit4)
+    // NetworkMonitorTest only: Android's own NetworkCapabilities and callbacks (Robolectric, M10).
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.test.ext.junit)
 }

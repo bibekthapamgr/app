@@ -336,3 +336,60 @@ class PackagedResourcesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def dex(strings: list[str]) -> bytes:
+    """A minimal dex file: a header whose string table holds [strings] (ULEB128 length, MUTF-8, 0), nothing else."""
+    header = bytearray(0x70)
+    header[:8] = b"dex\n035\0"
+    ids_off = 0x70
+    data_off = ids_off + 4 * len(strings)
+    ids, data = bytearray(), bytearray()
+    for text in strings:
+        ids += (data_off + len(data)).to_bytes(4, "little")
+        encoded = text.encode("utf-8")
+        length, uleb = len(text), bytearray()
+        while True:
+            byte = length & 0x7F
+            length >>= 7
+            uleb.append(byte | (0x80 if length else 0))
+            if not length:
+                break
+        data += uleb + encoded + b"\0"
+    header[56:60] = len(strings).to_bytes(4, "little")
+    header[60:64] = ids_off.to_bytes(4, "little")
+    return bytes(header + ids + data)
+
+
+class EngineNamesTest(unittest.TestCase):
+    """M10: the release APK's dex files must still name what the engine's JNI layer finds by name, after R8."""
+
+    def apk(self, dexes: dict[str, bytes]) -> str:
+        import zipfile
+
+        path = os.path.join(self.enterContext(tempfile.TemporaryDirectory()), "app-release.apk")
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, data in dexes.items():
+                archive.writestr(name, data)
+            archive.writestr("AndroidManifest.xml", b"binary")
+        return path
+
+    def test_every_name_kept_passes_across_dex_files(self):
+        names = list(check_release_manifest.ENGINE_CLASSES + check_release_manifest.ENGINE_METHODS)
+        long_name = "x" * 200  # a two-byte ULEB128 length
+        path = self.apk({"classes.dex": dex(names[:3] + [long_name, ""]), "classes2.dex": dex(names[3:])})
+        problems, facts = check_release_manifest.check_engine_names(path)
+        self.assertEqual([], problems)
+        self.assertIn("2", facts[0])
+        self.assertIn(long_name, check_release_manifest.dex_strings(dex([long_name, "a"])))
+
+    def test_a_renamed_class_or_method_fails(self):
+        names = [n for n in check_release_manifest.ENGINE_CLASSES + check_release_manifest.ENGINE_METHODS if n not in ("Lgo/Seq;", "verifyChain")]
+        problems, _ = check_release_manifest.check_engine_names(self.apk({"classes.dex": dex(names + ["La/a;", "a"])}))
+        self.assertEqual(1, len(problems))
+        self.assertIn("'Lgo/Seq;'", problems[0])
+        self.assertIn("'verifyChain'", problems[0])
+
+    def test_no_dex_fails(self):
+        problems, _ = check_release_manifest.check_engine_names(self.apk({}))
+        self.assertIn("no dex file", problems[0])

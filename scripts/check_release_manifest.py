@@ -23,7 +23,10 @@ fails CI unless:
   both backup rule files — passes the same checks, in every configuration it ships (`aapt2 dump resources`, then
   `aapt2 dump xmltree` of each file): a library's resource of the same name and qualifiers loses to the app's, but a
   qualified variant the app lacks (xml-v31/…) ships beside it and applies where it matches, and the release build
-  type's own copy replaces main's. aapt2's printout is read strictly: anything these files never hold fails.
+  type's own copy replaces main's. aapt2's printout is read strictly: anything these files never hold fails;
+- what the engine's JNI layer (gomobile) finds by name survives R8 in the release APK's dex files (M10): the classes
+  and methods core/engine's consumer rules keep, under their own names. A renamed one would crash the engine at its
+  first call on users' phones, and the device tests run the debug build, which R8 never touches.
 
 Usage: check_release_manifest.py [merged AndroidManifest.xml [release APK]]
 (defaults: the release build's merged manifest under app/build/intermediates and its APK under app/build/outputs;
@@ -412,6 +415,49 @@ def check_apk(references: list[tuple[str, str]], apk: str | None = None, aapt2: 
     return problems, facts
 
 
+# M10: what the engine's native code finds by name (core/engine/consumer-rules.pro keeps them): class descriptors, and
+# the Java methods Go calls back (the Platform interface) or the app calls (Pfengine's).
+ENGINE_CLASSES = (
+    "Lgo/Seq;",
+    "Lapp/proxyflow/engine/go/pfengine/Pfengine;",
+    "Lapp/proxyflow/engine/go/pfengine/Platform;",
+    "Lapp/proxyflow/core/engine/AndroidEnginePlatform;",
+)
+ENGINE_METHODS = ("protect", "resolveProxyHost", "verifyChain", "onEvent", "start", "probe", "resetFlows", "networkPlan", "selfTest")
+
+
+def dex_strings(data: bytes) -> set[str]:
+    """Every string of one dex file's string table (string_ids → string_data_item: a ULEB128 length, MUTF-8 bytes, 0)."""
+    if data[:4] != b"dex\n":
+        return set()
+    count, offset = int.from_bytes(data[56:60], "little"), int.from_bytes(data[60:64], "little")
+    out: set[str] = set()
+    for i in range(count):
+        at = int.from_bytes(data[offset + 4 * i : offset + 4 * i + 4], "little")
+        while data[at] & 0x80:  # the UTF-16 length, not needed: the bytes end at a 0
+            at += 1
+        end = data.index(b"\0", at + 1)
+        out.add(data[at + 1 : end].decode("utf-8", "replace"))
+    return out
+
+
+def check_engine_names(apk: str) -> tuple[list[str], list[str]]:
+    """M10: the release APK's dex files still name what the engine's JNI layer finds by name (ENGINE_CLASSES, _METHODS)."""
+    import zipfile
+
+    strings: set[str] = set()
+    with zipfile.ZipFile(apk) as archive:
+        dexes = [name for name in archive.namelist() if re.fullmatch(r"classes\d*\.dex", name)]
+        for name in dexes:
+            strings |= dex_strings(archive.read(name))
+    missing = [name for name in ENGINE_CLASSES + ENGINE_METHODS if name not in strings]
+    if not dexes:
+        return [f"{apk}: no dex file"], []
+    if missing:
+        return [f"the release APK's dex files ({len(dexes)}) lack what the engine's JNI layer finds by name: {missing} (R8 renamed or removed them)"], []
+    return [], [f"release APK dex files ({len(dexes)}): the engine's JNI names survive R8 ({len(ENGINE_CLASSES)} classes, {len(ENGINE_METHODS)} methods)"]
+
+
 def escape(text: str) -> str:
     return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
@@ -430,6 +476,13 @@ def main(argv: list[str]) -> int:
     apk_problems, apk_facts = check_apk(xml_references(path), argv[2] if len(argv) > 2 else None)
     problems += apk_problems
     facts += apk_facts
+    apks = [argv[2]] if len(argv) > 2 else sorted(glob.glob("app/build/outputs/apk/release/*.apk"))
+    if apks:
+        dex_problems, dex_facts = check_engine_names(apks[0])
+        problems += dex_problems
+        facts += dex_facts
+    else:
+        problems.append("no release APK to read the dex files of; run assembleRelease first")
     # The manifest comes from the code under test: print it with workflow commands off.
     token = secrets.token_hex(16)
     print(f"::stop-commands::{token}")

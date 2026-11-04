@@ -235,26 +235,30 @@ class ScreenshotTest {
         HomeScreen(home(reconnecting), HomeActions(), nowMillis = SAMPLE_TIME)
     }
 
-    /** M10: reconnecting on a network that asks for a sign-in (a captive portal): Home says so beside the failure. */
+    /**
+     * M10: reconnecting on a network that asks for a sign-in (a captive portal): Home says so beside the failure (the
+     * capture fails if the banner isn't there to scroll to).
+     */
     @Test
-    fun homeReconnectingOnASignInNetwork() = captureBothThemes("B5_home_reconnecting_sign_in") {
-        val retry = ReconnectInfo(
-            ReconnectReason.ProxyFailures,
-            attempt = 2,
-            maxAttempts = 8,
-            nextAttemptAtMillis = SAMPLE_TIME + 4_000,
-            lastError = ConnectionError("PROXY_UNREACHABLE", "connection to the proxy timed out"),
-        )
-        val reconnecting = ConnectionState(
-            ConnectionStatus.Reconnecting,
-            "p1",
-            tokyo.name,
-            connectedSinceMillis = SAMPLE_TIME - 600_000,
-            reconnect = retry,
-            networkSignIn = true,
-        )
-        HomeScreen(home(reconnecting), HomeActions(), nowMillis = SAMPLE_TIME)
-    }
+    fun homeReconnectingOnASignInNetwork() =
+        captureBothThemes("B5_home_reconnecting_sign_in", scrollTo = "This network asks you to sign in") {
+            val retry = ReconnectInfo(
+                ReconnectReason.ProxyFailures,
+                attempt = 2,
+                maxAttempts = 8,
+                nextAttemptAtMillis = SAMPLE_TIME + 4_000,
+                lastError = ConnectionError("PROXY_UNREACHABLE", "connection to the proxy timed out"),
+            )
+            val reconnecting = ConnectionState(
+                ConnectionStatus.Reconnecting,
+                "p1",
+                tokyo.name,
+                connectedSinceMillis = SAMPLE_TIME - 600_000,
+                reconnect = retry,
+                networkSignIn = true,
+            )
+            HomeScreen(home(reconnecting), HomeActions(), nowMillis = SAMPLE_TIME)
+        }
 
     /** A switch to another profile or a restart: the interface stays, so traffic is held while the new check runs. */
     @Test

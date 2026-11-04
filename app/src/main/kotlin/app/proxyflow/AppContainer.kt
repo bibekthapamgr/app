@@ -38,8 +38,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Manual dependency injection (ADR-0008): the one place that decides which
@@ -99,17 +101,21 @@ class AppContainer(
     init {
         // Keys left behind by a delete that was interrupted (ADR-0006). A failure here only delays that clean-up.
         appScope.launch { runCatching { profiles.deleteOrphanedKeys() } }
-        // Entries past the log's bounds go at start and every hour while the process runs, not only at the next
-        // write (ADR-0012; docs/m1/03 J10: retention applied at least daily).
         appScope.launch(Dispatchers.IO) {
-            while (true) {
-                runCatching { logRepository.purge() }
-                delay(LOG_PURGE_INTERVAL_MS)
+            // How long the log keeps entries, as the user set it (board E1, ADR-0014), before anything is purged: a purge
+            // with the default first would delete what a longer setting keeps (M10). A settings file that can't be read,
+            // or isn't read in time, keeps the default.
+            withTimeoutOrNull(SETTINGS_WAIT_MS) { settingsRepository.settings.catch {}.firstOrNull() }
+                ?.let { runCatching { logRepository.setRetention(it.logRetention.millis) } }
+            // Entries past the log's bounds go at start and every hour while the process runs, not only at the next
+            // write (ADR-0012; docs/m1/03 J10: retention applied at least daily).
+            launch {
+                while (true) {
+                    runCatching { logRepository.purge() }
+                    delay(LOG_PURGE_INTERVAL_MS)
+                }
             }
-        }
-        // How long the log keeps entries, as the user set it (board E1, ADR-0014): at start and on each change, which
-        // deletes at once what a shorter time no longer allows. A settings file that can't be read keeps the default.
-        appScope.launch(Dispatchers.IO) {
+            // Each change of the setting, which deletes at once what a shorter time no longer allows.
             settingsRepository.settings
                 .map { it.logRetention }
                 .distinctUntilChanged()
@@ -132,5 +138,8 @@ class AppContainer(
         const val SETTINGS_FILE = "settings"
         const val PROTECTION_FILE = "protection"
         const val LOG_PURGE_INTERVAL_MS = 60 * 60 * 1_000L
+
+        /** How long the first purge waits for the user's retention setting at most (a settings file read at start). */
+        const val SETTINGS_WAIT_MS = 5_000L
     }
 }

@@ -144,7 +144,12 @@ jobs:
           name: pfengine-aar
           path: engine/build
 
+      # aapt2 refuses an apostrophe without its backslash only at resource merging, minutes in, naming no string (M10-6).
+      - name: String resources Android's resource compiler takes (apostrophes, quotes, escapes)
+        run: python3 scripts/check_strings.py
+
       - name: Design tokens and generated colours agree
+        if: ${{ !cancelled() }}
         run: |
           python3 design/tools/check_contrast.py
           python3 design/tools/generate_compose_colors.py
@@ -406,6 +411,10 @@ jobs:
 
       - id: gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      # A string the resource compiler refuses fails the build below minutes in; this, in a second (M10-6).
+      - name: String resources Android's resource compiler takes
+        run: python3 scripts/check_strings.py
 
       # GitHub's Linux runners have KVM, but only root may use it by default.
       - name: Let the emulator use KVM

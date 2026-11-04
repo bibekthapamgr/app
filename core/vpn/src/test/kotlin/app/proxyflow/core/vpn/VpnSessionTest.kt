@@ -850,7 +850,11 @@ class VpnSessionTest {
         awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}")
         // The service's start wait, cancelled as the service attached just before the check began, may still be ending
         // (M10: once in run 41811060838 it was, and counted): the check alone runs once it has.
-        eventually("the check alone runs; ${session.activeJobs()} jobs") { session.activeJobs() == 1 }
+        val deadline = System.currentTimeMillis() + TIMEOUT_MS
+        while (session.activeJobs() != 1) {
+            check(System.currentTimeMillis() < deadline) { "timed out waiting until the check alone runs: ${session.activeJobs()} jobs" }
+            Thread.sleep(5)
+        }
 
         session.disconnect()
         awaitStatus(ConnectionStatus.Disconnected)

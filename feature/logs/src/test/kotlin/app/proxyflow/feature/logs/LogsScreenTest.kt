@@ -134,6 +134,27 @@ class LogsScreenTest {
         assertEquals(listOf("copy 7"), calls)
     }
 
+    /** M10: a sign-in page on the phone's network, its going, and the reconnection it starts are said in words. */
+    @Test
+    fun aSignInPageOnTheNetworkIsSaidInTheLog() {
+        fun entry(id: Long, event: LogEvent, details: Map<String, String>) =
+            LogEntry(id = id, timeMillis = failed.timeMillis + id, level = LogEntry.Level.Info, event = event, details = details)
+        val page = entry(11, LogEvent.SignInPage, mapOf(LogDetail.NETWORK to "wifi"))
+        val gone = entry(12, LogEvent.SignInPageGone, mapOf(LogDetail.NETWORK to "cellular"))
+        val again = entry(13, LogEvent.ReconnectStarted, mapOf(LogDetail.REASON to "sign_in_page_gone"))
+        var state by mutableStateOf(LogsUiState(loading = false, entries = listOf(page, gone, again), total = 3))
+        compose.setContent { ProxyFlowTheme { LogsScreen(state, actions = actions, zone = utc, today = LocalDate.of(2026, 11, 3)) } }
+        compose.onNodeWithText("Sign-in page on Wi-Fi: it may carry nothing until you sign in").assertIsDisplayed()
+        compose.onNodeWithText("No sign-in page on mobile data any more").assertIsDisplayed()
+        compose.onNodeWithText("Reconnecting: the network no longer asks for a sign-in").assertIsDisplayed()
+
+        state = LogsUiState(loading = false, entries = listOf(page), total = 1, selected = page)
+        compose.onNodeWithText("What you can do").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(
+            "Sign in from Android's notification. If its page doesn't open while ProxyFlow is on, stop ProxyFlow first.",
+        ).performScrollTo().assertIsDisplayed()
+    }
+
     @Test
     fun clearingIsConfirmedFirst() {
         show(LogsUiState(loading = false, entries = listOf(failed), total = 1, confirmingClear = true))

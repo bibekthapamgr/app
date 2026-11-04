@@ -561,33 +561,86 @@ class HomeScreenTest {
     }
 
     /**
-     * M10: a network with a sign-in page (a captive portal) is said beside a failure to reach the proxy, with what happens
-     * next in each state: connect again, ProxyFlow trying again at once, or try again; never when Android found none.
+     * M10: a network with a sign-in page (a captive portal) is said beside a failure to reach the proxy, with what to do
+     * in the words of each screen: tap Try again, or ProxyFlow trying again at once where the session does (a failure that
+     * may pass, a certificate the page may have answered with); never when Android found none.
      */
     @Test
     fun aSignInPageOnTheNetworkIsSaidBesideTheFailure() {
         val unreachable = ConnectionError("PROXY_UNREACHABLE")
+        val untrusted = ConnectionError("TLS_UNTRUSTED")
         val retry = ReconnectInfo(ReconnectReason.ProxyFailures, 1, 8, nextAttemptAtMillis = 3_000, lastError = unreachable)
+        val cause = "Android found a sign-in page on this network, as in hotels and airports: until you sign in, it may carry " +
+            "nothing, your proxy included."
+        val certificate = "Android found a sign-in page on this network, as in hotels and airports: until you sign in, the page " +
+            "may answer in your proxy's place, with a certificate of its own."
+        val tryAgain = "Sign in from Android's notification, then tap Try again."
+        val pageNotOpening = "If the page doesn't open, stop ProxyFlow first."
+        val atOnce = "Sign in from Android's notification and ProxyFlow tries again at once. $pageNotOpening"
+        val tryAgainHeld = "$tryAgain $pageNotOpening"
         val cases = listOf(
-            ConnectionState(profileId = "p1", error = unreachable) to
-                "Sign in from Android's notification, then connect again.",
-            ConnectionState(ConnectionStatus.Reconnecting, "p1", "Office", connectedSinceMillis = 0, reconnect = retry) to
-                "Sign in from Android's notification and ProxyFlow tries again at once. If the page doesn't open, stop ProxyFlow first.",
-            ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = unreachable) to
-                "Sign in from Android's notification, then try again. If the page doesn't open, stop ProxyFlow first.",
+            Triple(ConnectionState(profileId = "p1", error = unreachable), "Can't reach your proxy", "$cause $tryAgain"),
+            Triple(ConnectionState(profileId = "p1", error = untrusted), "Certificate not trusted", "$certificate $tryAgain"),
+            Triple(
+                ConnectionState(ConnectionStatus.Reconnecting, "p1", "Office", connectedSinceMillis = 0, reconnect = retry),
+                "Can't reach your proxy",
+                "$cause $atOnce",
+            ),
+            Triple(
+                ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = unreachable),
+                "Can't reach your proxy",
+                "$cause $atOnce",
+            ),
+            Triple(
+                ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = untrusted),
+                "Certificate not trusted",
+                "$certificate $atOnce",
+            ),
+            Triple(
+                ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError("AUTH_FAILED")),
+                null,
+                "$cause $tryAgainHeld",
+            ),
         )
         var state by mutableStateOf(ready(cases.first().first))
         compose.setContent { ProxyFlowTheme { HomeScreen(state, actions, nowMillis = 0) } }
-        for ((connection, next) in cases) {
+        for ((connection, failure, text) in cases) {
             state = ready(connection)
             compose.onNodeWithText("This network asks you to sign in").assertDoesNotExist()
             state = ready(connection.copy(networkSignIn = true))
             scrolledTo("This network asks you to sign in").assertIsDisplayed()
-            scrolledTo(
-                "Android found a sign-in page on this network, as in hotels and airports: it carries nothing until you sign in, " +
-                    "your proxy included. $next",
-            ).assertIsDisplayed()
-            scrolledTo("Can't reach your proxy").assertIsDisplayed()
+            scrolledTo(text).assertIsDisplayed()
+            if (failure != null) scrolledTo(failure).assertIsDisplayed()
+        }
+    }
+
+    /**
+     * The sign-in banner explains a failure to reach the proxy, so it is never shown without one, nor beside a failure of
+     * the phone's or ProxyFlow's own (M10 review): connected, connecting, offline; a deleted profile, a key that can't be
+     * read, the engine stopping.
+     */
+    @Test
+    fun theSignInBannerIsShownOnlyBesideAFailureToReachTheProxy() {
+        val cases = listOf(
+            ConnectionState(ConnectionStatus.Connected, "p1", "Office", connectedSinceMillis = 0),
+            ConnectionState(ConnectionStatus.Connecting, "p1", "Office", step = ConnectStep.ProxyHandshake),
+            ConnectionState(
+                ConnectionStatus.Offline,
+                "p1",
+                "Office",
+                connectedSinceMillis = 0,
+                error = ConnectionError(ConnectionError.OFFLINE),
+            ),
+            ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.PROFILE_DELETED)),
+            ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = ConnectionError(ConnectionError.ENGINE_STOPPED)),
+            ConnectionState(profileId = "p1", error = ConnectionError(ConnectionError.CREDENTIAL_UNREADABLE)),
+        )
+        var state by mutableStateOf(ready(cases.first().copy(networkSignIn = true)))
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions, nowMillis = 0) } }
+        for (connection in cases) {
+            state = ready(connection.copy(networkSignIn = true))
+            compose.waitForIdle()
+            compose.onNodeWithText("This network asks you to sign in").assertDoesNotExist()
         }
     }
 

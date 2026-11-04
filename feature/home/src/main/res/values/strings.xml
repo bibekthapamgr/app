@@ -132,6 +132,8 @@
     <string name="home_reconnect_back_online_message">Your phone has a network again. ProxyFlow is reconnecting to your proxy.</string>
     <string name="home_reconnect_network_changed_title">Network changed</string>
     <string name="home_reconnect_network_changed_message">Your phone moved to another network. ProxyFlow is reconnecting to your proxy.</string>
+    <string name="home_reconnect_sign_in_gone_title">Sign-in page gone</string>
+    <string name="home_reconnect_sign_in_gone_message">This network no longer asks for a sign-in. ProxyFlow is reconnecting to your proxy.</string>
     <string name="home_reconnect_attempt">Attempt %1$d of %2$d</string>
     <string name="home_reconnect_next_try">next try in %1$d s</string>
     <string name="home_reconnect_trying">trying now…</string>
@@ -143,11 +145,15 @@
     <!-- B6b (pre-flight failures) and the blocked layout -->
     <string name="home_not_connected_note">You\'re not connected: apps use your normal network unless Android\'s system kill switch is on.</string>
     <string name="home_blocked_note">Apps can\'t go online until this is fixed — ProxyFlow sends nothing around your proxy.</string>
-    <!-- M10: Android found a sign-in page (a captive portal) on the phone's network; shown beside a failure to reach the proxy. -->
+    <!-- M10: Android found a sign-in page (a captive portal) on the phone's network. Said beside a failure to reach the proxy:
+         its cause in one sentence (%1$s of home_sign_in_network_text), then what to do in another (%2$s). -->
     <string name="home_sign_in_network_title">This network asks you to sign in</string>
-    <string name="home_sign_in_network_connect_message">Android found a sign-in page on this network, as in hotels and airports: it carries nothing until you sign in, your proxy included. Sign in from Android's notification, then connect again.</string>
-    <string name="home_sign_in_network_reconnect_message">Android found a sign-in page on this network, as in hotels and airports: it carries nothing until you sign in, your proxy included. Sign in from Android's notification and ProxyFlow tries again at once. If the page doesn't open, stop ProxyFlow first.</string>
-    <string name="home_sign_in_network_blocked_message">Android found a sign-in page on this network, as in hotels and airports: it carries nothing until you sign in, your proxy included. Sign in from Android's notification, then try again. If the page doesn't open, stop ProxyFlow first.</string>
+    <string name="home_sign_in_network_text">%1$s %2$s</string>
+    <string name="home_sign_in_network_cause">Android found a sign-in page on this network, as in hotels and airports: until you sign in, it may carry nothing, your proxy included.</string>
+    <string name="home_sign_in_network_cause_certificate">Android found a sign-in page on this network, as in hotels and airports: until you sign in, the page may answer in your proxy\'s place, with a certificate of its own.</string>
+    <string name="home_sign_in_network_try_again">Sign in from Android\'s notification, then tap Try again.</string>
+    <string name="home_sign_in_network_try_again_held">Sign in from Android\'s notification, then tap Try again. If the page doesn\'t open, stop ProxyFlow first.</string>
+    <string name="home_sign_in_network_at_once">Sign in from Android\'s notification and ProxyFlow tries again at once. If the page doesn\'t open, stop ProxyFlow first.</string>
     <string name="home_code">Code: %1$s</string>
     <string name="home_try_again">Try again</string>
     <string name="home_restart">Restart</string>

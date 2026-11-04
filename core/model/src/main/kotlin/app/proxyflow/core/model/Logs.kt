@@ -69,6 +69,15 @@ enum class LogEvent(val key: String) {
 
     /** What Android said about its kill switch (Always-on VPN, Block connections without VPN), when that changed (M8). */
     SystemKillSwitch("system_kill_switch"),
+
+    /**
+     * Android found a sign-in page on the phone's network (a captive portal, M10): noted while ProxyFlow is on, and when a
+     * connection starts on such a network, since it may explain what fails next.
+     */
+    SignInPage("sign_in_page"),
+
+    /** The phone's network no longer asks for a sign-in (M10): the user signed in, most often. */
+    SignInPageGone("sign_in_page_gone"),
     ;
 
     companion object {
@@ -95,7 +104,7 @@ enum class LogFilter {
         val CONNECTION = setOf(
             LogEvent.ConnectRequested, LogEvent.StageReached, LogEvent.Connected, LogEvent.ConnectFailed, LogEvent.ReconnectStarted,
             LogEvent.Reconnected, LogEvent.NetworkChanged, LogEvent.Stopped, LogEvent.Revoked, LogEvent.SessionSummary,
-            LogEvent.SessionInterrupted, LogEvent.SystemKillSwitch,
+            LogEvent.SessionInterrupted, LogEvent.SystemKillSwitch, LogEvent.SignInPage, LogEvent.SignInPageGone,
         )
         val BLOCKED =
             setOf(LogEvent.Blocked, LogEvent.ReconnectStarted, LogEvent.ReconnectAttemptFailed, LogEvent.ReconnectGaveUp, LogEvent.Offline)

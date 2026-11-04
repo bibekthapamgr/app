@@ -247,9 +247,9 @@ class ReconnectEndToEndTest {
 
     /**
      * M10: the phone's network asks for a sign-in (a captive portal), as Android would tell the session: every state says
-     * so, connected or not, and nothing else changes; the proxy then fails — a portal lets nothing through until the user
-     * signs in — and ProxyFlow reconnects, holding traffic; once signed in, the next attempt runs at once instead of after
-     * its wait.
+     * so, connected or not, and nothing else changes; the proxy then fails — a portal may let nothing through until the
+     * user signs in — and ProxyFlow reconnects, holding traffic; once the page is gone, the attempt due next runs at once
+     * instead of after its wait, as the same reconnection, and the log says both.
      */
     @Test(timeout = TEST_TIMEOUT_MS)
     fun signingInToTheNetworkReconnectsAtOnce() {
@@ -277,8 +277,12 @@ class ReconnectEndToEndTest {
         app.runtime.session.underlyingNetwork(real)
         val back = app.await(RETRY_NOW_MS, "Connected right after signing in") { it.status == ConnectionStatus.Connected }
         assertFalse(back.networkSignIn)
-        assertEquals(ReconnectReason.NetworkBack, history.states.last { it.reconnect != null }.reconnect?.reason)
+        val reconnection = history.states.last { it.reconnect != null }.reconnect
+        assertEquals("the same reconnection", ReconnectReason.ProxyFailures, reconnection?.reason)
+        assertEquals("its attempt's number kept", 1, reconnection?.attempt)
         assertSent("sign-in-back")
+        app.awaitLog("the sign-in page found") { it.event == LogEvent.SignInPage && it.profileId == profile.id }
+        app.awaitLog("the sign-in page gone") { it.event == LogEvent.SignInPageGone && it.profileId == profile.id }
     }
 
     /** Without a network the engine stops and traffic waits at the interface (B7); with one back, it reconnects at once. */

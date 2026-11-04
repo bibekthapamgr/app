@@ -127,8 +127,8 @@ class VpnSession(
     /**
      * The phone's network as Android reports it to the service ([underlyingNetwork]).
      *
-     * @param signIn Android found a sign-in page on it (NET_CAPABILITY_CAPTIVE_PORTAL): it carries nothing until the user
-     *   signs in ([ConnectionState.networkSignIn]).
+     * @param signIn Android found a sign-in page on it (NET_CAPABILITY_CAPTIVE_PORTAL): until the user signs in, it may
+     *   carry nothing or answer in the proxy's place ([ConnectionState.networkSignIn]).
      */
     data class NetworkInfo(val id: String, val transport: String, val signIn: Boolean = false)
 
@@ -172,7 +172,10 @@ class VpnSession(
     private var network: String? = null
     private var networkKnown = false
 
-    /** The phone's network as last reported, or null (none, or not reported yet). For device tests and diagnosis. */
+    /**
+     * The phone's network as last reported, or null (none, or not reported yet): every published state's
+     * [ConnectionState.networkSignIn] comes from it. Read by device tests too.
+     */
     @Volatile var lastNetwork: NetworkInfo? = null
         private set
 
@@ -424,7 +427,9 @@ class VpnSession(
         }
         cancelAttempt()
         recovery = null
-        startedByAlwaysOn = alwaysOn
+        // Android's Always-on start lasts until connected: a switch or a restart meanwhile (the picker, the edit screen's
+        // reconnect) holds traffic on the same interface and is retried as the start was (M10, ADR-0015 §3).
+        startedByAlwaysOn = alwaysOn || startedByAlwaysOn
         // Switching or restarting: flows end now. Once connected, the interface stays, so traffic is held until the next engine runs on it.
         stopEngine()
         if (sessionTotals?.profileId.let { it != null && it != profile.id }) closeSession() // a switch ends the old profile's session
@@ -461,6 +466,8 @@ class VpnSession(
                 LogDetail.BY to if (alwaysOn) BY_ALWAYS_ON else null,
             ),
         )
+        // A connection on a network that asks for a sign-in may fail for it: the log says so before it does (M10).
+        lastNetwork?.takeIf { it.signIn }?.let { noteSignInPage(LogEvent.SignInPage, it) }
         stageReached()
         val current = host
         if (current == null) waitForService(profile) else runPreflight(current, profile)
@@ -1158,17 +1165,25 @@ class VpnSession(
     private fun onNetwork(info: NetworkInfo?) {
         val previous = network
         val known = networkKnown
-        val signedIn = lastNetwork?.signIn == true && info?.signIn == false && info.id == previous
+        val askedBefore = lastNetwork?.signIn == true
+        // The same network no longer asks for a sign-in: the user signed in, most often; the page may also have gone by
+        // itself. Android's flag says only that its own check was answered by a page, or no longer is.
+        val pageGone = askedBefore && info?.signIn == false && info.id == previous
+        val pageFound = info?.signIn == true && !(askedBefore && info.id == previous)
         network = info?.id
         networkKnown = true
         lastNetwork = info
         val signIn = if (info?.signIn == true) ", asks for a sign-in" else ""
         when {
             info?.id != previous || !known -> log("network: ${info?.transport ?: "none"}$signIn${if (known) "" else " (first report)"}")
-            signedIn -> log("network: ${info.transport}, signed in")
+            pageGone -> log("network: ${info.transport}, no sign-in page any more")
             info != null && info.signIn -> log("network: ${info.transport}$signIn")
         }
         if (state.value.networkSignIn != (info?.signIn == true)) publish(state.value)
+        if (state.value.active && info != null) {
+            if (pageFound) noteSignInPage(LogEvent.SignInPage, info)
+            if (pageGone) noteSignInPage(LogEvent.SignInPageGone, info)
+        }
         if (!known) return // Android's first report says where the phone is, not that anything changed
         val status = state.value.status
         val heldForRetry = status == ConnectionStatus.Blocked && tun != null && RetryPolicy.recoverable(state.value.error?.code)
@@ -1177,11 +1192,7 @@ class VpnSession(
             return
         }
         if (info.id == previous) {
-            // Signed in on the same network: it carries traffic now, as when a network is back, so the attempts its sign-in
-            // page held back start over at once.
-            if (signedIn && (recovery != null || heldForRetry)) {
-                startRecovery(ReconnectReason.NetworkBack, recovery?.lastError ?: state.value.error, immediate = true)
-            }
+            if (pageGone) afterTheSignInPage()
             return
         }
         when {
@@ -1191,7 +1202,12 @@ class VpnSession(
             }
             recovery != null || heldForRetry -> {
                 noteNetwork(info, reset = null)
-                startRecovery(ReconnectReason.NetworkChanged, recovery?.lastError ?: state.value.error, immediate = true)
+                // A block's detail ("reconnecting stopped after 8 attempts") says nothing of the attempts that start now.
+                startRecovery(
+                    ReconnectReason.NetworkChanged,
+                    recovery?.lastError ?: state.value.error?.copy(detail = null),
+                    immediate = true,
+                )
             }
             status == ConnectionStatus.Connected && engineRunning -> {
                 // The engine keeps running; its connections end so apps make new ones, which go out on the new network.
@@ -1200,6 +1216,33 @@ class VpnSession(
                 noteNetwork(info, reset)
             }
         }
+    }
+
+    /**
+     * The phone's network no longer asks for a sign-in (ADR-0015 §3). What its page held back is tried again at once, as
+     * long as ProxyFlow holds traffic for it: while reconnecting, the attempt due next runs now and keeps its number — one
+     * running is cut short, as it ran while the page answered, and runs again — so a page that comes and goes never adds
+     * attempts; blocked with the interface up, for a failure that may pass or a certificate that may have been the page's,
+     * the attempts start again. Nothing else changes: a first connect or an Always-on start's first check goes on, and a
+     * connected session never asked the page anything that failed.
+     */
+    private fun afterTheSignInPage() {
+        val r = recovery
+        val error = state.value.error
+        when {
+            r != null -> {
+                cancelAttempt()
+                stopEngine()
+                log("reconnect attempt ${r.attempt} at once: no sign-in page any more")
+                scheduleAttempt(0)
+            }
+            state.value.status == ConnectionStatus.Blocked && tun != null && error != null && error.triedAgainAfterSignIn ->
+                startRecovery(ReconnectReason.SignInPageGone, error.copy(detail = null), immediate = true)
+        }
+    }
+
+    private fun noteSignInPage(event: LogEvent, info: NetworkInfo) {
+        note(LogEntry.Level.Info, event, details = mapOf(LogDetail.NETWORK to info.transport))
     }
 
     private fun noteNetwork(info: NetworkInfo, reset: Int?) {

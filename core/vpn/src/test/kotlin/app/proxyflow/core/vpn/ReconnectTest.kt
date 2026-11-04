@@ -20,6 +20,7 @@ import app.proxyflow.engine.go.pfengine.Platform
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
@@ -695,8 +696,9 @@ class ReconnectTest {
 
     /**
      * A network with a sign-in page (M10): while connected it changes nothing but what the state says — no move, so no
-     * reset and no reconnection — and when the proxy then fails, signing in on the same network runs the next attempt at
-     * once, as a network that is back, instead of after its wait.
+     * reset and no reconnection — and the log says it; when the proxy then fails and ProxyFlow reconnects, the page going
+     * (the user signed in) runs the attempt due next at once, instead of after its wait: the same reconnection, its
+     * attempt's number kept.
      */
     @Test
     fun signingInOnTheSameNetworkRunsTheNextAttemptAtOnce() {
@@ -708,6 +710,7 @@ class ReconnectTest {
         assertEquals("connected still", ConnectionStatus.Connected, asked.status)
         assertEquals("no move: nothing reset", 0, engine.resets.get())
         assertEquals(0, entries.count { it.event == LogEvent.NetworkChanged || it.event == LogEvent.ReconnectStarted })
+        assertEquals("wifi", entries.single { it.event == LogEvent.SignInPage }.details[LogDetail.NETWORK])
 
         engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
         escalate()
@@ -722,51 +725,286 @@ class ReconnectTest {
         assertFalse(back.networkSignIn)
         assertEquals("one attempt, at once", probes + 1, log.count("probe ${profile.id}"))
         val again = state.history.last { it.reconnect != null }.reconnect
-        assertEquals(ReconnectReason.NetworkBack, again?.reason)
+        assertEquals("the same reconnection", ReconnectReason.ProxyFailures, again?.reason)
+        assertEquals("its attempt's number kept", 1, again?.attempt)
+        assertEquals(1, entries.count { it.event == LogEvent.ReconnectStarted })
+        assertEquals(1, entries.count { it.event == LogEvent.SignInPageGone })
         assertEquals(0, entries.count { it.event == LogEvent.NetworkChanged })
         assertTrue(sessionLog.all.toString(), "network: wifi, asks for a sign-in" in sessionLog.all)
-        assertTrue(sessionLog.all.toString(), "network: wifi, signed in" in sessionLog.all)
+        assertTrue(sessionLog.all.toString(), "network: wifi, no sign-in page any more" in sessionLog.all)
     }
 
-    /** Blocked after the last attempt, with traffic held for a retry: signing in tries again at once too. */
+    /** A sign-in page appearing on the same network while reconnecting changes what the state says, and nothing else. */
+    @Test
+    fun aSignInPageAppearingWhileReconnectingRestartsNothing() {
+        policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000, 60_000), jitter = 0.0)
+        val profile = connect()
+        session.underlyingNetwork(WIFI)
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        escalate()
+        val waiting = await { it.status == ConnectionStatus.Reconnecting && it.reconnect?.nextAttemptAtMillis == NOW + 60_000 }
+        val probes = log.count("probe ${profile.id}")
+
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        val flagged = await { it.networkSignIn }
+        assertEquals(waiting.reconnect, flagged.reconnect)
+        assertEquals(probes, log.count("probe ${profile.id}"))
+        assertEquals(1, entries.count { it.event == LogEvent.ReconnectStarted })
+        assertEquals(1, entries.count { it.event == LogEvent.SignInPage })
+    }
+
+    /** An attempt running when the page goes ran while the page answered: it is cut short and runs again at once. */
+    @Test
+    fun anAttemptRunningWhenThePageGoesIsCutShortAndRunsAgain() {
+        val profile = connect()
+        session.underlyingNetwork(WIFI)
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        val first = CountDownLatch(1)
+        val blockNext = AtomicBoolean(true)
+        engine.probeHook = { if (blockNext.getAndSet(false)) first.await(10, TimeUnit.SECONDS) }
+        host.onAbort = { first.countDown() }
+        escalate()
+        eventually("attempt 1 runs") { log.count("probe ${profile.id}") == 2 }
+
+        engine.answer = PreflightAnswer(ok = true)
+        session.underlyingNetwork(WIFI)
+        await { it.status == ConnectionStatus.Connected }
+        assertEquals("the running attempt was cut short", 1, host.aborts.get())
+        assertEquals("and ran again", 3, log.count("probe ${profile.id}"))
+        assertEquals("its number kept", 1, state.history.last { it.reconnect != null }.reconnect?.attempt)
+        eventually("no job left") { session.activeJobs() == 0 }
+        assertEquals(0, host.guardsOpen.get())
+    }
+
+    /** The page coming and going again and again while reconnecting never adds attempts: the last one still blocks. */
+    @Test
+    fun aPageThatComesAndGoesNeverAddsAttempts() {
+        policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000, 60_000), jitter = 0.0)
+        val profile = connect()
+        session.underlyingNetwork(WIFI)
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        escalate()
+        await { it.status == ConnectionStatus.Reconnecting && it.reconnect?.nextAttemptAtMillis == NOW + 60_000 }
+        val probes = log.count("probe ${profile.id}")
+
+        for (attempt in 1..3) {
+            session.underlyingNetwork(WIFI_SIGN_IN)
+            session.underlyingNetwork(WIFI)
+            if (attempt < 3) await { it.reconnect.let { r -> r?.attempt == attempt + 1 && r.nextAttemptAtMillis == NOW + 60_000 } }
+        }
+        val blocked = await { it.status == ConnectionStatus.Blocked }
+        assertEquals("reconnecting stopped after 3 attempts", blocked.error?.detail)
+        assertEquals("three attempts, each at once", probes + 3, log.count("probe ${profile.id}"))
+        assertEquals(1, entries.count { it.event == LogEvent.ReconnectStarted })
+        assertEquals(3, entries.count { it.event == LogEvent.SignInPageGone })
+    }
+
+    /**
+     * Blocked after the last attempt, with traffic held for a retry: the page going starts the attempts again at once,
+     * said as such and without the block's detail; the page coming and going later while connected changes nothing.
+     */
     @Test
     fun signingInAfterTheLastAttemptTriesAgain() {
         val profile = connect()
         session.underlyingNetwork(WIFI_SIGN_IN)
         engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
         escalate()
-        await { it.status == ConnectionStatus.Blocked }
+        val blocked = await { it.status == ConnectionStatus.Blocked }
+        assertEquals("reconnecting stopped after 3 attempts", blocked.error?.detail)
         val probes = log.count("probe ${profile.id}")
 
-        engine.answer = PreflightAnswer(ok = true)
+        val gate = CountDownLatch(1)
+        engine.gate = gate
         session.underlyingNetwork(WIFI)
+        eventually("the attempt after signing in runs") { log.count("probe ${profile.id}") == probes + 1 }
+        runBlocking { session.awaitIdle() }
+        val running = state.value
+        assertEquals(ConnectionStatus.Reconnecting, running.status)
+        assertEquals(ReconnectReason.SignInPageGone, running.reconnect?.reason)
+        assertEquals(1, running.reconnect?.attempt)
+        assertEquals("the block's detail is not the new attempts'", ConnectionError("PROXY_UNREACHABLE"), running.reconnect?.lastError)
+        engine.answer = PreflightAnswer(ok = true)
+        engine.gate = null
+        gate.countDown()
         await { it.status == ConnectionStatus.Connected }
-        assertEquals(probes + 1, log.count("probe ${profile.id}"))
+        assertEquals("sign_in_page_gone", entries.last { it.event == LogEvent.ReconnectStarted }.details[LogDetail.REASON])
 
-        // Signing in again later (the page came back, and went) while connected changes nothing.
+        // The page coming back, and going, while connected changes nothing.
+        val checks = log.count("probe ${profile.id}")
         session.underlyingNetwork(WIFI_SIGN_IN)
         session.underlyingNetwork(WIFI)
         runBlocking { session.awaitIdle() }
         assertEquals(ConnectionStatus.Connected, state.value.status)
-        assertEquals(probes + 1, log.count("probe ${profile.id}"))
+        assertEquals(checks, log.count("probe ${profile.id}"))
         assertEquals(0, engine.resets.get())
     }
 
-    /** What no retry changes stays blocked when the user signs in: a refused sign-in or certificate is the proxy's answer. */
+    /**
+     * A certificate failure blocks at once; on a network with a sign-in page it may have been the page's, answering in the
+     * proxy's place, so the page going runs one attempt at once — and the same certificate again blocks at once.
+     */
     @Test
-    fun signingInNeverRetriesWhatNoRetryChanges() {
+    fun signingInRetriesACertificateBlockOnce() {
         val profile = connect()
         session.underlyingNetwork(WIFI_SIGN_IN)
         proxyFailure("TLS_UNTRUSTED")
         await { it.status == ConnectionStatus.Blocked }
         val probes = log.count("probe ${profile.id}")
 
+        engine.answer = PreflightAnswer(ok = false, code = "TLS_UNTRUSTED")
+        session.underlyingNetwork(WIFI)
+        eventually("one attempt after signing in") { log.count("probe ${profile.id}") == probes + 1 }
+        val again = await {
+            it.status == ConnectionStatus.Blocked && state.history.any { s -> s.reconnect?.reason == ReconnectReason.SignInPageGone }
+        }
+        assertEquals("TLS_UNTRUSTED", again.error?.code)
+        assertFalse("traffic still held", host.tuns.single().closed)
+        runBlocking { session.awaitIdle() }
+        assertEquals("one attempt only", probes + 1, log.count("probe ${profile.id}"))
+
+        // A certificate that was the page's passes once the page is gone: the page comes back, and goes.
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        engine.answer = PreflightAnswer(ok = true)
+        session.underlyingNetwork(WIFI)
+        await { it.status == ConnectionStatus.Connected }
+        assertFalse(state.value.networkSignIn)
+    }
+
+    /** A refused sign-in is the proxy's own answer: it stays blocked when the page goes, and the user acts. */
+    @Test
+    fun aRefusedSignInStaysBlockedWhenThePageGoes() {
+        val profile = connect()
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        proxyFailure("AUTH_FAILED")
+        await { it.status == ConnectionStatus.Blocked }
+        val probes = log.count("probe ${profile.id}")
+
         session.underlyingNetwork(WIFI)
         runBlocking { session.awaitIdle() }
         assertEquals(ConnectionStatus.Blocked, state.value.status)
-        assertEquals("TLS_UNTRUSTED", state.value.error?.code)
+        assertEquals("AUTH_FAILED", state.value.error?.code)
         assertEquals(probes, log.count("probe ${profile.id}"))
         assertFalse(state.value.networkSignIn)
+    }
+
+    /** A block for a deleted profile stays when the page goes: nothing to try again with. */
+    @Test
+    fun aDeletedProfilesBlockStaysWhenThePageGoes() {
+        val profile = connect()
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        session.profileDeleted(profile.id)
+        await { it.status == ConnectionStatus.Blocked }
+        val probes = log.count("probe ${profile.id}")
+
+        session.underlyingNetwork(WIFI)
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Blocked, state.value.status)
+        assertEquals(ConnectionError.PROFILE_DELETED, state.value.error?.code)
+        assertEquals(probes, log.count("probe ${profile.id}"))
+        assertFalse(host.tuns.single().closed)
+    }
+
+    /** The page going while a first connect's check runs changes nothing: the connect goes on, and nothing is held. */
+    @Test
+    fun signingInDuringAFirstConnectChangesNothing() {
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        val profile = save()
+        val gate = CountDownLatch(1)
+        engine.gate = gate
+        session.connect(profile.id)
+        eventually("the check runs") { log.count("probe ${profile.id}") == 1 }
+
+        session.underlyingNetwork(WIFI)
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Connecting, state.value.status)
+        assertFalse(state.value.networkSignIn)
+        engine.gate = null
+        gate.countDown()
+        await { it.status == ConnectionStatus.Connected }
+        assertEquals(1, log.count("probe ${profile.id}"))
+        assertEquals(0, entries.count { it.event == LogEvent.ReconnectStarted })
+        assertEquals(
+            "the connect on a sign-in network says so, and the page going too",
+            listOf(LogEvent.ConnectRequested, LogEvent.SignInPage, LogEvent.SignInPageGone),
+            entries.map { it.event }.filter { it in SIGN_IN_EVENTS || it == LogEvent.ConnectRequested },
+        )
+    }
+
+    /** An Always-on start on a network with a sign-in page: nothing during its first check; once reconnecting, at once. */
+    @Test
+    fun anAlwaysOnStartOnASignInNetwork() {
+        policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000, 60_000), jitter = 0.0)
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        val profile = save()
+        runBlocking { profiles.repository.setActive(profile.id) }
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        val gate = CountDownLatch(1)
+        engine.gate = gate
+        session.attach(host, alwaysOn = true, startId = host.started())
+        eventually("the first check runs") { log.count("probe ${profile.id}") == 1 }
+
+        session.underlyingNetwork(WIFI)
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Connecting, state.value.status)
+        assertTrue("traffic held from the start", state.value.held)
+        engine.gate = null
+        gate.countDown()
+        await { it.status == ConnectionStatus.Reconnecting && it.reconnect?.nextAttemptAtMillis == NOW + 60_000 }
+
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        engine.answer = PreflightAnswer(ok = true)
+        session.underlyingNetwork(WIFI)
+        await { it.status == ConnectionStatus.Connected }
+        assertEquals(ReconnectReason.AlwaysOnStart, state.history.last { it.reconnect != null }.reconnect?.reason)
+        assertEquals("one interface throughout", 1, host.tuns.size)
+        assertFalse(host.tuns.single().closed)
+    }
+
+    /**
+     * Android's Always-on start lasts until connected: a switch to another profile while it holds traffic is retried as
+     * the start was, on the same interface, instead of blocking at its first failure.
+     */
+    @Test
+    fun aSwitchDuringAnAlwaysOnHoldIsRetriedAsTheStart() {
+        policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000, 60_000), jitter = 0.0)
+        val tokyo = save()
+        val osaka = runBlocking { profiles.repository.save(null, input(server = "osaka.example.com")) }
+        runBlocking { profiles.repository.setActive(tokyo.id) }
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        session.attach(host, alwaysOn = true, startId = host.started())
+        await { it.status == ConnectionStatus.Reconnecting && it.reconnect?.reason == ReconnectReason.AlwaysOnStart }
+
+        session.switchIfActive(osaka.id)
+        val retried = await { it.profileId == osaka.id && it.reconnect?.reason == ReconnectReason.AlwaysOnStart }
+        assertEquals(ConnectionStatus.Reconnecting, retried.status)
+        assertFalse("never blocked", state.history.any { it.status == ConnectionStatus.Blocked })
+        assertEquals("one interface, held throughout", 1, host.tuns.size)
+        assertFalse(host.tuns.single().closed)
+
+        engine.answer = PreflightAnswer(ok = true)
+        session.retryNow()
+        assertEquals(osaka.id, await { it.status == ConnectionStatus.Connected }.profileId)
+    }
+
+    /** The same for the edit screen's reconnect of the profile Android started: retried as the start, never blocked at once. */
+    @Test
+    fun aReconnectDuringAnAlwaysOnHoldIsRetriedAsTheStart() {
+        policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000, 60_000), jitter = 0.0)
+        val tokyo = save()
+        runBlocking { profiles.repository.setActive(tokyo.id) }
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        session.attach(host, alwaysOn = true, startId = host.started())
+        await { it.status == ConnectionStatus.Reconnecting && it.reconnect?.reason == ReconnectReason.AlwaysOnStart }
+        val checks = log.count("probe ${tokyo.id}")
+
+        session.reconnect(tokyo.id)
+        eventually("the restart's check") { log.count("probe ${tokyo.id}") == checks + 1 }
+        val retried = await { it.status == ConnectionStatus.Reconnecting && it.reconnect?.nextAttemptAtMillis == NOW + 60_000 }
+        assertEquals(ReconnectReason.AlwaysOnStart, retried.reconnect?.reason)
+        assertFalse("never blocked", state.history.any { it.status == ConnectionStatus.Blocked })
+        assertEquals(1, host.tuns.size)
+        assertFalse(host.tuns.single().closed)
     }
 
     /** Without a connection, a sign-in page is said (a connect would fail for it) and nothing else changes. */
@@ -775,20 +1013,22 @@ class ReconnectTest {
         session.underlyingNetwork(WIFI_SIGN_IN)
         await { it.networkSignIn }
         assertEquals(ConnectionState.Idle.copy(networkSignIn = true), state.value)
+        assertEquals("not logged without a connection", emptyList<LogEntry>(), entries.toList())
 
-        // A connect that fails meanwhile keeps saying it: the failure and its likely cause are shown together.
+        // A connect that fails meanwhile keeps saying it: the failure and its likely cause are shown, and logged, together.
         val profile = save()
         engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
         session.connect(profile.id)
         val failed = await { it.status == ConnectionStatus.Disconnected && it.error != null }
         assertTrue(failed.networkSignIn)
         assertEquals("PROXY_UNREACHABLE", failed.error?.code)
+        assertEquals(1, entries.count { it.event == LogEvent.SignInPage })
 
         session.underlyingNetwork(WIFI)
         val signedIn = await { !it.networkSignIn }
         assertEquals("nothing to retry: the user connects again", ConnectionStatus.Disconnected, signedIn.status)
         assertEquals(1, log.count("probe ${profile.id}"))
-        assertEquals(emptyList<LogEvent>(), entries.map { it.event }.filter { it in NETWORK_EVENTS })
+        assertEquals(emptyList<LogEvent>(), entries.map { it.event }.filter { it in NETWORK_EVENTS || it == LogEvent.SignInPageGone })
     }
 
     @Test
@@ -973,5 +1213,6 @@ class ReconnectTest {
         val WIFI_SIGN_IN = WIFI.copy(signIn = true)
         val MOBILE = VpnSession.NetworkInfo("net 102", "cellular")
         val NETWORK_EVENTS = setOf(LogEvent.Offline, LogEvent.NetworkChanged, LogEvent.ReconnectStarted, LogEvent.Reconnected)
+        val SIGN_IN_EVENTS = setOf(LogEvent.SignInPage, LogEvent.SignInPageGone)
     }
 }
