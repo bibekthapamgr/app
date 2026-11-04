@@ -81,7 +81,7 @@ Legend: ✅ in place and checked automatically on every CI run · 🔁 in place,
 |---|---|---|
 | ✅ | No "all traffic", "every app", "full VPN", "anonymous", "protection", "100 %"… in any string | `CopyClaimsTest` |
 | ✅ | Android's kill switch never presented as guaranteed by an app toggle: no switch, status "as Android said", "ProxyFlow can't turn this on for you" | `SettingsScreenTest`, `HomeScreenTest`, screenshots E1, E1b, E2 |
-| ✅ | No line states an older reading of Android's kill switch as current: Home and Settings say when Android said it; where ProxyFlow isn't connected, Home and the active profile's delete confirmation say apps "use your normal network unless Android's system kill switch is on" (F12) | `HomeScreenTest`, `SettingsScreenTest`, `ProfilesScreenTest`, screenshots B2, B6b, E1, E1b |
-| 🔁 | The disconnected notification says the same | Read per release (`core/vpn` strings; no test reads the notification's text) |
+| ✅ | No line states an older reading of Android's kill switch as current: Home and Settings say when Android said it; Home, where ProxyFlow isn't connected, and the active profile's delete confirmation, for after the connection ends, say apps "use your normal network unless Android's system kill switch is on" (F12) | `HomeScreenTest`, `SettingsScreenTest`, `ProfilesScreenTest`, screenshots B2, B6b, E1, E1b |
+| 🔁 | The disconnected notification says the same | Read per release (`core/vpn` strings; no test checks its wording — `CopyClaimsTest` reads it only for forbidden claims) |
 | ✅ | The limitations the user must be told are stated (About, routing doc) | `CopyClaimsTest.theLimitationsAreStated` |
 | 🔁 | The store listing and support texts say no more than `docs/m6/routing-and-limitations.md` | M11 review |
