@@ -15,11 +15,12 @@ All are Google's `google_apis` x86_64 system images, booted fresh for each job w
 | Android behaviour | Versions | What ProxyFlow does | Covered by |
 |---|---|---|---|
 | The notification permission (`POST_NOTIFICATIONS`) | 13+ (API 33–36) | Asked on onboarding's A3 and from Settings, never needed to connect; the VPN's foreground service runs without it | `OnboardingFlowTest`; `NotificationPermissionEndToEndTest` (scenario N, API 33–36) |
+| A notification action's own unlock requirement (`setAuthenticationRequired`) | 12+ (API 31–36) | Disconnect, Cancel and Restart carry it; on Android 10 and 11 they go through an activity, which Android starts only unlocked (M10-17) | `VpnNotificationsTest` (Robolectric, both ways); `VpnEndToEndTest` on API 31–36 |
 | Foreground service types | 14+ (API 34–36) | The VPN service is `systemExempted` (`FOREGROUND_SERVICE_SYSTEM_EXEMPTED`), the type Android gives VPN apps | Every device test that connects, on API 34–36; `scripts/check_release_manifest.py` |
 | Why a process ended (`ApplicationExitInfo`) | 11+ (API 30–36) | Home names Android's reason for an interrupted connection; on Android 10 it says it can't tell | M8's failure injection, every level |
 | Whether a VPN is bypassable, in its capabilities | 13+ | Read for the evidence: Android routes every uid but ProxyFlow's into the VPN, `bypassable=false` | M6 evidence, every level |
-| App Standby's restricted bucket | 11+ (rare before) | The foreground service keeps ProxyFlow on the network | `PowerSavingEndToEndTest`, every level |
-| Doze, Battery Saver | all | The same | `PowerSavingEndToEndTest`, every level |
+| App Standby's restricted bucket | 11+ (rare before) | The foreground service keeps ProxyFlow on the network | `scripts/m10_scenarios.sh restart`, P (the bucket read back: restricted, 45, from API 30; rare, 40, on API 29), every level |
+| Doze, Battery Saver | all | The same | `scripts/m10_scenarios.sh restart`, P, every level: without instrumentation, ProxyFlow ranked as its own foreground service |
 | Always-on VPN and "Block connections without VPN" | all | Shown as Android last said; Android's start connects the chosen profile, holding traffic first; after a restart too | M8's scenario B; M10's scenario R (a restart), every level |
 | The Quick Settings tile, added and tapped through Android's own system UI | all | — | `QuickTileEndToEndTest`, every level (the test adds the tile with `cmd statusbar add-tile` and would skip a version without it; none is) |
 | Edge-to-edge drawing | enforced from 15 (targetSdk 35+) | Every screen draws edge to edge and pads for the system bars since M2 | The screenshot tests (Robolectric, API 35), the device tests' screens on every level |
