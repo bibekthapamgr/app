@@ -11,10 +11,12 @@ sealed interface ConnectionTestResult {
 
     /**
      * The test failed with [error]: the catalogue's code (docs/m1/04 §4), for example `AUTH_FAILED`, and its detail.
-     * [fromEngine] is false for a failure the tester found before asking the engine — no password to send, a sign-in that
-     * can't be encoded, a Keystore that failed — which describes the form or the phone, not the proxy.
+     * [fromEngine] is true when the engine was asked — the proxy's answer, or the engine's own failure (`INTERNAL`) — and
+     * false for a failure found before asking it — no password to send, a sign-in that can't be encoded, a Keystore that
+     * failed, a test that couldn't start — which describes the form or the phone, never the proxy. No default: every
+     * failure says which it is.
      */
-    data class Failed(val error: ConnectionError, val fromEngine: Boolean = true) : ConnectionTestResult {
+    data class Failed(val error: ConnectionError, val fromEngine: Boolean) : ConnectionTestResult {
         val code: String get() = error.code
     }
 

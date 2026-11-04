@@ -658,6 +658,13 @@ class HomeScreenTest {
             disconnected.copy(connection = ConnectionState(ConnectionStatus.Connected, "p1", "Office", profile, connectedSinceMillis = now))
         compose.onNodeWithText("ProxyFlow is using a proxy now. Choosing another one reconnects through it", substring = true)
             .assertIsDisplayed()
+        compose.onNodeWithText("If it can't connect, apps stay offline until you try again or stop.", substring = true).assertIsDisplayed()
+
+        // A first connect holds nothing yet (the tile or Always-on VPN started it while the sheet was open).
+        state = disconnected.copy(connection = ConnectionState(ConnectionStatus.Connecting, "p1", "Office", profile))
+        compose.onNodeWithText("ProxyFlow is still checking a proxy. Choosing another one checks that one instead", substring = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("Choosing another one reconnects", substring = true).assertDoesNotExist()
     }
 
     private fun ready(

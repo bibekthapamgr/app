@@ -343,7 +343,7 @@ class ScreenshotTest {
         compose.setContent {
             ProxyFlowTheme {
                 ProfilesScreen(
-                    profilesState.copy(connectedProfileId = "p1"),
+                    profilesState.copy(connectedProfileId = "p1", connectionHoldsTraffic = true),
                     onAddProxy = {},
                     onEditProxy = {},
                     onUseProxy = {},
@@ -472,7 +472,7 @@ class ScreenshotTest {
     /** D7: the proxy rejected the sign-in, in the words Home uses for it (the error catalogue), with its code. */
     @Test
     fun testFailed() = captureBothThemes("D7_test_failed", scrollTo = "Code: AUTH_FAILED · proxy rejected the credentials") {
-        val rejected = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED", "proxy rejected the credentials"))
+        val rejected = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED", "proxy rejected the credentials"), fromEngine = true)
         AddEditProxyScreen(
             AddEditUiState(input = officeForm, dirty = true, test = ConnectionTestState.Done(rejected, office)),
             AddEditActions(),
@@ -681,7 +681,7 @@ class ScreenshotTest {
 
     @Test
     @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
-    fun largeFontProfiles() = captureLargeFont("C2_profiles_list", action = hasText("Add proxy"), scroll = false) {
+    fun largeFontProfiles() = captureLargeFont("C2_profiles_list", action = hasContentDescription("Add proxy"), scroll = false) {
         ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}, nowMillis = SAMPLE_TIME)
     }
 
@@ -694,7 +694,7 @@ class ScreenshotTest {
     @Test
     @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
     fun largeFontTestFailed() = captureLargeFont("D7_test_failed", action = hasText("Code: AUTH_FAILED · proxy rejected the credentials")) {
-        val rejected = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED", "proxy rejected the credentials"))
+        val rejected = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED", "proxy rejected the credentials"), fromEngine = true)
         AddEditProxyScreen(
             AddEditUiState(input = officeForm, dirty = true, test = ConnectionTestState.Done(rejected, office)),
             AddEditActions(),
@@ -747,11 +747,14 @@ class ScreenshotTest {
         content: @Composable () -> Unit,
     ) {
         compose.setContent { ProxyFlowTheme { content() } }
-        if (lazyList) compose.onNode(hasScrollAction()).performScrollToNode(action)
-        val main = compose.onNode(action)
-        if (scroll) main.performScrollTo()
-        main.assertIsDisplayed()
+        // Scrolled first, so the image shows what the checks find; captured whatever they find, so it can be looked at.
+        val reached = runCatching {
+            if (lazyList) compose.onNode(hasScrollAction()).performScrollToNode(action)
+            if (scroll) compose.onNode(action).performScrollTo()
+        }
         val captured = runCatching { compose.onRoot().captureRoboImage("$DIR/large_font/$name.png") }
+        reached.getOrThrow()
+        compose.onNode(action).assertIsDisplayed()
         assertAccessible("$name (200 %)")
         captured.getOrThrow()
     }

@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 
 /**
@@ -158,6 +159,15 @@ class VpnRuntime(
                 if (id == null) return@collectLatest
                 profiles.profiles.first { list -> list.none { it.id == id } }
                 session.profileDeleted(id)
+            }
+        }
+        // A rename shows at once on the connection using the profile — Home, the tile, the notification: a name is not
+        // a setting the engine runs (M9). Watched the same way.
+        scope.launch {
+            mutableState.map { s -> s.profileId?.takeIf { s.active } }.distinctUntilChanged().collectLatest { id ->
+                if (id == null) return@collectLatest
+                profiles.profiles.mapNotNull { list -> list.firstOrNull { it.id == id }?.name }.distinctUntilChanged()
+                    .collect { name -> session.profileRenamed(id, name) }
             }
         }
     }

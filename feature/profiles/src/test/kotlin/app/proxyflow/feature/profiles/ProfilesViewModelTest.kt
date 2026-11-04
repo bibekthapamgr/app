@@ -33,7 +33,8 @@ class ProfilesViewModelTest {
     @get:Rule
     val main = MainDispatcherRule()
 
-    private val repository = TestProfiles().repository
+    private val profiles = TestProfiles()
+    private val repository = profiles.repository
     private val tester = FakeConnectionTester()
 
     private fun viewModel(repo: ProfileRepository = repository, connection: ConnectionController = UnavailableConnectionController()) =
@@ -129,21 +130,38 @@ class ProfilesViewModelTest {
     }
 
     /**
-     * "Use this proxy" asks the session to switch a connection running on another profile — the session decides, in order
-     * with what it was asked before (VpnSessionTest) — then keeps the choice.
+     * "Use this proxy" keeps the choice, then asks the session to switch a connection running on another profile — the
+     * session decides, in order with what it was asked before (VpnSessionTest).
      */
     @Test
-    fun useThisProxyAsksTheSessionToSwitchThenKeepsTheChoice() = runTest {
-        val connection = RecordingConnection()
+    fun useThisProxyKeepsTheChoiceThenAsksTheSessionToSwitch() = runTest {
+        val connection = RecordingConnection(chosen = { profiles.active.state.value })
         val vm = viewModel(connection = connection)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
         repository.save(null, ProxyProfileInput(server = "a.example.com", port = "1080"))
         repository.save(null, ProxyProfileInput(server = "b.example.com", port = "1080"))
 
         vm.setActive("p2")
-        assertEquals(listOf("switchIfConnected p2"), connection.calls)
-        assertEquals("p2", vm.uiState.value.activeProfileId)
         assertEquals("nothing connects or disconnects here", listOf("switchIfConnected p2"), connection.calls)
+        assertEquals("the choice was saved before the switch was asked", listOf<String?>("p2"), connection.chosenAtSwitch)
+        assertEquals("p2", vm.uiState.value.activeProfileId)
+    }
+
+    /** A choice that can't be saved switches nothing, and the screen says so: the list and the connection agree. */
+    @Test
+    fun aChoiceThatCantBeSavedSwitchesNothing() = runTest {
+        val connection = RecordingConnection()
+        val failing = object : ProfileRepository by repository {
+            override suspend fun setActive(id: String) = error("disk full")
+        }
+        val vm = viewModel(repo = failing, connection = connection)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
+        repository.save(null, ProxyProfileInput(server = "a.example.com", port = "1080"))
+        repository.save(null, ProxyProfileInput(server = "b.example.com", port = "1080"))
+
+        vm.setActive("p2")
+        assertEquals(ProfileAction.Use, vm.uiState.value.failed)
+        assertTrue(connection.calls.isEmpty())
     }
 
     @Test
@@ -154,7 +172,7 @@ class ProfilesViewModelTest {
                 gate.await()
                 val tested = repository.get(profileId) ?: return null
                 repository.recordTest(profileId, tested, ProfileTest(5_000, code = "AUTH_FAILED", latencyMillis = null))
-                return ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED"))
+                return ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED"), fromEngine = true)
             }
         }
         val vm = ProfilesViewModel(repository, UnavailableConnectionController(), keeping)
@@ -176,16 +194,19 @@ class ProfilesViewModelTest {
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
         repository.save(null, ProxyProfileInput(server = "a.example.com", port = "1080"))
 
-        tester.result = ConnectionTestResult.Failed(ConnectionError(ConnectionError.INTERNAL, "the packet engine could not be loaded"))
+        val engineMissing = ConnectionError(ConnectionError.INTERNAL, "the packet engine could not be loaded")
+        tester.result = ConnectionTestResult.Failed(engineMissing, fromEngine = true)
         vm.test("p1")
         assertEquals(ProfileAction.Test, vm.uiState.value.failed)
         assertEquals(listOf("p1"), tester.savedRequests)
         assertTrue(vm.uiState.value.testing.isEmpty())
     }
 
-    private class RecordingConnection : ConnectionController {
+    /** [chosen]: the profile chosen when a switch is asked, recorded in [chosenAtSwitch]. */
+    private class RecordingConnection(private val chosen: () -> String? = { null }) : ConnectionController {
         val current = MutableStateFlow(ConnectionState.Idle)
         val calls = mutableListOf<String>()
+        val chosenAtSwitch = mutableListOf<String?>()
         override val state: StateFlow<ConnectionState> = current
         override val canConnect = true
 
@@ -200,6 +221,7 @@ class ProfilesViewModelTest {
 
         override fun switchIfConnected(profileId: String) {
             calls += "switchIfConnected $profileId"
+            chosenAtSwitch += chosen()
         }
     }
 }

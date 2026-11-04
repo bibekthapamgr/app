@@ -47,7 +47,7 @@
     <string name="privacy_sent_nothing">ProxyFlow itself sends nothing to its developer, who has no servers to receive it: no usage data, crash reports or logs.</string>
     <string name="privacy_sent_shared">If you copy or export the log, you decide where it goes. It never includes passwords, server or site names, or addresses.</string>
     <string name="privacy_android_title">Android and Google</string>
-    <string name="privacy_android_crash">If your phone shares diagnostics with Google, Android may include ProxyFlow\'s crash reports, and Google may show them to ProxyFlow\'s developer, with the phone\'s model and Android version. ProxyFlow removes sign-in details, server and site names and addresses from the error messages it hands to Android, though Android writes the original message to the phone\'s own log, which other apps can\'t read.</string>
+    <string name="privacy_android_crash">If your phone shares usage and diagnostics data with Google, Android may include ProxyFlow\'s crash and freeze (ANR) reports, and Google may show them to ProxyFlow\'s developer, with details such as the phone\'s model, its Android version, the app\'s version and the country or region the phone reported. ProxyFlow removes sign-in details, server and site names and addresses from the error messages it hands to Android, though Android writes the original message to the phone\'s own log, which other apps can\'t read.</string>
     <string name="privacy_android_outside">Some traffic of Android itself and of its built-in apps, such as Google Play services, doesn\'t use the VPN, so it doesn\'t go through your proxy.</string>
     <string name="privacy_permissions_title">Permissions</string>
     <string name="privacy_permission_vpn">VPN: Android asks you the first time you connect. It lets ProxyFlow send apps\' traffic to your proxy.</string>
@@ -76,7 +76,7 @@
     <string name="help_carry_title">What goes through your proxy</string>
     <string name="help_carry_tcp">Websites and most apps use TCP, which goes through your proxy, and your proxy looks up site names.</string>
     <string name="help_carry_blocked">UDP is blocked, so calls and some games switch to TCP or don\'t work, and ping isn\'t answered. Printers and other devices on your local network are reached through your proxy too, so usually not at all.</string>
-    <string name="help_carry_outside">ProxyFlow\'s own connection to your proxy, some of Android\'s own traffic, apps in a work profile, Private space or another user on this phone, and devices tethered to it don\'t use the VPN.</string>
+    <string name="help_carry_outside">ProxyFlow\'s own connection to your proxy and the lookup of your proxy\'s name, some of Android\'s own traffic, apps in a work profile, Private space or another user on this phone, and devices tethered to it don\'t use the VPN.</string>
     <string name="help_kill_switch_title">Kill switches</string>
     <string name="help_kill_switch_app">While connected, ProxyFlow holds traffic whenever your proxy isn\'t working: nothing goes around it. This is always on.</string>
     <string name="help_kill_switch_system">If Android stops ProxyFlow, or another VPN takes over, only Android\'s own setting keeps apps offline: Always-on VPN with Block connections without VPN. Only you can turn it on, in Android\'s VPN settings.</string>

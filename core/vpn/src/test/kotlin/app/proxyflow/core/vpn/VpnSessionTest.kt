@@ -327,6 +327,30 @@ class VpnSessionTest {
         assertEquals("the pick after the Stop started nothing", 2, log.count("probe"))
     }
 
+    /** A rename while connected shows at once — the state the notification, the tile and Home read — and changes nothing else. */
+    @Test
+    fun aRenameOfTheConnectionsProfileShowsAtOnce() {
+        val profile = save(name = "Tokyo")
+        val other = save(name = "Office")
+        session.connect(profile.id)
+        awaitStatus(ConnectionStatus.Connected)
+        val shown = host.statuses.size
+
+        session.profileRenamed(profile.id, "Tokyo (home)")
+        eventually("renamed") { state.value.profileName == "Tokyo (home)" }
+        assertEquals("Tokyo (home)", state.value.profile?.name)
+        assertEquals(ConnectionStatus.Connected, state.value.status)
+        assertTrue("the notification was drawn again", host.statuses.size > shown)
+        assertEquals("Tokyo (home)", host.statuses.last().profileName)
+        assertEquals("nothing reconnected", 1, log.count("probe"))
+
+        session.profileRenamed(other.id, "Elsewhere")
+        session.profileRenamed(profile.id, "")
+        eventually("named by its server") { state.value.profileName == "proxy.example.com" }
+        runBlocking { session.awaitIdle() }
+        assertEquals(profile.id, state.value.profileId)
+    }
+
     /**
      * The Quick Settings tile (M9): its tap disconnects only a connection still Connected when the session gets to it;
      * held or blocked traffic is left to Home's Stop, which asks first.

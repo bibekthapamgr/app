@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -170,14 +171,15 @@ class AddEditProxyScreenTest {
         assertEquals(1, cancels)
 
         val office = ProxyProfile(id = "p1", name = "Office", protocol = ProxyProtocol.HTTP, host = "203.0.113.10", port = 3128)
-        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Failed(ConnectionError("PROXY_UNREACHABLE")), office))
+        val unreachable = ConnectionTestResult.Failed(ConnectionError("PROXY_UNREACHABLE"), fromEngine = true)
+        state = state.copy(test = ConnectionTestState.Done(unreachable, office))
         compose.onNodeWithText("Test failed: Can't reach your proxy").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("ProxyFlow couldn't connect to 203.0.113.10:3128", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Code: PROXY_UNREACHABLE").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Proxy works").assertDoesNotExist()
 
         val unsupported = ConnectionError("AUTH_FAILED", ConnectionError.DETAIL_UNSUPPORTED_SIGN_IN + "Digest")
-        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Failed(unsupported), office))
+        state = state.copy(test = ConnectionTestState.Done(ConnectionTestResult.Failed(unsupported, fromEngine = true), office))
         compose.onNodeWithText("Test failed: Username or password rejected").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("ProxyFlow signs in to HTTP proxies with Basic sign-in", substring = true).performScrollTo()
             .assertIsDisplayed()
@@ -215,6 +217,22 @@ class AddEditProxyScreenTest {
         compose.onNodeWithText("Keep editing").performClick()
         compose.onNodeWithText("Save and reconnect").performClick()
         assertEquals(listOf("keep", "reconnect"), calls)
+    }
+
+    /** While saving, Back waits — the top bar's and Android's — so what is saved, and the reconnect after it, goes through. */
+    @Test
+    fun backWaitsWhileSaving() {
+        var backs = 0
+        compose.setContent {
+            ProxyFlowTheme {
+                AddEditProxyScreen(AddEditUiState(isEdit = true, dirty = true, saving = true), AddEditActions(onBack = { backs++ }))
+            }
+        }
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+        assertEquals(0, backs)
+        compose.onNodeWithText("Discard changes?").assertDoesNotExist()
     }
 
     @Test

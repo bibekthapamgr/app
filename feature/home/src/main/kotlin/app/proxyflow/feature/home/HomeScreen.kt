@@ -65,6 +65,7 @@ import app.proxyflow.core.designsystem.component.PfLoadingIndicator
 import app.proxyflow.core.designsystem.component.PfPrimaryButton
 import app.proxyflow.core.designsystem.component.PfProfileTestLine
 import app.proxyflow.core.designsystem.component.PfSecondaryButton
+import app.proxyflow.core.designsystem.component.PfSheetDragHandle
 import app.proxyflow.core.designsystem.component.PfStatusPill
 import app.proxyflow.core.designsystem.component.PfTextButton
 import app.proxyflow.core.designsystem.component.StatusTone
@@ -999,7 +1000,11 @@ private fun countOrNull(@PluralsRes plural: Int, value: Long): String? = if (val
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ProfilePicker(state: HomeUiState.Ready, actions: HomeActions, nowMillis: Long) {
-    ModalBottomSheet(onDismissRequest = actions.onDismissPicker, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(
+        onDismissRequest = actions.onDismissPicker,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        dragHandle = { PfSheetDragHandle() },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1014,8 +1019,13 @@ private fun ProfilePicker(state: HomeUiState.Ready, actions: HomeActions, nowMil
                 modifier = Modifier.semantics { heading() },
             )
             if (state.connection.active) {
+                val note = if (state.connection.holdsTrafficOnSwitch) {
+                    R.string.home_picker_switch_note
+                } else {
+                    R.string.home_picker_checking_note
+                }
                 Text(
-                    stringResource(R.string.home_picker_switch_note),
+                    stringResource(note),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

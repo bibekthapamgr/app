@@ -22,7 +22,7 @@
     <string name="profiles_cancel">Cancel</string>
     <string name="profiles_switch_title">Switch to \"%1$s\"?</string>
     <!-- %1$s: the profile the connection uses now; %2$s: the one the user chose. -->
-    <string name="profiles_switch_body">ProxyFlow is using %1$s. Switching ends its open connections, and apps can\'t go online until ProxyFlow is connected through %2$s. Nothing is sent around a proxy meanwhile.</string>
+    <string name="profiles_switch_body">ProxyFlow is using %1$s. Switching ends its open connections, and apps can\'t go online until ProxyFlow is connected through %2$s. If it can\'t connect, apps stay offline until you try again or stop. Nothing is sent around a proxy meanwhile.</string>
     <string name="profiles_switch_confirm">Switch</string>
     <string name="profiles_duplicate">Duplicate</string>
     <!-- Board C2's menu: tests the saved profile as connecting would (J3, ADR-0014). -->
@@ -67,9 +67,10 @@
     <!-- Board D7. %1$s: the error catalogue's title, the one connecting shows for the same failure. -->
     <string name="edit_test_failed_title">Test failed: %1$s</string>
     <string name="edit_test_code">Code: %1$s</string>
-    <!-- Found before any proxy was asked (ADR-0014 §2): nothing was sent. -->
+    <!-- Found before any proxy was asked (ADR-0014 §2): nothing was sent. The form asks for the password itself before a
+         test whose details the saved one can't go with, so this is a profile changed or deleted since the form opened. -->
     <string name="edit_test_needs_password_title">Enter the password to test</string>
-    <string name="edit_test_needs_password_body">Nothing was sent. A saved password goes only with its own username to its own server, so a new profile, or a changed server or username, needs the password typed in to be tested.</string>
+    <string name="edit_test_needs_password_body">Nothing was sent. This profile was changed or deleted since you opened it, so its saved password can\'t be used for these details. Type the password to test them.</string>
     <string name="edit_password_reenter">Enter the password again: the server, port, protocol, username or TLS setting changed</string>
     <string name="edit_tls">TLS to the proxy</string>
     <string name="edit_tls_hint">Recommended. Encrypts the connection between this phone and your proxy, which must support TLS on this port. HTTPS sites stay encrypted end to end either way.</string>

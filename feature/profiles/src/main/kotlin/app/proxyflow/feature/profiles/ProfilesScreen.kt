@@ -95,9 +95,12 @@ fun ProfilesScreen(
 ) {
     // Saved by id so the confirmation survives rotation; it closes by itself if the profile disappears.
     var pendingDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
-    // "Use this proxy" while a connection runs on another profile switches it (J11): asked first, as Home's picker says
-    // it before the tap. Closed, not applied, if the connection or either profile goes away meanwhile.
+    // "Use this proxy" while a connection runs on another saved profile switches it (J11), holding apps' traffic until
+    // the new proxy is checked: asked first, as Home's picker says it before the tap. During a first connect nothing is
+    // held, and a connection whose profile was deleted is blocked already: either switches at once. The question closes,
+    // not applied, if the connection or either profile goes away meanwhile.
     var pendingUseId by rememberSaveable { mutableStateOf<String?>(null) }
+    val switchingFrom = state.profiles.firstOrNull { it.id == state.connectedProfileId }?.takeIf { state.connectionHoldsTraffic }
     val snackbar = remember { SnackbarHostState() }
     val failure = state.failed?.let { action ->
         stringResource(
@@ -121,9 +124,11 @@ fun ProfilesScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
             if (state.profiles.isNotEmpty()) {
+                // Material's extended button is named by its icon (its text is left out of what TalkBack reads), so the
+                // icon carries the words.
                 ExtendedFloatingActionButton(
                     text = { Text(stringResource(R.string.profiles_add)) },
-                    icon = { Icon(PfIcons.Add, contentDescription = null) },
+                    icon = { Icon(PfIcons.Add, contentDescription = stringResource(R.string.profiles_add)) },
                     onClick = onAddProxy,
                 )
             }
@@ -154,7 +159,7 @@ fun ProfilesScreen(
                         nowMillis = nowMillis,
                         onClick = { onEditProxy(profile.id) },
                         onUse = {
-                            if (state.connectedProfileId != null && state.connectedProfileId != profile.id) {
+                            if (switchingFrom != null && switchingFrom.id != profile.id) {
                                 pendingUseId = profile.id
                             } else {
                                 onUseProxy(profile.id)
@@ -191,9 +196,10 @@ fun ProfilesScreen(
             destructive = true,
         )
     }
-    val switchingFrom = state.profiles.firstOrNull { it.id == state.connectedProfileId }
     val switchingTo = state.profiles.firstOrNull { it.id == pendingUseId }?.takeIf { switchingFrom != null && it.id != switchingFrom.id }
-    LaunchedEffect(state.loading, switchingTo == null) { if (!state.loading && switchingTo == null) pendingUseId = null }
+    LaunchedEffect(state.loading, pendingUseId, switchingTo == null) {
+        if (!state.loading && pendingUseId != null && switchingTo == null) pendingUseId = null
+    }
     if (switchingFrom != null && switchingTo != null) {
         PfConfirmDialog(
             title = stringResource(R.string.profiles_switch_title, switchingTo.displayName),

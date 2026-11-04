@@ -162,6 +162,14 @@ data class ConnectionState(
     /** Connecting or up: a new connect for the same profile has nothing to do. */
     val active: Boolean get() = status != ConnectionStatus.Disconnected
 
+    /**
+     * A switch or a reconnect now keeps apps' traffic with ProxyFlow: held on the VPN interface until the next proxy is
+     * checked, blocked if it fails, never sent around a proxy (ADR-0010 §5). True once connected, and while an Always-on
+     * start holds traffic (M8). During a first connect apps use the normal network until it is connected, and a switch
+     * only checks another proxy instead.
+     */
+    val holdsTrafficOnSwitch: Boolean get() = active && (status != ConnectionStatus.Connecting || held)
+
     /** The stage for the screens and the log (ADR-0012). */
     val stage: ConnectionStage
         get() = when (status) {

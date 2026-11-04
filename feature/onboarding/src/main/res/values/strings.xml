@@ -27,7 +27,7 @@
     <string name="how_udp">Calls, some games, ping (UDP, ICMP)</string>
     <string name="how_udp_outcome">Blocked</string>
     <string name="how_local">Printers, casting, local devices</string>
-    <string name="how_local_outcome">Through your proxy, so usually unreachable</string>
+    <string name="how_local_outcome">Sent to your proxy or blocked, so usually unreachable</string>
     <string name="how_never_around">Blocked traffic is never sent around your proxy. Video calls usually switch to TCP; apps that can\'t won\'t work while connected. Ping isn\'t answered.</string>
     <string name="how_provider">Your proxy provider can see which sites you connect to and any unencrypted data. Choose one you trust.</string>
     <string name="how_vpn_title">The VPN permission</string>

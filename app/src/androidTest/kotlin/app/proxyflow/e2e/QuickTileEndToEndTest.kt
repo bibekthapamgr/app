@@ -45,6 +45,9 @@ class QuickTileEndToEndTest {
         Shell.run("wm dismiss-keyguard")
         val keyguard = app.context.getSystemService(KeyguardManager::class.java)
         eventually("the phone unlocked", diagnose = { Shell.run("dumpsys window | grep -i keyguard") }) { !keyguard.isKeyguardLocked }
+        // Removed first: `add-tile` puts a new tile first, on the panel's first page, but leaves one already there
+        // where it is — possibly on a page that isn't shown, whose tiles don't listen.
+        Shell.run("cmd statusbar remove-tile $tile")
         val added = Shell.run("cmd statusbar add-tile $tile")
         assumeFalse("this Android has no `cmd statusbar add-tile`: $added", "Unknown command" in added || "unknown command" in added)
     }
@@ -74,6 +77,7 @@ class QuickTileEndToEndTest {
         Log.i(TAG, "exchange $line")
         assertEquals("PROXYFLOW-DEST $line", Shell.exchange(env.destinationName, env.destinationPort, line))
 
+        openQuickSettings() // still open, unless something closed it meanwhile
         Shell.run("cmd statusbar click-tile $tile")
         app.awaitStatus(ConnectionStatus.Disconnected)
     }

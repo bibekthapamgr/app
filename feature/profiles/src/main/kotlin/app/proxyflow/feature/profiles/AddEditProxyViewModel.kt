@@ -164,6 +164,8 @@ class AddEditProxyViewModel(
     /**
      * Saves the form. When a connection runs on this profile and the changes are to how it reaches its proxy — its server,
      * TLS or sign-in — the user is asked first (board D9): the connection then runs again with them ([saveAndReconnect]).
+     * During a first connect nothing is held yet ([ConnectionState.holdsTrafficOnSwitch]): the attempt is checked again
+     * with what is saved, without asking.
      */
     fun save() = save(reconnect = false)
 
@@ -182,10 +184,13 @@ class AddEditProxyViewModel(
         // A profile that no longer exists is saved as a new one, under a new id.
         val id = profileId.takeIf { current.isEdit }
         val running = connection.state.value.takeIf { id != null && it.active && it.profileId == id }
-        if (!reconnect && running != null && changesTheConnection(running, current.input)) {
-            state.update { it.copy(confirmReconnect = running.profileName ?: current.originalName.orEmpty()) }
+        val changed = running?.takeIf { changesTheConnection(it, current.input) }
+        if (!reconnect && changed != null && changed.holdsTrafficOnSwitch) {
+            // Named as saved: a rename since it connected shows (the connection's own name is from its start).
+            state.update { it.copy(confirmReconnect = current.originalName ?: changed.profileName.orEmpty()) }
             return
         }
+        val reconnects = reconnect || changed != null
         state.update { it.copy(saving = true, saveFailed = false) }
         viewModelScope.launch {
             try {
@@ -194,8 +199,9 @@ class AddEditProxyViewModel(
                 withContext(NonCancellable) {
                     val saved = repository.save(id, current.input)
                     lastTested?.takeIf { it.input == current.input }?.let { keep(saved, it) }
-                    // Flows end and traffic is held until the saved settings are checked, never sent around a proxy.
-                    if (reconnect) connection.reconnect(saved.id)
+                    // Flows end and traffic is held until the saved settings are checked, never sent around a proxy;
+                    // during a first connect, the attempt starts again with them.
+                    if (reconnects) connection.reconnect(saved.id)
                 }
                 state.update { it.copy(saving = false, saved = true, dirty = false) }
             } catch (e: CancellationException) {
@@ -233,7 +239,7 @@ class AddEditProxyViewModel(
                 throw e
             } catch (e: Exception) {
                 // A tester that broke tested nothing: that is a failure, never a pass.
-                ConnectionTestResult.Failed(ConnectionError(ConnectionError.INTERNAL, "the test could not run"))
+                ConnectionTestResult.Failed(ConnectionError(ConnectionError.INTERNAL, "the test could not run"), fromEngine = false)
             }
             // A result is only shown for the form it was made with.
             if (state.value.input == input) {

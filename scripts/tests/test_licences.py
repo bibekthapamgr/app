@@ -138,30 +138,59 @@ class NoticesTest(unittest.TestCase):
 
     def test_the_engines_own_module_is_not_a_notice(self) -> None:
         # What gomobile's bind links: the engine as a dependency of its generated main package, built from the checkout.
-        facts = FACTS + ["  github.com/bibekthapamgr/app/engine v0.0.0-00010101000000-000000000000", "  /home/runner/work/app/app/engine (devel)"]
-        document, problems = licences.notices(TREE, facts, fetch(POMS))
-        self.assertEqual([], problems)
-        names = {e["name"] for e in document["libraries"]}
-        self.assertNotIn("github.com/bibekthapamgr/app/engine", names)
-        self.assertFalse(any(name.startswith("/") for name in names))
+        own = ["  github.com/bibekthapamgr/app/engine v0.0.0-00010101000000-000000000000", "  => /home/runner/work/app/app/engine (devel)"]
+        # Facts written before build-aar.sh marked replacements put the directory on a line of its own.
+        unmarked = [own[0], "  /home/runner/work/app/app/engine (devel)"]
+        for lines in (own, unmarked):
+            document, problems = licences.notices(TREE, FACTS + lines, fetch(POMS))
+            self.assertEqual([], problems)
+            names = {e["name"] for e in document["libraries"]}
+            self.assertNotIn("github.com/bibekthapamgr/app/engine", names)
+            self.assertFalse(any(name.startswith("/") for name in names))
 
     def test_another_module_built_from_a_local_directory_fails(self) -> None:
-        facts = FACTS + ["  golang.org/x/sys v0.48.0", "  /home/runner/work/sys (devel)"]
+        facts = FACTS + ["  golang.org/x/sys v0.48.0", "  => /home/runner/work/sys (devel)"]
         _, problems = licences.notices(TREE, facts, fetch(POMS))
         self.assertEqual(
             ["the engine links golang.org/x/sys from the directory /home/runner/work/sys, which docs/m4/dependency-review.md hasn't reviewed"],
             problems,
         )
 
+    def test_a_replaced_module_is_listed_as_what_replaces_it(self) -> None:
+        facts = FACTS + ["  golang.org/x/sys v0.48.0", "  => golang.org/x/sys v0.49.0"]
+        document, problems = licences.notices(TREE, facts, fetch(POMS))
+        self.assertEqual([], problems)
+        versions = [e["version"] for e in document["libraries"] if e["name"] == "golang.org/x/sys"]
+        self.assertEqual(["v0.49.0"], versions, "the replaced version is not linked")
+        facts = FACTS + ["  golang.org/x/sys v0.48.0", "  => example.com/fork/sys v1.0.0"]
+        _, problems = licences.notices(TREE, facts, fetch(POMS))
+        self.assertEqual(["the engine links example.com/fork/sys v1.0.0, which docs/m4/dependency-review.md hasn't reviewed"], problems)
+        _, problems = licences.notices(TREE, FACTS[:3] + ["  => golang.org/x/sys v0.49.0"], fetch(POMS))
+        self.assertEqual(1, len(problems), "a replacement with no module before it")
+
+    PROTOBUF = GOOGLE + (
+        "androidx/datastore/datastore-preferences-external-protobuf/1.3.0/datastore-preferences-external-protobuf-1.3.0.pom"
+    )
+    PROTOBUF_TREE = TREE + ["\\--- androidx.datastore:datastore-preferences-external-protobuf:1.3.0"]
+
     def test_datastores_repackaged_protobuf_ships_protobufs_own_licence(self) -> None:
-        tree = TREE + ["\\--- androidx.datastore:datastore-preferences-external-protobuf:1.3.0"]
-        document, problems = licences.notices(tree, FACTS, fetch(POMS))
+        poms = dict(POMS)
+        poms[self.PROTOBUF] = pom_xml("<license><name>BSD-3-Clause</name><url>https://opensource.org/licenses/BSD-3-Clause</url></license>")
+        document, problems = licences.notices(self.PROTOBUF_TREE, FACTS, fetch(poms))
         self.assertEqual([], problems)
         self.assertIn(
             ("androidx.datastore:datastore-preferences-external-protobuf", "1.3.0", "BSD-3-Clause-Protobuf"),
             {(e["name"], e["version"], e["licence"]) for e in document["libraries"]},
         )
         self.assertIn("BSD-3-Clause-Protobuf", document["licences"])
+
+    def test_an_override_whose_pom_now_declares_another_licence_is_reviewed_again(self) -> None:
+        poms = dict(POMS)
+        poms[self.PROTOBUF] = pom_xml(APACHE)
+        document, problems = licences.notices(self.PROTOBUF_TREE, FACTS, fetch(poms))
+        self.assertEqual(1, len(problems))
+        self.assertIn("review OVERRIDES", problems[0])
+        self.assertNotIn("androidx.datastore:datastore-preferences-external-protobuf", {e["name"] for e in document["libraries"]})
 
     def test_names_and_urls_of_apache_2(self) -> None:
         for name in ("Apache-2.0", "Apache 2.0", "Apache License, Version 2.0", "The Apache Software License, Version 2.0"):

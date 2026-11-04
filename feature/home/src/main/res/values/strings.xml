@@ -234,6 +234,8 @@
     <!-- Board B8, the profile picker; picking one while a connection runs (one that started while the picker was open:
          Always-on VPN, the Quick Settings tile) switches the connection to it (J11, ADR-0010 §5). -->
     <string name="home_picker_title">Choose proxy</string>
-    <string name="home_picker_switch_note">ProxyFlow is using a proxy now. Choosing another one reconnects through it: open connections end, and apps can\'t go online until it\'s connected. Nothing is sent around a proxy meanwhile.</string>
+    <string name="home_picker_switch_note">ProxyFlow is using a proxy now. Choosing another one reconnects through it: open connections end, and apps can\'t go online until it\'s connected. If it can\'t connect, apps stay offline until you try again or stop. Nothing is sent around a proxy meanwhile.</string>
+    <!-- A first connect: apps use the normal network until it is connected, and picking only checks another proxy. -->
+    <string name="home_picker_checking_note">ProxyFlow is still checking a proxy. Choosing another one checks that one instead, and apps use your normal network until it\'s connected.</string>
     <string name="home_picker_manage">Manage profiles</string>
 </resources>

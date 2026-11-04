@@ -35,6 +35,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.proxyflow.core.designsystem.component.BannerTone
 import app.proxyflow.core.designsystem.component.PfBanner
@@ -339,15 +340,21 @@ private fun errorText(error: ProfileError, protocol: ProxyProtocol): String = st
  */
 @Composable
 private fun TestConnection(test: ConnectionTestState, onTest: () -> Unit, onCancel: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+    Column {
         PfSecondaryButton(
             text = stringResource(R.string.edit_test),
             onClick = onTest,
             enabled = test != ConnectionTestState.Testing,
             modifier = Modifier.fillMaxWidth(),
         )
-        // What the test found is announced (TalkBack) when it ends: it can take 15 s, and the user waits for it.
-        Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        // What the test found is announced (TalkBack) when it ends: it can take 15 s, and the user waits for it. The
+        // region is there before the test starts, so its change is announced; it takes no room while empty.
+        Column(
+            Modifier
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .padding(top = if (test == ConnectionTestState.Idle) 0.dp else Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
             TestOutcome(test, onCancel)
         }
     }
@@ -384,6 +391,7 @@ private fun TestOutcome(test: ConnectionTestState, onCancel: () -> Unit) {
             )
             is ConnectionTestResult.Failed -> if (!result.fromEngine && result.code == AUTH_REQUIRED) {
                 // Found before any proxy was asked (ADR-0014 §2): nothing was sent, so not worded as the proxy's answer.
+                // The form's own checks ask for the password first, so this is a profile changed or deleted meanwhile.
                 PfBanner(
                     title = stringResource(R.string.edit_test_needs_password_title),
                     text = stringResource(R.string.edit_test_needs_password_body),

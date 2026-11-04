@@ -74,10 +74,12 @@ GO_MODULES = {
     "gvisor.dev/gvisor": "gVisor",
 }
 
-# group:artifact -> (licence id, why the POM isn't taken as it is).
-OVERRIDES: dict[str, tuple[str, str]] = {
+# group:artifact -> (licence id, the licence name its POM declares as reviewed, why the POM isn't taken as it is). The
+# POM is still read: if it declares anything else, the override is reviewed again rather than applied.
+OVERRIDES: dict[str, tuple[str, str, str]] = {
     "androidx.datastore:datastore-preferences-external-protobuf": (
         "BSD-3-Clause-Protobuf",
+        "BSD-3-Clause",
         "Protocol Buffers' Java lite runtime, repackaged inside DataStore: the POM names BSD-3-Clause without its copyright"
         " holder, so the notice is protobuf's own LICENSE file",
     ),
@@ -164,13 +166,17 @@ def maven_entries(lines: list[str], fetch: Fetch) -> tuple[list[dict], list[str]
         group, artifact = coordinates.split(":")
         if artifact.endswith("-bom"):
             continue  # a platform: versions only, no code in the app
-        if coordinates in OVERRIDES:
-            entries.append({"name": coordinates, "version": version, "licence": OVERRIDES[coordinates][0]})
-            continue
         try:
             declared = declared_licences(group, artifact, version, fetch)
         except LookupError as e:
             problems.append(str(e))
+            continue
+        if coordinates in OVERRIDES:
+            spdx, reviewed, _ = OVERRIDES[coordinates]
+            if [name for name, _ in declared] != [reviewed]:
+                problems.append(f"{coordinates}:{version} declares {declared}, not {reviewed} as reviewed: review OVERRIDES")
+            else:
+                entries.append({"name": coordinates, "version": version, "licence": spdx})
             continue
         ids = {licence_id(name, url) for name, url in declared}
         if not declared:
@@ -195,23 +201,31 @@ def go_entries(facts: list[str]) -> tuple[list[dict], list[str]]:
         start = next(i for i, line in enumerate(facts) if line.startswith("MODULES linked into libgojni.so"))
     except StopIteration:
         return entries, problems + ["the engine facts list no modules linked into libgojni.so"]
-    previous: str | None = None
+    # What is linked: each module, or what replaces it. build-aar.sh marks a replacement "=>"; a directory standing on a
+    # line of its own (facts written before the mark) replaces the module before it too.
+    linked: list[tuple[str, str, str | None]] = []  # (module or directory, version, the module it replaces)
     for line in facts[start + 1:]:
         if not line.startswith("  "):
             break
         parts = line.split()
+        replacement = parts[:1] == ["=>"] or (len(parts) >= 1 and parts[0].startswith(("/", ".")))
+        if parts[:1] == ["=>"]:
+            parts = parts[1:]
         if len(parts) < 2:
             problems.append(f"an engine module line that can't be read: {line.strip()}")
             continue
-        module, version = parts[0], parts[1]
-        # A "=>" line follows the module it replaces; build-aar.sh prints both the same way.
-        replaced, previous = previous, module
-        if module == OWN_GO_MODULE:
-            continue
+        if replacement:
+            if not linked or linked[-1][2] is not None:
+                problems.append(f"a replacement with no module before it: {line.strip()}")
+                continue
+            linked[-1] = (parts[0], parts[1], linked[-1][0])
+        else:
+            linked.append((parts[0], parts[1], None))
+    for module, version, replaced in linked:
+        if OWN_GO_MODULE in (module, replaced):
+            continue  # ProxyFlow's own code
         if module.startswith(("/", ".")):
-            # A module built from a local directory: only the engine's own may be.
-            if replaced != OWN_GO_MODULE:
-                problems.append(f"the engine links {replaced} from the directory {module}, which docs/m4/dependency-review.md hasn't reviewed")
+            problems.append(f"the engine links {replaced} from the directory {module}, which docs/m4/dependency-review.md hasn't reviewed")
             continue
         if module not in GO_MODULES:
             problems.append(f"the engine links {module} {version}, which docs/m4/dependency-review.md hasn't reviewed")

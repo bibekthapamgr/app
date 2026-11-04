@@ -16,7 +16,7 @@ import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.SystemKillSwitch
 import app.proxyflow.core.model.TrafficStats
-import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed interface HomeUiState {
     data object Loading : HomeUiState
@@ -178,17 +179,19 @@ class HomeViewModel(
     /**
      * B8: [id] becomes the profile Home shows and connects, the user's choice (M8). While a connection runs on another
      * profile it switches to [id] (J11): the old proxy's flows end and apps' traffic is held until the new proxy is
-     * checked, never sent around a proxy (ADR-0010 §5).
+     * checked, never sent around a proxy (ADR-0010 §5). The choice is saved first, then the session is asked to switch
+     * and decides in order with what it was asked before; both happen even if Home closes in between.
      */
     fun chooseProfile(id: String) {
-        connection.switchIfConnected(id)
         viewModelScope.launch {
-            try {
-                profiles.setActive(id)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // Not saved: Home goes on showing the profile it showed (after a switch, the connection's).
+            withContext(NonCancellable) {
+                try {
+                    profiles.setActive(id)
+                } catch (e: Exception) {
+                    // Not saved: Home goes on showing the profile it showed, and nothing switches.
+                    return@withContext
+                }
+                connection.switchIfConnected(id)
             }
         }
     }

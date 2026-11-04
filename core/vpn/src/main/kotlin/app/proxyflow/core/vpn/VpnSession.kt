@@ -285,6 +285,12 @@ class VpnSession(
     /** A profile was deleted; when it is the connection's, its credentials are no longer used (J11). */
     fun profileDeleted(profileId: String) = send(Event.ProfileDeleted(profileId))
 
+    /**
+     * [profileId] is saved under the name [name] now (blank: its server stands for it). A connection on it shows the new
+     * name at once — Home, the tile, the notification — since a name is not a setting the engine runs (M9).
+     */
+    fun profileRenamed(profileId: String, name: String) = send(Event.ProfileRenamed(profileId, name))
+
     /** The phone's default network as Android reports it to the service: null when it has none. */
     fun underlyingNetwork(network: NetworkInfo?) = send(Event.Network(network))
 
@@ -345,6 +351,7 @@ class VpnSession(
                 is Event.Detached -> onDetached(event.host)
                 is Event.Revoked -> onRevoked()
                 is Event.ProfileDeleted -> onProfileDeleted(event.profileId)
+                is Event.ProfileRenamed -> onProfileRenamed(event.profileId, event.name)
                 is Event.Network -> onNetwork(event.network)
                 is Event.PreflightDone -> onPreflightDone(event)
                 is Event.Routed -> onRouted(event.attempt)
@@ -1006,6 +1013,15 @@ class VpnSession(
         revokedHost?.notifyProblem(state.value)
     }
 
+    private fun onProfileRenamed(profileId: String, name: String) {
+        val current = state.value
+        val running = current.profile
+        if (!current.active || current.profileId != profileId || running == null || running.name == name) return
+        val renamed = running.copy(name = name)
+        publish(current.copy(profileName = renamed.displayName, profile = renamed))
+        host?.showStatus(state.value)
+    }
+
     private fun onProfileDeleted(profileId: String) {
         val current = state.value
         if (!current.active || current.profileId != profileId) return
@@ -1460,6 +1476,8 @@ class VpnSession(
         class Revoked(val host: VpnHost) : Event
 
         data class ProfileDeleted(val profileId: String) : Event
+
+        data class ProfileRenamed(val profileId: String, val name: String) : Event
 
         class Network(val network: NetworkInfo?) : Event
 

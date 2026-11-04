@@ -34,7 +34,7 @@ If you copy or export the log, you decide where it goes. It never includes passw
 
 ## Android and Google
 
-If your phone shares diagnostics with Google, Android may include ProxyFlow's crash reports, and Google may show them to ProxyFlow's developer, with the phone's model and Android version. ProxyFlow removes sign-in details, server and site names and addresses from the error messages it hands to Android, though Android writes the original message to the phone's own log, which other apps can't read.
+If your phone shares usage and diagnostics data with Google, Android may include ProxyFlow's crash and freeze (ANR) reports, and Google may show them to ProxyFlow's developer, with details such as the phone's model, its Android version, the app's version and the country or region the phone reported. ProxyFlow removes sign-in details, server and site names and addresses from the error messages it hands to Android, though Android writes the original message to the phone's own log, which other apps can't read.
 
 Some traffic of Android itself and of its built-in apps, such as Google Play services, doesn't use the VPN, so it doesn't go through your proxy.
 

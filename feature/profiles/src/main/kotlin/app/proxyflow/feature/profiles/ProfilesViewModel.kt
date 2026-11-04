@@ -11,6 +11,7 @@ import app.proxyflow.core.model.ProfileNames
 import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** A list action that did not complete (storage or Android Keystore failure, a test that couldn't run); the screen says so once. */
 enum class ProfileAction { Use, Duplicate, Delete, Test }
@@ -29,6 +31,8 @@ enum class ProfileAction { Use, Duplicate, Delete, Test }
  * @param lastTests each profile's last connection test, by id (board C2): kept while its server and sign-in stay as
  *   tested; a profile never tested, or changed since, isn't in it.
  * @param testing the profiles a test started from this list runs for now.
+ * @param connectionHoldsTraffic a switch now keeps apps' traffic held until the next proxy is checked
+ *   (`ConnectionState.holdsTrafficOnSwitch`), so "Use this proxy" asks first; during a first connect it doesn't.
  */
 data class ProfilesUiState(
     val loading: Boolean = true,
@@ -38,6 +42,7 @@ data class ProfilesUiState(
     val connectedProfileId: String? = null,
     val lastTests: Map<String, ProfileTest> = emptyMap(),
     val testing: Set<String> = emptySet(),
+    val connectionHoldsTraffic: Boolean = false,
 )
 
 class ProfilesViewModel(
@@ -59,18 +64,22 @@ class ProfilesViewModel(
                 connectedProfileId = current.profileId?.takeIf { current.active },
                 lastTests = tests.kept,
                 testing = tests.running,
+                connectionHoldsTraffic = current.holdsTrafficOnSwitch,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProfilesUiState())
 
     /**
      * "Use this proxy": [id] becomes the active profile. While a connection runs on another profile it switches to [id],
      * as picking it on Home does (J11): traffic is held meanwhile, never sent around a proxy. The screen asks first while
-     * a connection runs ([ProfilesUiState.connectedProfileId]). The switch is asked of the session before the choice is
-     * saved, as Home's picker does, so the session decides it in order with what it was asked before.
+     * a switch would hold traffic ([ProfilesUiState.connectionHoldsTraffic]). The choice is saved first, so a choice
+     * that couldn't be saved switches nothing and the screen says so; then the session is asked to switch, and decides
+     * in order with what it was asked before. Both happen even if the screen closes in between.
      */
     fun setActive(id: String) = perform(ProfileAction.Use) {
-        connection.switchIfConnected(id)
-        repository.setActive(id)
+        withContext(NonCancellable) {
+            repository.setActive(id)
+            connection.switchIfConnected(id)
+        }
     }
 
     /**

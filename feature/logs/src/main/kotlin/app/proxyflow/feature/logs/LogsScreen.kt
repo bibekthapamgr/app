@@ -59,6 +59,7 @@ import app.proxyflow.core.designsystem.component.PfConfirmDialog
 import app.proxyflow.core.designsystem.component.PfEmptyState
 import app.proxyflow.core.designsystem.component.PfLoadingScreen
 import app.proxyflow.core.designsystem.component.PfSecondaryButton
+import app.proxyflow.core.designsystem.component.PfSheetDragHandle
 import app.proxyflow.core.designsystem.component.PfTextField
 import app.proxyflow.core.designsystem.component.PfTopAppBar
 import app.proxyflow.core.designsystem.icon.PfIcons
@@ -355,7 +356,11 @@ private fun LogRow(entry: LogEntry, time: String, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EntrySheet(entry: LogEntry, profileName: String?, zone: ZoneId, onCopy: () -> Unit, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        dragHandle = { PfSheetDragHandle() },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

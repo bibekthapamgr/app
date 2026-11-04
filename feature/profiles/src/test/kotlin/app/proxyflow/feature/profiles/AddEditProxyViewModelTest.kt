@@ -1,6 +1,10 @@
 package app.proxyflow.feature.profiles
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.ConnectionTester
 import app.proxyflow.core.data.CredentialsRead
@@ -354,9 +358,10 @@ class AddEditProxyViewModelTest {
         vm.onPortChange("1080")
         val tested = vm.uiState.value.input.toProfile("", 0, 0)
 
-        tester.result = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED"))
+        tester.result = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED"), fromEngine = true)
         vm.testConnection()
-        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED")), tested), vm.uiState.value.test)
+        val rejected = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED"), fromEngine = true)
+        assertEquals(ConnectionTestState.Done(rejected, tested), vm.uiState.value.test)
         assertEquals(listOf<String?>(null), tester.requests.map { it.first })
 
         tester.result = ConnectionTestResult.Passed(latencyMillis = 42)
@@ -390,7 +395,7 @@ class AddEditProxyViewModelTest {
         changed.onPortChange("1081")
         changed.save()
         // A test that couldn't run on this phone says nothing about the proxy.
-        tester.result = ConnectionTestResult.Failed(ConnectionError(ConnectionError.INTERNAL))
+        tester.result = ConnectionTestResult.Failed(ConnectionError(ConnectionError.INTERNAL), fromEngine = true)
         val broken = viewModel()
         broken.onServerChange("other.example.com")
         broken.onPortChange("1080")
@@ -399,6 +404,63 @@ class AddEditProxyViewModelTest {
 
         assertEquals(2, repository.profiles.first().size)
         assertTrue(repository.lastTests.first().isEmpty())
+    }
+
+    /** A failure the tester found before asking any proxy (ADR-0014 §2) describes the form, not the proxy: never kept. */
+    @Test
+    fun aFailureFoundBeforeAskingTheProxyIsNotKept() = runTest {
+        val vm = viewModel()
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        tester.result = ConnectionTestResult.Failed(ConnectionError("AUTH_REQUIRED"), fromEngine = false)
+        vm.testConnection()
+        vm.save()
+
+        assertEquals(1, repository.profiles.first().size)
+        assertTrue(repository.lastTests.first().isEmpty())
+    }
+
+    /** An edit drops the tested input — with its typed password — even when it is edited back to what was tested. */
+    @Test
+    fun anEditForgetsWhatWasTestedEvenIfUndone() = runTest {
+        val vm = viewModel()
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.testConnection()
+        vm.onPortChange("1081")
+        vm.onPortChange("1080")
+        vm.save()
+
+        assertEquals(1, repository.profiles.first().size)
+        assertTrue("tested before the edit: not kept", repository.lastTests.first().isEmpty())
+    }
+
+    /** Save, and the reconnect it was confirmed with (D9), finish even if the screen closes meanwhile. */
+    @Test
+    fun aSaveAndItsReconnectFinishWhenTheScreenClosesMeanwhile() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        connection.current.value = ConnectionState(ConnectionStatus.Connected, saved.id, "Office", saved)
+        val gate = CompletableDeferred<Unit>()
+        val slow = object : ProfileRepository by repository {
+            override suspend fun save(id: String?, input: ProxyProfileInput): ProxyProfile {
+                gate.await()
+                return repository.save(id, input)
+            }
+        }
+        val store = ViewModelStore()
+        val factory = viewModelFactory { initializer { viewModel(editing(saved.id), slow) } }
+        val vm = ViewModelProvider(store, factory)[AddEditProxyViewModel::class.java]
+        vm.onPortChange("1081")
+        vm.onPasswordChange("secret")
+        vm.save()
+        vm.saveAndReconnect()
+        assertTrue(vm.uiState.value.saving)
+
+        store.clear() // the screen closed: the ViewModel's scope ends
+        gate.complete(Unit)
+
+        assertEquals(1081, repository.get(saved.id)?.port)
+        assertEquals(listOf("reconnect ${saved.id}"), connection.calls)
     }
 
     @Test
@@ -556,6 +618,30 @@ class AddEditProxyViewModelTest {
         assertTrue(vm.uiState.value.saved)
         assertEquals(1081, repository.get(saved.id)?.port)
         assertEquals(listOf("reconnect ${saved.id}"), connection.calls)
+    }
+
+    /**
+     * During a first connect nothing is held yet — apps use the normal network until it is connected — so a change is
+     * saved and the attempt checks it, without asking; an Always-on start holding traffic asks, as a connection does.
+     */
+    @Test
+    fun aChangeDuringAFirstConnectIsCheckedAgainWithoutAsking() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        connection.current.value = ConnectionState(ConnectionStatus.Connecting, saved.id, "Office", saved)
+        val first = viewModel(editing(saved.id))
+        first.onPortChange("1081")
+        first.onPasswordChange("secret")
+        first.save()
+        assertNull(first.uiState.value.confirmReconnect)
+        assertTrue(first.uiState.value.saved)
+        assertEquals(listOf("reconnect ${saved.id}"), connection.calls)
+
+        connection.current.value = ConnectionState(ConnectionStatus.Connecting, saved.id, "Office", saved, held = true)
+        val held = viewModel(editing(saved.id))
+        held.onPortChange("1082")
+        held.onPasswordChange("secret")
+        held.save()
+        assertEquals("traffic held: asked first", "Office", held.uiState.value.confirmReconnect)
     }
 
     @Test

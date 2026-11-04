@@ -66,7 +66,7 @@ class EngineConnectionTesterTest {
         val saved = repository.save(null, withSignIn)
         engine.answer = PreflightAnswer(ok = false, code = "AUTH_FAILED", detail = "proxy rejected the credentials")
         assertEquals(
-            ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED", "proxy rejected the credentials")),
+            ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED", "proxy rejected the credentials"), fromEngine = true),
             tester.testSaved(saved.id),
         )
         assertEquals(ProfileTest(NOW, code = "AUTH_FAILED", latencyMillis = null), repository.lastTests.first()[saved.id])

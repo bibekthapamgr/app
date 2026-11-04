@@ -145,7 +145,7 @@ class EngineConnectionTester(
                     answer.latencyMillis.coerceAtLeast(1),
                 )
             } else {
-                ConnectionTestResult.Failed(answer.error)
+                ConnectionTestResult.Failed(answer.error, fromEngine = true)
             }
         } finally {
             secret?.close() // the probe consumed it already; this covers a probe that never ran

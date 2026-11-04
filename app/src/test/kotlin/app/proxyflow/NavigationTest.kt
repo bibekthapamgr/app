@@ -1,5 +1,6 @@
 package app.proxyflow
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.testing.DumpOnFailureRule
+import app.proxyflow.feature.about.AboutDestination
 import app.proxyflow.feature.profiles.AddEditProxyDestination
 import app.proxyflow.feature.profiles.navigateToAddEditProxy
 import org.junit.Assert.assertEquals
@@ -154,6 +156,25 @@ class NavigationTest {
 
         compose.pressBack()
         compose.waitForText("Add a proxy to get started").assertIsDisplayed()
+    }
+
+    /** A double tap on a link to a screen pushed on top (Settings' About & privacy) opens it once (`dropUnlessResumed`). */
+    @Test
+    fun aDoubleTapOnALinkOpensItsScreenOnce() {
+        compose.tab("Settings").performClick()
+        val about = compose.onNodeWithText("About & privacy").performScrollTo().fetchSemanticsNode()
+        val tap = checkNotNull(about.config[SemanticsActions.OnClick].action)
+        // Both taps arrive before About is drawn.
+        compose.runOnUiThread {
+            tap()
+            tap()
+        }
+        compose.waitForIdle()
+        val abouts = compose.activity.navController?.currentBackStack?.value.orEmpty().count { it.destination.hasRoute<AboutDestination>() }
+        assertEquals(1, abouts)
+
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("About & privacy").performScrollTo().assertIsDisplayed()
     }
 
     @Test

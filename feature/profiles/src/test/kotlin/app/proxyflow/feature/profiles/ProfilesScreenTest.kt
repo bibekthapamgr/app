@@ -164,13 +164,21 @@ class ProfilesScreenTest {
         assertEquals(listOf("p2"), used)
     }
 
-    /** J11: "Use this proxy" while a connection runs on another profile switches it, so the screen asks first. */
+    /**
+     * J11: "Use this proxy" while a connection runs on another profile switches it, holding apps' traffic until the new
+     * proxy is checked, so the screen asks first; during a first connect nothing is held, and it switches at once.
+     */
     @Test
     fun usingAnotherProxyWhileConnectedAsksFirst() {
         val used = mutableListOf<String>()
-        var state by mutableStateOf(
-            ProfilesUiState(loading = false, profiles = listOf(office, backup), activeProfileId = "p1", connectedProfileId = "p1"),
+        val connected = ProfilesUiState(
+            loading = false,
+            profiles = listOf(office, backup),
+            activeProfileId = "p1",
+            connectedProfileId = "p1",
+            connectionHoldsTraffic = true,
         )
+        var state by mutableStateOf(connected)
         compose.setContent {
             ProxyFlowTheme {
                 ProfilesScreen(state, onAddProxy = {}, onEditProxy = {}, onUseProxy = { used += it }, onDeleteProxy = {})
@@ -184,6 +192,8 @@ class ProfilesScreenTest {
                 "connected through Backup SOCKS.",
             substring = true,
         ).assertIsDisplayed()
+        compose.onNodeWithText("If it can't connect, apps stay offline until you try again or stop.", substring = true)
+            .assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()
         assertEquals("cancelled: nothing switches", emptyList<String>(), used)
 
@@ -195,9 +205,25 @@ class ProfilesScreenTest {
         // The connection ends while the question is open: it closes, and nothing is switched.
         compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
         compose.onNodeWithText("Use this proxy").performClick()
-        state = state.copy(connectedProfileId = null)
+        state = state.copy(connectedProfileId = null, connectionHoldsTraffic = false)
         compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertDoesNotExist()
         assertEquals(listOf("p2"), used)
+
+        // A first connect holds nothing yet: the switch only checks the other proxy instead, without asking.
+        state = connected.copy(connectionHoldsTraffic = false)
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertDoesNotExist()
+        assertEquals(listOf("p2", "p2"), used)
+
+        // Blocked on a profile deleted since: traffic is blocked already, so the switch is its way out, at once — and no
+        // question is left behind to appear later.
+        state = connected.copy(connectedProfileId = "deleted")
+        compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
+        compose.onNodeWithText("Use this proxy").performClick()
+        assertEquals(listOf("p2", "p2", "p2"), used)
+        state = connected
+        compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertDoesNotExist()
     }
 
     @Test
