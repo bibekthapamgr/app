@@ -287,7 +287,8 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
     idle = find(found, "idle")
     if idle:
         facts.append(
-            f"idle while connected, the screen off ({idle.get('screen_off')}), {idle.get('seconds')} s: CPU {idle.get('cpu_ms')} ms ({idle.get('cpu_pct')} % of one core, "
+            f"idle while connected, the screen off ({idle.get('screen_off')}), {idle.get('seconds')} s ({idle.get('awake_s', '?')} s of it awake, the rest the "
+            f"phone asleep): CPU {idle.get('cpu_ms')} ms ({idle.get('cpu_pct')} % of one core, "
             f"{idle.get('cpu_s_per_hour')} s an hour); {idle.get('bytes')} bytes through the VPN meanwhile (other apps'); "
             f"goroutines {idle.get('goroutines_before')} before, {idle.get('goroutines_after')} after (flows {idle.get('flows_before')} → {idle.get('flows_after')})"
         )

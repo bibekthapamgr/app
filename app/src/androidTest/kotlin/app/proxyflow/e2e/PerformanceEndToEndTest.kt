@@ -599,8 +599,9 @@ class PerformanceEndToEndTest {
 
     /**
      * Quality bar: under 2 % battery an hour above the phone's own, connected and idle with the screen off — battery only
-     * a phone can show. The emulator gives what drives it: this process's CPU over [IDLE_MS] with the screen off (checked
-     * off before and after), the traffic other apps sent through the VPN meanwhile, and the engine's goroutines before and
+     * a phone can show. The emulator gives what drives it: this process's CPU over [IDLE_MS] of Android's clock with the
+     * screen off (checked off before and after), the phone's sleep included, and how much of it the phone was awake; the
+     * traffic other apps sent through the VPN meanwhile, and the engine's goroutines before and
      * after: none may pile up — at most [GOROUTINES_PER_FLOW] for each flow more than before (a connection's handler and
      * its two copy loops, engine/tunnel/tcp.go), and [GOROUTINE_SLACK] for the Go runtime's own, which it starts on demand.
      */
@@ -621,7 +622,12 @@ class PerformanceEndToEndTest {
             }
             val cpuBefore = cpuMillis()
             val start = SystemClock.elapsedRealtime()
-            Thread.sleep(IDLE_MS)
+            val awakeStart = SystemClock.uptimeMillis()
+            // The period goes by Android's clock, the phone's sleep included: a phone that suspends with its screen off
+            // stops a plain sleep's clock too (API 29: its 5 minutes took 24 in run 41919093108, and the tests after it
+            // ran out of time; M10-130), so it ends on time, at the first moment the phone is awake after it.
+            while (SystemClock.elapsedRealtime() - start < IDLE_MS) Thread.sleep(IDLE_STEP_MS)
+            val awake = SystemClock.uptimeMillis() - awakeStart
             val cpu = cpuMillis() - cpuBefore
             val millis = SystemClock.elapsedRealtime() - start
             val screenOff = !power.isInteractive
@@ -631,6 +637,7 @@ class PerformanceEndToEndTest {
             perf(
                 "idle",
                 "seconds" to millis / 1000,
+                "awake_s" to awake / 1000,
                 "cpu_ms" to cpu,
                 "cpu_pct" to "%.3f".format(Locale.ROOT, cpu * 100.0 / millis),
                 "cpu_s_per_hour" to "%.1f".format(Locale.ROOT, cpu / 1000.0 * 3_600_000 / millis),
@@ -729,6 +736,7 @@ class PerformanceEndToEndTest {
         const val GOROUTINES_PER_FLOW = 3
         const val GOROUTINE_SLACK = 20
         const val IDLE_MS = 5 * 60_000L
+        const val IDLE_STEP_MS = 1_000L
         const val SCREEN_MS = 10_000L
         const val SETTLE_MS = 3_000L
         const val CLIENT_JOIN_MS = 15_000L

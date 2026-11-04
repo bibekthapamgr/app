@@ -65,7 +65,7 @@ GOOD = [
     "go_held_idle_kib=20480 go_held_kib=30720 go_heap_kib=12000 go_stacks_kib=3200 goroutines_idle=40 goroutines=650 goroutines_closed=44 opening_ms=4100",
     "memory traffic=in_flight connections=200 least_down_bytes=98304 load_bytes=262144 rss_disconnected_kib=150000 rss_idle_kib=160000 rss_peak_kib=196000 "
     "go_held_idle_kib=20480 go_held_kib=40960 go_heap_kib=36000 go_stacks_kib=3300 goroutines_idle=40 goroutines=652 goroutines_closed=45 opening_ms=4300",
-    "idle seconds=300 cpu_ms=420 cpu_pct=0.140 cpu_s_per_hour=5.0 bytes=12000 screen_off=true goroutines_before=40 goroutines_after=40 "
+    "idle seconds=300 awake_s=180 cpu_ms=420 cpu_pct=0.140 cpu_s_per_hour=5.0 bytes=12000 screen_off=true goroutines_before=40 goroutines_after=40 "
     "flows_before=2 flows_after=2",
 ]
 
@@ -112,6 +112,8 @@ class M10PerformanceTest(unittest.TestCase):
         self.assertIn("throughput down (16 MiB each, the median of 3, timed without its set-up)", text)
         self.assertIn("each with 262144 bytes in flight (ProxyFlow had handed each at least 98304 bytes on when read)", text)
         self.assertIn("so 44.9 MiB (47.1 MB) more than before connecting", text)
+        # The idle period by the phone's clock, its sleep included, and how much of it the phone was awake (M10-130).
+        self.assertIn("the screen off (true), 300 s (180 s of it awake, the rest the phone asleep)", text)
         self.assertIn("an upload paced at it, 62500000 bytes in 10012 ms (49.9 Mbit/s): 820 ms of CPU, 8.2 % of one core", text)
         summary = m10_performance.row(found)
         self.assertTrue(summary.startswith("row: connect_p50_socks5=812 connect_p90_socks5=1050 setup_p50_socks5=9 direct_p50_socks5=2 "), summary)

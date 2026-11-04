@@ -136,7 +136,14 @@ wifi_only() {
 wifi_in_airplane_mode() {
     timeout 30 adb shell cmd connectivity airplane-mode enable >/dev/null 2>&1 ||
         timeout 30 adb shell settings put global airplane_mode_on 1 >/dev/null 2>&1 || true
-    sleep 5
+    # Mobile data off too, and gone before Wi-Fi is checked: on API 33 airplane mode left it up, and the runner was
+    # reached through it (run 41919093108: "mobile data (airplane mode …)", both up after the tests; M10-129).
+    timeout 30 adb shell svc data disable >/dev/null 2>&1 || true
+    for _ in $(seq 1 10); do
+        if ! cellular_up; then break; fi
+        sleep 2
+    done
+    sleep 3
     timeout 30 adb shell svc wifi enable >/dev/null 2>&1 || true
 }
 # What the phone uses, read from its interfaces' addresses.
@@ -269,7 +276,8 @@ start_tcpdump() { # <interface>
     timeout 30 adb shell "${AS_ROOT}setsid tcpdump -i $1 -s 400 -U -w /data/local/tmp/pf-$1.pcap </dev/null >/dev/null 2>&1 &"
 }
 uplink_interfaces() {
-    timeout 30 adb shell ip -o link show > "$OUT/guest-links.txt" 2>&1
+    # As root: as the shell user, API 33's image listed none (run 41919093108: "tcpdump on:" empty; M10-129).
+    timeout 30 adb shell "${AS_ROOT}ip -o link show" > "$OUT/guest-links.txt" 2>&1
     awk -F': ' '{print $2}' "$OUT/guest-links.txt" | sed 's/@.*//' | tr -d '\r' | grep -E '^(eth|wlan|radio|rmnet)[0-9]+$' || true
 }
 if [ "$API" = 33 ] && [ -n "$ROOT_TCPDUMP" ]; then
@@ -281,6 +289,9 @@ if [ "$API" = 33 ] && [ -n "$ROOT_TCPDUMP" ]; then
     } > "$OUT/guest-capture.txt" 2>&1
     if grep -q 'uid=0' "$OUT/guest-capture.txt"; then
         IFACES="$(uplink_interfaces)"
+        if [ -z "$IFACES" ]; then
+            echo "no uplink interface listed: $(tr -d '\r' < "$OUT/guest-links.txt" | head -3 | paste -sd ' ' - | cut -c1-200)" >> "$OUT/guest-capture.txt"
+        fi
         for iface in $IFACES; do start_tcpdump "$iface"; done
         echo "$IFACES" > "$OUT/guest-interfaces.txt"
         GUEST_CAPTURE=2
@@ -372,13 +383,10 @@ timeout 30 adb shell "setsid sh /data/local/tmp/pf-connecting.sh > /data/local/t
 # Bounded well inside the job's own limit, so that logcat, the captures and the evidence are still
 # collected when a test hangs (scripts/m5_evidence.py reads how far the tests got from logcat).
 # Into a file, not through tee: a Gradle daemon that outlives a stopped build would hold a pipe open.
-# One module's tests after another (--no-parallel): with the project's parallel builds, the three modules' instrumented
-# tests ran at once on the one emulator; API 29's stalled past their limit in two runs (M10-114), for a cause not
-# known, and three instrumentations at once on one phone is a way they could.
 GRADLE_LOG="$RUNNER_TEMP/gradle-2-device.log"
 timeout --kill-after=60s "${DEVICE_TESTS_TIMEOUT:-55m}" \
     ./gradlew :core:data:connectedDebugAndroidTest :core:engine:connectedDebugAndroidTest :app:connectedDebugAndroidTest \
-    --continue --no-parallel > "$GRADLE_LOG" 2>&1
+    --continue > "$GRADLE_LOG" 2>&1
 STATUS=$?
 cat "$GRADLE_LOG"
 if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
@@ -495,7 +503,8 @@ if [ "$GUEST_CAPTURE" != 0 ]; then
         AS_ROOT="" # adbd is the shell user again; the captures need no root now
     fi
     LISTING="$(timeout 30 adb shell 'ls -l /data/local/tmp/pf-*.pcap' 2>&1 | tr -d '\r')"
-    echo "captured on the phone: $(awk '{print $NF, $5}' <<<"$LISTING" | paste -sd ';' -)" >> "$OUT/guest-capture.txt"
+    CAPTURED="$(awk '/^-/ {print $NF, $5}' <<<"$LISTING" | paste -sd ';' -)"
+    echo "captured on the phone: ${CAPTURED:-none ($(head -1 <<<"$LISTING" | cut -c1-120))}" >> "$OUT/guest-capture.txt"
     for iface in $(cat "$OUT/guest-interfaces.txt"); do
         # Only a capture the phone has: tcpdump on an interface that was down at the start (eth0 in airplane mode)
         # wrote none. Skipped only on the phone's own "no": an adb that does not answer is no reason not to try.
