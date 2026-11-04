@@ -113,24 +113,48 @@ class ProfileWatchTest {
     }
 
     /**
-     * The wait grows with the failures in a row. A read that stays good for a minute starts the count over; one that
-     * fails again sooner doesn't, so a store that fails soon after every read is tried less and less often.
+     * The wait grows with the failures in a row. A read that stays good for a minute — from its first profiles, however
+     * often they change — starts the count over; one that fails again sooner doesn't, so a store that fails soon after
+     * every read is tried less and less often. Each collection counts its own failures, and the profiles of every read
+     * pass through.
      */
     @Test
     fun theWaitStartsOverOnlyOnceAReadStaysGood() = runBlocking {
         val now = AtomicLong()
 
-        // Every read gives the profiles, then fails after [goodFor].
-        fun failingAfter(goodFor: Long) = flow {
+        // Every read gives the profiles at once and again [goodFor] later, then fails; each wait moves the clock on.
+        fun reading(goodFor: Long, waits: MutableList<Long>) = flow {
             emit(listOf(office))
             now.addAndGet(goodFor)
+            emit(listOf(office))
             throw IllegalStateException("disk")
-        }
-        for ((goodFor, expected) in listOf(0L to listOf(0L, 1L, 2L), RECOVERED_AFTER_MILLIS to listOf(0L, 0L, 0L))) {
+        }.retryReading(
+            log = calls::add,
+            delayMillis = { inARow ->
+                waits += inARow
+                now.addAndGet(30_000) // the wait passes
+                1L
+            },
+            clockMillis = now::get,
+        )
+        for ((goodFor, expected) in listOf(
+            0L to listOf(0L, 1L, 2L, 3L, 4L),
+            RECOVERED_AFTER_MILLIS - 1 to listOf(0L, 1L, 2L, 3L, 4L),
+            RECOVERED_AFTER_MILLIS to listOf(0L, 0L, 0L, 0L, 0L),
+        )) {
             val waits = CopyOnWriteArrayList<Long>()
-            failingAfter(goodFor).retryReading(calls::add, { inARow -> 1L.also { waits += inARow } }, now::get).take(4).toList()
+            val logged = calls.count("profiles can't be read")
+            val read = reading(goodFor, waits).take(2 * 6).toList()
             assertEquals("good for $goodFor ms", expected, waits)
+            assertEquals("every read's profiles", List(12) { listOf(office) }, read)
+            assertEquals("each failure logged", logged + 5, calls.count("profiles can't be read (IllegalStateException); trying again"))
         }
+
+        val waits = CopyOnWriteArrayList<Long>()
+        val one = reading(0L, waits)
+        one.take(6).toList()
+        one.take(6).toList()
+        assertEquals("each collection counts its own", listOf(0L, 1L, 0L, 1L), waits)
     }
 
     @Test

@@ -35,10 +35,9 @@ internal fun CoroutineScope.watchConnectionProfile(
     renamed: (profileId: String, name: String) -> Unit,
     log: (String) -> Unit,
     retryDelayMillis: (failuresInARow: Long) -> Long = ::profileReadRetryDelay,
-    clockMillis: () -> Long = { System.nanoTime() / 1_000_000 },
 ): Job {
     val connection = state.map { s -> s.profileId?.takeIf { s.active } }.distinctUntilChanged()
-    val readable = profiles.retryReading(log, retryDelayMillis, clockMillis)
+    val readable = profiles.retryReading(log, retryDelayMillis)
     return launch {
         launch(CoroutineName(DELETION_WATCH)) {
             connection.collectLatest { id ->
@@ -73,7 +72,7 @@ internal const val RECOVERED_AFTER_MILLIS = 60_000L
 internal fun Flow<List<ProxyProfile>>.retryReading(
     log: (String) -> Unit,
     delayMillis: (failuresInARow: Long) -> Long,
-    clockMillis: () -> Long,
+    clockMillis: () -> Long = { System.nanoTime() / 1_000_000 },
 ): Flow<List<ProxyProfile>> = flow {
     var inARow = 0L
     var goodSince: Long? = null
