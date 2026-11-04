@@ -39,8 +39,9 @@ GOOD = [
     "setup protocol=http path=direct_to_proxy n=20 failed=0 p50_ms=1 p90_ms=2 max_ms=4",
     "setup protocol=http path=vpn n=20 failed=0 p50_ms=11 p90_ms=16 max_ms=25",
     "fail_closed proxy=refusing first_ms=12 connected_probes=2 worst_connected_ms=15 opened=0 "
-    "results=FAILED:12:ConnectException:Connected,FAILED:15:ConnectException:Connected,FAILED:5003:SocketTimeoutException:Reconnecting,"
-    "FAILED:5002:SocketTimeoutException:Reconnecting,UNRESOLVED:UnknownHostException:Reconnecting status=Reconnecting",
+    "results=FAILED:12:ConnectException:Connected:-1210,FAILED:15:ConnectException:Connected:-640,"
+    "FAILED:5003:SocketTimeoutException:Reconnecting:310,FAILED:5002:SocketTimeoutException:Reconnecting:5520,"
+    "UNRESOLVED:UnknownHostException:Reconnecting:? status=Reconnecting",
     "fail_closed proxy=silent first_ms=10015 opened=0 results=FAILED:10015:ConnectException status=Connected",
     "throughput protocol=socks5 direction=down path=proxy_only bytes=16777216 n=3 timed_bytes=16711680 ms=550 mbit_s=243.1 "
     "each_mbit_s=238.7,243.1,247.6 setup_ms=30",
@@ -105,6 +106,8 @@ class M10PerformanceTest(unittest.TestCase):
         self.assertIn("(50 % of it)", text)
         self.assertIn("0 of 5 opened", text)
         self.assertIn("the longest any of the 2 made while the session was still connected waited then: 15 ms", text)
+        # Each probe with when its connection began, from the session leaving Connected (M10-99).
+        self.assertIn("the session leaving Connected, negative before it): FAILED:12:ConnectException:Connected:-1210,", text)
         self.assertIn("SOCKS5 p50 9 ms, p90 14 ms, max 30 ms (n=20), a TCP connection straight to the proxy p50 2 ms, p90 3 ms", text)
         self.assertIn("throughput down (16 MiB each, the median of 3, timed without its set-up)", text)
         self.assertIn("each with 262144 bytes in flight (ProxyFlow had handed each at least 98304 bytes on when read)", text)
@@ -156,7 +159,7 @@ class M10PerformanceTest(unittest.TestCase):
     def test_a_connection_through_a_refusing_proxy_fails(self):
         lines = [line for line in GOOD if "proxy=refusing" not in line] + [
             "fail_closed proxy=refusing first_ms=8 connected_probes=1 worst_connected_ms=8 opened=1 "
-            "results=FAILED:8:ConnectException:Connected,CONNECTED:30:Connected status=Connected"
+            "results=FAILED:8:ConnectException:Connected:?,CONNECTED:30:Connected:? status=Connected"
         ]
         problems = m10_performance.report(m10_performance.measurements(run(lines)))[2]
         self.assertEqual(1, len(problems), problems)

@@ -247,7 +247,13 @@ tcpdump_interfaces() {
 }
 GUEST_CAPTURE=0
 if [ "$API" -lt 34 ]; then
-    echo "not on API $API, below 34: its uplink is mobile data, which the emulator's own capture (-tcpdump) sees (adbd did not survive adb root and unroot on API 29; not tried on 30 to 33)" > "$OUT/guest-capture.txt"
+    # What the emulator's own capture sees of the uplink chosen above (M10-103: not always mobile data).
+    case "$UPLINK" in
+        "mobile data and Wi-Fi"*) SEEN="its uplink is ${UPLINK}: the emulator's own capture (-tcpdump) sees the mobile data" ;;
+        "mobile data"*) SEEN="its uplink is mobile data, which the emulator's own capture (-tcpdump) sees" ;;
+        *) SEEN="its uplink is ${UPLINK:-none}, which from API 30 on the emulator's own capture (-tcpdump) does not see: it records mobile data's device alone" ;;
+    esac
+    echo "not on API $API, below 34: $SEEN (adbd did not survive adb root and unroot on API 29; not tried on 30 to 33)" > "$OUT/guest-capture.txt"
 else
     {
         echo "adb root: $(timeout 30 adb root 2>&1 | tr -d '\r')"

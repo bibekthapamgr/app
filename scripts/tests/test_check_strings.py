@@ -35,7 +35,7 @@ VALUES = """<?xml version="1.0" encoding="utf-8"?>
     <string name="quoted_markup">"Tap <b>Connect</b>, it's quick"</string>
     <string name="quoted_xliff">"It's <xliff:g id="count">%1$d</xliff:g> left"</string>
     <string name="quoted_span_in_xliff">"<xliff:g id="count"><b>%1$d</b></xliff:g> it's left"</string>
-    <string name="quoted_other_namespace">"It's <tools:note>still</tools:note> quoted"</string>
+    <string name="quoted_other_namespace">"<tools:note>Still</tools:note> it's quoted"</string>
 </resources>
 """
 
@@ -95,7 +95,8 @@ class CheckTest(unittest.TestCase):
                 f"{where}:18: quoted_markup: an apostrophe without its backslash (write \\')",
                 # An <xliff:g> is no span: quoting goes on across it (aapt2 resets it at spans only). A span inside one is.
                 f"{where}:20: quoted_span_in_xliff: an apostrophe without its backslash (write \\')",
-                # Nor is an element of any other namespace (aapt2 ignores it): line 21's apostrophe is still quoted.
+                # Nor is an element of any other namespace (aapt2 ignores it): line 21's apostrophe, after one, is still
+                # quoted, where a span would have ended the quoting (as line 18's does).
             ],
             report,
         )

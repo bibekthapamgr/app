@@ -176,7 +176,8 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
         facts.append(
             f"fail closed, the proxy refusing: the first new connection failed after {refusing.get('first_ms')} ms; the longest any of the "
             f"{refusing.get('connected_probes', '?')} made while the session was still connected waited then: {refusing.get('worst_connected_ms')} ms; "
-            f"{opened} of {len(refusing.get('results', '').split(','))} opened; each (result:ms:exception:the session's state as it returned): "
+            f"{opened} of {len(refusing.get('results', '').split(','))} opened; each (result:ms:exception:the session's state as it returned:"
+            f"when its connection began, in ms from the session leaving Connected, negative before it): "
             f"{refusing.get('results')}; the session then: {refusing.get('status')}"
         )
         if opened:

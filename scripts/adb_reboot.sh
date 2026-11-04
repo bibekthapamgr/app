@@ -5,6 +5,13 @@
 # 1 from the old boot: waiting for the device and that property alone can pass on the old boot, before the phone has
 # gone down (M10's review). A new boot is told apart by the kernel's boot_id, which every boot draws anew.
 
+# The runner kernel's last out-of-memory kill (the emulator went away at a restart twice: M10-54, M10-97), or "none".
+oom_kill() {
+    local line
+    line="$(sudo -n dmesg 2>/dev/null | grep -i -E 'out of memory|killed process' | tail -1 | cut -c1-160)"
+    echo "${line:-none}"
+}
+
 # The running boot's id, or nothing when adb could not say.
 boot_id() {
     timeout 10 adb shell cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r[:space:]'
@@ -49,6 +56,6 @@ reboot_and_wait() { # <seconds>
         sleep 2
     done
     # What was last seen, for the error: whether adb ever left the old boot, the boot id now, the boot's progress.
-    REBOOT_SEEN="$REBOOT_SEEN; adb $([ -n "$REBOOT_WENT_DOWN" ] && echo "left the old boot" || echo "never left the old boot"); boot id now: ${new:-unreadable}; sys.boot_completed: ${completed:-unset}; adb state: $(timeout 5 adb get-state 2>&1 | tr -d '\r' | head -c 80); emulator process: $(pgrep -f 'qemu-system|emulator64|/emulator ' >/dev/null 2>&1 && echo running || echo "none on this host"); the runner's disk: $(df -Ph / 2>/dev/null | awk 'NR==2 {print $4 " free of " $2}')"
+    REBOOT_SEEN="$REBOOT_SEEN; adb $([ -n "$REBOOT_WENT_DOWN" ] && echo "left the old boot" || echo "never left the old boot"); boot id now: ${new:-unreadable}; sys.boot_completed: ${completed:-unset}; adb state: $(timeout 5 adb get-state 2>&1 | tr -d '\r' | head -c 80); emulator process: $(pgrep -f 'qemu-system|emulator64|/emulator ' >/dev/null 2>&1 && echo running || echo "none on this host"); the runner's disk: $(df -Ph / 2>/dev/null | awk 'NR==2 {print $4 " free of " $2}'); the runner's last out-of-memory kill: $(oom_kill)"
     return 1
 }

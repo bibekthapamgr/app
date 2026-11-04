@@ -83,7 +83,7 @@ class ProxyFlowTileService : TileService() {
         val tile = qsTile ?: return
         val content = QuickTile.content(state, profile, locked)
         val line = when (content.line) {
-            QuickTile.Line.Profile -> content.profileName.orEmpty()
+            QuickTile.Line.Profile -> content.profileName?.let(QuickTile::subtitleOf).orEmpty()
             QuickTile.Line.Connected -> getString(R.string.tile_connected)
             QuickTile.Line.Connecting -> getString(R.string.tile_connecting)
             QuickTile.Line.Reconnecting -> getString(R.string.tile_reconnecting)

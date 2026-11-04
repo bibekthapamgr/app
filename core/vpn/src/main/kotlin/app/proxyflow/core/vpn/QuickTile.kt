@@ -44,6 +44,22 @@ internal object QuickTile {
     }
 
     /**
+     * [name] as the tile's subtitle shows it. Android's system UI lays the subtitle out by its first character with a
+     * direction of its own (a letter) and, on a right-to-left phone, right to left when it has none, which would turn
+     * round a name that is an address ("2606:4700::1111": a profile without a name shows its server's). A left-to-right
+     * mark in front of such a name keeps it in order, as ProxyFlow's own screens do (M10-101); any other is left as is.
+     */
+    fun subtitleOf(name: String): String = if (name.codePoints().anyMatch(::hasADirection)) name else "\u200E$name"
+
+    private fun hasADirection(codePoint: Int): Boolean = when (Character.getDirectionality(codePoint)) {
+        Character.DIRECTIONALITY_LEFT_TO_RIGHT,
+        Character.DIRECTIONALITY_RIGHT_TO_LEFT,
+        Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC,
+        -> true
+        else -> false
+    }
+
+    /**
      * @param hasProfile a profile exists to connect.
      * @param consentNeeded Android's VPN consent screen must be shown first, which only Home can do (behind B9).
      */

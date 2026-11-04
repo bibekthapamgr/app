@@ -211,7 +211,8 @@ class PerformanceEndToEndTest {
             "connected_probes" to connectedWaits.size,
             "worst_connected_ms" to connectedWaits.maxOrNull(),
             "opened" to refused.count { it.result.startsWith("CONNECTED ") },
-            "results" to refused.joinToString(",") { it.result.replace(' ', ':') + ":" + it.state },
+            // Each with when its connection began, from the session leaving Connected (M10-99): the evidence shows which counted.
+            "results" to refused.joinToString(",") { it.result.replace(' ', ':') + ":" + it.state + ":" + it.beganFrom(left) },
             "left_connected_ms" to refused.first().ended.let { first -> if (left == 0L) null else left - first },
             "status" to app.controller.state.value.status,
         )
@@ -446,6 +447,9 @@ class PerformanceEndToEndTest {
 
         /** The client's own time to its result. */
         val ms: Long? get() = result.split(" ").getOrNull(1)?.toLongOrNull()?.takeIf { failed || result.startsWith("CONNECTED ") }
+
+        /** When its connection began, in ms from [left] (negative: before the session left Connected); "?" without either. */
+        fun beganFrom(left: Long): String = if (began == null || left == 0L) "?" else (began - left).toString()
 
         /**
          * How long this connection waited while the session was still connected, given when the session left Connected

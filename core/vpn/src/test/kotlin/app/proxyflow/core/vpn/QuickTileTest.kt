@@ -87,4 +87,17 @@ class QuickTileTest {
             assertEquals(status.name, Tap.OpenApp, QuickTile.tap(state(status), hasProfile = true, consentNeeded = false))
         }
     }
+
+    /**
+     * A name without a letter, as an unnamed profile's server, gets a left-to-right mark in front, so a right-to-left
+     * phone's system UI keeps it in order (M10-101); a name with a letter, in any script, is left as it is.
+     */
+    @Test
+    fun aNameWithoutALetterKeepsItsOrder() {
+        assertEquals("\u200E2606:4700:4700::1111", QuickTile.subtitleOf("2606:4700:4700::1111"))
+        assertEquals("\u200E203.0.113.10", QuickTile.subtitleOf("203.0.113.10"))
+        for (name in listOf("Tokyo residential", "fd00::1", "مكتب 2", "2 מִשְׂרָד", "東京")) {
+            assertEquals(name, QuickTile.subtitleOf(name))
+        }
+    }
 }
