@@ -3,6 +3,8 @@ package app.proxyflow.feature.profiles
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -215,6 +217,7 @@ fun ProfilesScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ProfileItem(
     profile: ProxyProfile,
@@ -232,13 +235,19 @@ private fun ProfileItem(
     PfCard(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalAlignment = Alignment.CenterVertically) {
-                    Text(profile.displayName, style = MaterialTheme.typography.titleMedium)
+                // The label goes under a name too long to leave it room (large fonts), never squeezed letter by letter.
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Text(
+                        profile.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                    )
                     if (active) {
                         Text(
                             stringResource(R.string.profiles_active).uppercase(),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.align(Alignment.CenterVertically),
                         )
                     }
                 }
