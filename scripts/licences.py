@@ -222,8 +222,9 @@ def go_entries(facts: list[str]) -> tuple[list[dict], list[str]]:
         else:
             linked.append((parts[0], parts[1], None))
     for module, version, replaced in linked:
-        if OWN_GO_MODULE in (module, replaced):
-            continue  # ProxyFlow's own code
+        # ProxyFlow's own code: the engine's module, built from the checkout. Replaced by another module, it is not.
+        if module == OWN_GO_MODULE or (replaced == OWN_GO_MODULE and module.startswith(("/", "."))):
+            continue
         if module.startswith(("/", ".")):
             problems.append(f"the engine links {replaced} from the directory {module}, which docs/m4/dependency-review.md hasn't reviewed")
             continue

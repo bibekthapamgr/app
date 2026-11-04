@@ -219,20 +219,40 @@ class AddEditProxyScreenTest {
         assertEquals(listOf("keep", "reconnect"), calls)
     }
 
-    /** While saving, Back waits — the top bar's and Android's — so what is saved, and the reconnect after it, goes through. */
+    /**
+     * While saving, Back waits — the top bar's and Android's — so what is saved, and the reconnect after it, goes through;
+     * also for a form saved without changes, which no discard question would hold.
+     */
     @Test
     fun backWaitsWhileSaving() {
         var backs = 0
+        var state by mutableStateOf(AddEditUiState(isEdit = true, dirty = true, saving = true))
+        compose.setContent { ProxyFlowTheme { AddEditProxyScreen(state, AddEditActions(onBack = { backs++ })) } }
+        for (saving in listOf(state, state.copy(dirty = false))) {
+            state = saving
+            compose.onNodeWithContentDescription("Back").performClick()
+            compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+            compose.waitForIdle()
+            assertEquals(0, backs)
+            compose.onNodeWithText("Discard changes?").assertDoesNotExist()
+        }
+    }
+
+    /** D9 during a first connect: the reconnect only checks the new settings, and says so. */
+    @Test
+    fun aReconnectDuringAFirstConnectSaysItOnlyChecks() {
         compose.setContent {
             ProxyFlowTheme {
-                AddEditProxyScreen(AddEditUiState(isEdit = true, dirty = true, saving = true), AddEditActions(onBack = { backs++ }))
+                AddEditProxyScreen(
+                    AddEditUiState(isEdit = true, dirty = true, confirmReconnect = "Office", confirmReconnectHolds = false),
+                    AddEditActions(),
+                )
             }
         }
-        compose.onNodeWithContentDescription("Back").performClick()
-        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
-        compose.waitForIdle()
-        assertEquals(0, backs)
-        compose.onNodeWithText("Discard changes?").assertDoesNotExist()
+        compose.onNodeWithText("Reconnect with changes?").assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow is still checking Office. Saving checks the new settings instead", substring = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("apps can't go online", substring = true).assertDoesNotExist()
     }
 
     @Test

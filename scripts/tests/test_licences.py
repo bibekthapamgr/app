@@ -148,6 +148,11 @@ class NoticesTest(unittest.TestCase):
             self.assertNotIn("github.com/bibekthapamgr/app/engine", names)
             self.assertFalse(any(name.startswith("/") for name in names))
 
+    def test_the_engines_module_replaced_by_another_module_is_not_skipped(self) -> None:
+        facts = FACTS + ["  github.com/bibekthapamgr/app/engine v0.0.0-00010101000000-000000000000", "  => example.com/fork/engine v1.0.0"]
+        _, problems = licences.notices(TREE, facts, fetch(POMS))
+        self.assertEqual(["the engine links example.com/fork/engine v1.0.0, which docs/m4/dependency-review.md hasn't reviewed"], problems)
+
     def test_another_module_built_from_a_local_directory_fails(self) -> None:
         facts = FACTS + ["  golang.org/x/sys v0.48.0", "  => /home/runner/work/sys (devel)"]
         _, problems = licences.notices(TREE, facts, fetch(POMS))

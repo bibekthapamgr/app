@@ -28,10 +28,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -154,11 +156,13 @@ class VpnRuntime(
 
         // A deleted profile's credentials must not stay in use: the connection using it stops its engine (J11).
         // Room is watched only while a connection exists.
+        // A failure reading Room is logged, never left to end the process the VPN runs in.
         scope.launch {
             mutableState.map { s -> s.profileId?.takeIf { s.active } }.distinctUntilChanged().collectLatest { id ->
                 if (id == null) return@collectLatest
-                profiles.profiles.first { list -> list.none { it.id == id } }
-                session.profileDeleted(id)
+                val gone = profiles.profiles.catch { e -> log.add("profiles can't be read (${e.javaClass.simpleName})") }
+                    .firstOrNull { list -> list.none { it.id == id } }
+                if (gone != null) session.profileDeleted(id)
             }
         }
         // A rename shows at once on the connection using the profile — Home, the tile, the notification: a name is not
@@ -166,7 +170,9 @@ class VpnRuntime(
         scope.launch {
             mutableState.map { s -> s.profileId?.takeIf { s.active } }.distinctUntilChanged().collectLatest { id ->
                 if (id == null) return@collectLatest
-                profiles.profiles.mapNotNull { list -> list.firstOrNull { it.id == id }?.name }.distinctUntilChanged()
+                profiles.profiles.catch { e -> log.add("profiles can't be read (${e.javaClass.simpleName})") }
+                    .mapNotNull { list -> list.firstOrNull { it.id == id }?.name }
+                    .distinctUntilChanged()
                     .collect { name -> session.profileRenamed(id, name) }
             }
         }

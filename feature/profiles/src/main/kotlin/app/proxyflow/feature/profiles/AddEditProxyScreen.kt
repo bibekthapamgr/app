@@ -209,9 +209,10 @@ fun AddEditProxyScreen(state: AddEditUiState, actions: AddEditActions, modifier:
     }
     // Board D9: the connection runs on this profile, and saving changes how it reaches its proxy.
     state.confirmReconnect?.let { name ->
+        val body = if (state.confirmReconnectHolds) R.string.edit_reconnect_body else R.string.edit_reconnect_checking_body
         PfConfirmDialog(
             title = stringResource(R.string.edit_reconnect_title),
-            text = stringResource(R.string.edit_reconnect_body, name),
+            text = stringResource(body, name),
             confirmLabel = stringResource(R.string.edit_reconnect_confirm),
             dismissLabel = stringResource(R.string.edit_keep_editing),
             onConfirm = actions.onSaveAndReconnect,
@@ -347,8 +348,9 @@ private fun TestConnection(test: ConnectionTestState, onTest: () -> Unit, onCanc
             enabled = test != ConnectionTestState.Testing,
             modifier = Modifier.fillMaxWidth(),
         )
-        // What the test found is announced (TalkBack) when it ends: it can take 15 s, and the user waits for it. The
-        // region is there before the test starts, so its change is announced; it takes no room while empty.
+        // What the test found is announced (TalkBack) when it ends: it can take 15 s, and the user waits for it. The region
+        // holds "Testing…" while the test runs, so the result replacing it is a change TalkBack reads; empty, it takes no
+        // room (and isn't in what TalkBack reaches).
         Column(
             Modifier
                 .semantics { liveRegion = LiveRegionMode.Polite }

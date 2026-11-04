@@ -345,6 +345,8 @@ class VpnSessionTest {
         assertEquals("nothing reconnected", 1, log.count("probe"))
 
         session.profileRenamed(other.id, "Elsewhere")
+        runBlocking { session.awaitIdle() }
+        assertEquals("another profile's rename changes nothing here", "Tokyo (home)", state.value.profileName)
         session.profileRenamed(profile.id, "")
         eventually("named by its server") { state.value.profileName == "proxy.example.com" }
         runBlocking { session.awaitIdle() }

@@ -32,7 +32,8 @@ enum class ProfileAction { Use, Duplicate, Delete, Test }
  *   tested; a profile never tested, or changed since, isn't in it.
  * @param testing the profiles a test started from this list runs for now.
  * @param connectionHoldsTraffic a switch now keeps apps' traffic held until the next proxy is checked
- *   (`ConnectionState.holdsTrafficOnSwitch`), so "Use this proxy" asks first; during a first connect it doesn't.
+ *   (`ConnectionState.holdsTrafficOnSwitch`); during a first connect it only checks the other proxy instead. "Use this
+ *   proxy" says which when it asks.
  */
 data class ProfilesUiState(
     val loading: Boolean = true,
@@ -70,10 +71,11 @@ class ProfilesViewModel(
 
     /**
      * "Use this proxy": [id] becomes the active profile. While a connection runs on another profile it switches to [id],
-     * as picking it on Home does (J11): traffic is held meanwhile, never sent around a proxy. The screen asks first while
-     * a switch would hold traffic ([ProfilesUiState.connectionHoldsTraffic]). The choice is saved first, so a choice
-     * that couldn't be saved switches nothing and the screen says so; then the session is asked to switch, and decides
-     * in order with what it was asked before. Both happen even if the screen closes in between.
+     * as picking it on Home does (J11), never sending anything around a proxy. The screen asks first while
+     * a connection runs on another saved profile, in the words for [ProfilesUiState.connectionHoldsTraffic]. The choice
+     * is saved first, so a choice that couldn't be saved switches nothing and the screen says so; then the session is
+     * asked to switch, and decides in order with what it was asked before. Both happen even if the screen closes in
+     * between.
      */
     fun setActive(id: String) = perform(ProfileAction.Use) {
         withContext(NonCancellable) {

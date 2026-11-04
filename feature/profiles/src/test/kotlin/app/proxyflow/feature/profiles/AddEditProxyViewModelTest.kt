@@ -621,18 +621,20 @@ class AddEditProxyViewModelTest {
     }
 
     /**
-     * During a first connect nothing is held yet — apps use the normal network until it is connected — so a change is
-     * saved and the attempt checks it, without asking; an Always-on start holding traffic asks, as a connection does.
+     * During a first connect a reconnect only checks the new settings — the phone's network stays as it is until it's
+     * connected — and D9 says so; an Always-on start holding traffic is asked about as a connection is.
      */
     @Test
-    fun aChangeDuringAFirstConnectIsCheckedAgainWithoutAsking() = runTest {
+    fun aChangeDuringAFirstConnectIsAskedInItsOwnWords() = runTest {
         val saved = repository.save(null, signIn.copy(name = "Office"))
         connection.current.value = ConnectionState(ConnectionStatus.Connecting, saved.id, "Office", saved)
         val first = viewModel(editing(saved.id))
         first.onPortChange("1081")
         first.onPasswordChange("secret")
         first.save()
-        assertNull(first.uiState.value.confirmReconnect)
+        assertEquals("Office", first.uiState.value.confirmReconnect)
+        assertFalse("a first connect holds nothing", first.uiState.value.confirmReconnectHolds)
+        first.saveAndReconnect()
         assertTrue(first.uiState.value.saved)
         assertEquals(listOf("reconnect ${saved.id}"), connection.calls)
 
@@ -641,7 +643,25 @@ class AddEditProxyViewModelTest {
         held.onPortChange("1082")
         held.onPasswordChange("secret")
         held.save()
-        assertEquals("traffic held: asked first", "Office", held.uiState.value.confirmReconnect)
+        assertEquals("Office", held.uiState.value.confirmReconnect)
+        assertTrue("traffic held", held.uiState.value.confirmReconnectHolds)
+    }
+
+    /** A connection blocked because its profile was deleted isn't this form's: Save makes a new profile and asks nothing. */
+    @Test
+    fun aConnectionWhoseProfileWasDeletedIsNotAskedAbout() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        val vm = viewModel(editing(saved.id))
+        repository.delete(saved.id)
+        val deleted = ConnectionError(ConnectionError.PROFILE_DELETED)
+        connection.current.value = ConnectionState(ConnectionStatus.Blocked, saved.id, "Office", saved, error = deleted)
+        vm.onPortChange("1081")
+        vm.onPasswordChange("secret")
+        vm.save()
+
+        assertNull(vm.uiState.value.confirmReconnect)
+        assertTrue(vm.uiState.value.saved)
+        assertTrue("nothing reconnected", connection.calls.isEmpty())
     }
 
     @Test

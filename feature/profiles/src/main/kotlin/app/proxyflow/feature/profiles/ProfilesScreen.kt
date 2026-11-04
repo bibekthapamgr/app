@@ -97,12 +97,13 @@ fun ProfilesScreen(
 ) {
     // Saved by id so the confirmation survives rotation; it closes by itself if the profile disappears.
     var pendingDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
-    // "Use this proxy" while a connection runs on another saved profile switches it (J11), holding apps' traffic until
-    // the new proxy is checked: asked first, as Home's picker says it before the tap. During a first connect nothing is
-    // held, and a connection whose profile was deleted is blocked already: either switches at once. The question closes,
-    // not applied, if the connection or either profile goes away meanwhile.
+    // "Use this proxy" while a connection runs on another saved profile switches it (J11): asked first, as Home's picker
+    // says it before the tap, in the words for the connection's state — once connected, traffic is held until the new
+    // proxy is checked; during a first connect, the other proxy is checked instead. A connection whose profile was
+    // deleted has none to name, and is blocked already: it switches at once. The question closes, not applied, if the
+    // connection or either profile goes away meanwhile.
     var pendingUseId by rememberSaveable { mutableStateOf<String?>(null) }
-    val switchingFrom = state.profiles.firstOrNull { it.id == state.connectedProfileId }?.takeIf { state.connectionHoldsTraffic }
+    val switchingFrom = state.profiles.firstOrNull { it.id == state.connectedProfileId }
     val snackbar = remember { SnackbarHostState() }
     val failure = state.failed?.let { action ->
         stringResource(
@@ -205,7 +206,11 @@ fun ProfilesScreen(
     if (switchingFrom != null && switchingTo != null) {
         PfConfirmDialog(
             title = stringResource(R.string.profiles_switch_title, switchingTo.displayName),
-            text = stringResource(R.string.profiles_switch_body, switchingFrom.displayName, switchingTo.displayName),
+            text = stringResource(
+                if (state.connectionHoldsTraffic) R.string.profiles_switch_body else R.string.profiles_switch_checking_body,
+                switchingFrom.displayName,
+                switchingTo.displayName,
+            ),
             confirmLabel = stringResource(R.string.profiles_switch_confirm),
             dismissLabel = stringResource(R.string.profiles_cancel),
             onConfirm = {
