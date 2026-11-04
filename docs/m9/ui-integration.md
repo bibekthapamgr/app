@@ -71,5 +71,5 @@ The table lists each control a screen can show, the code it runs and the test th
 ## 4. Not in M9
 
 - The Settings board's "Reconnect automatically" and "Record destinations" switches (ADR-0014 §6).
-- A public privacy policy URL and a support contact (open decision D8): `docs/m9/privacy-policy.md` is the text, made from the app's own.
+- A public privacy policy URL and a support contact (owner decision D9, new in M9): `docs/m9/privacy-policy.md` is the text, made from the app's own.
 - What "Test connection" contacts (open decision D6): the pre-flight target, one constant.

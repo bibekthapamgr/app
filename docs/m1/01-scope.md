@@ -68,6 +68,7 @@ ProxyFlow is a free, original Android app that sends other apps' TCP traffic thr
 | D6 | "Test proxy" target | A neutral HTTPS endpoint fetched through the proxy (e.g. a `generate_204` style URL) vs handshake-only test | Handshake + one HTTPS request to a configurable, documented URL; disclosed in privacy policy |
 | D7 | TLS default in the Add-proxy form | Off (matches most providers) vs On | **Off with the plaintext warning shown** unless D2 = (b) |
 | D8 | App licence and first translations | Open-source (Apache-2.0/MIT/GPL) vs closed; Nepali, Japanese, others | Owner choice; note GPL engines (sing-tun) are excluded only if the app is not GPL |
+| D9 | Public privacy policy and support contact (added in M9) | Where the privacy policy Google Play asks for is published (a page of the project's site or repository), and the contact address the policy and the store listing give | The text is ready, made from the app's own (`docs/m9/privacy-policy.md`, ADR-0014 §7); one address the owner controls |
 
 ## 7. V1 quality bars (targets to be verified on devices in M10)
 

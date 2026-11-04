@@ -59,7 +59,7 @@ Rules: UI never talks to the engine directly; decrypted credentials pass only fr
 | Cleanup | `Stop()` closes every tracked flow, waits for goroutines, idempotent; does **not** close the TUN fd (owned by Kotlin) | E12: `Stop()` with 200 flows open took 24 ms; goroutines 608 → 2; the last app saw its connection end 17 ms after the stop signal |
 | Adapters | SOCKS5 (RFC 1928/1929), HTTP CONNECT (Basic, preemptive), TLS wrapper (TLS 1.2+, strict verification, SNI override); hostname validation blocks header injection; response headers capped (16 KiB / 100 lines) | `adapters/` + fuzz targets |
 | Errors | 19 stable codes shared with the UI (`adapters/errors.go`); proxy-level vs target-level | `04-ux…` §4 |
-| Observability | Stats snapshot (bytes, active/opened/failed flows, DNS outcomes, UDP rejected, RSS, goroutines, last proxy error, consecutive failures) + typed event stream; destinations only when the user enables "Record destinations" | E14 |
+| Observability | Stats snapshot (bytes, active/opened/failed flows, DNS outcomes, UDP rejected, RSS, goroutines, last proxy error, consecutive failures) + typed event stream; destinations only when the user enables "Record destinations" (**M9:** not offered in V1, so never recorded; ADR-0014 §6) | E14 |
 
 ### Kotlin ⇄ Go boundary (gomobile)
 

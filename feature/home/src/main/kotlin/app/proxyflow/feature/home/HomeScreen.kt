@@ -32,6 +32,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -150,6 +151,9 @@ internal fun HomeRoute(
     val connect = viewModel::connect
     val connection = (state as? HomeUiState.Ready)?.connection
     var picking by rememberSaveable { mutableStateOf(false) }
+    // The picker is Ready's: with the last profile gone it closes, and doesn't come back when one is added.
+    val ready = state is HomeUiState.Ready
+    LaunchedEffect(ready) { if (!ready) picking = false }
     // The connected timer, the wait before the next attempt (B5) and the picker's "tested 2 min ago" (B8) tick on whole
     // seconds, only while shown.
     val ticking = connection?.status == ConnectionStatus.Connected || connection?.reconnect?.nextAttemptAtMillis != null || picking

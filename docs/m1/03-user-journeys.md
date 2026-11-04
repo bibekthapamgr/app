@@ -68,6 +68,7 @@ Rules that apply to every state:
 | Happy path | Steps: reach proxy (TCP connect, RTT) → TLS verified (version, certificate subject) → sign-in accepted → one test request through the proxy → result with round-trip time |
 | Branches | Each step maps to an engine code: `PROXY_DNS_FAILED`, `PROXY_UNREACHABLE`, `TLS_*`, `AUTH_REQUIRED`/`AUTH_FAILED`, `PROTOCOL_ERROR`, `HANDSHAKE_TIMEOUT`; D7 shows the failed step and the fix |
 | Acceptance | The test runs without the VPN and does not change the phone's routing; credentials go only to the configured proxy; the test target (decision D6) is disclosed in the privacy policy; result saved on the profile ("Works · 182 ms · tested 2 min ago") |
+| M9 | Implemented as ADR-0014 §1–§3: the engine answers once — the catalogue code of the step that failed, or the time the tunnel took — so D5 shows the test running and D6/D7 its answer, not each step as it passes; the test opens one tunnel to the pre-flight target and sends nothing through it (D6 stays open) |
 
 ## J4 — VPN permission
 

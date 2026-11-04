@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes docs/m9/privacy-policy.md, the privacy policy for the public address Google Play asks for (open decision D8),
+"""Writes docs/m9/privacy-policy.md, the privacy policy for the public address Google Play asks for (owner decision D9),
 from the app's own text (M9): the strings in feature/about/src/main/res/values/strings.xml, in the order the in-app page
 shows them (PRIVACY_SECTIONS in PrivacyPolicyScreen.kt), for the version in app/build.gradle.kts. The two can't say
 different things: scripts/tests/test_privacy_policy.py fails in CI when the document is not what this writes.
@@ -65,7 +65,7 @@ def document() -> str:
         f"# ProxyFlow — {text['privacy_title']}",
         "",
         "The privacy policy the app shows (About & privacy, then Privacy policy), for the public address Google Play asks "
-        "for (open decision D8: where it is published, and the support contact). Written from the app's own text by "
+        "for (owner decision D9: where it is published, and the support contact). Written from the app's own text by "
         "`scripts/privacy_policy.py`; CI fails if the two differ. Do not edit by hand.",
         "",
         f"*{text['privacy_applies'].replace('%1$s', version())}*",

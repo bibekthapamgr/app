@@ -1,6 +1,6 @@
 # ProxyFlow — Privacy policy
 
-The privacy policy the app shows (About & privacy, then Privacy policy), for the public address Google Play asks for (open decision D8: where it is published, and the support contact). Written from the app's own text by `scripts/privacy_policy.py`; CI fails if the two differ. Do not edit by hand.
+The privacy policy the app shows (About & privacy, then Privacy policy), for the public address Google Play asks for (owner decision D9: where it is published, and the support contact). Written from the app's own text by `scripts/privacy_policy.py`; CI fails if the two differ. Do not edit by hand.
 
 *This policy describes ProxyFlow version 0.9.0 (9).*
 

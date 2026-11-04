@@ -1,4 +1,4 @@
-"""The public privacy policy (docs/m9/privacy-policy.md, open decision D8) says what the app's own page says (M9).
+"""The public privacy policy (docs/m9/privacy-policy.md, owner decision D9) says what the app's own page says (M9).
 
 Run: python3 -m unittest discover -s scripts/tests -v
 """
