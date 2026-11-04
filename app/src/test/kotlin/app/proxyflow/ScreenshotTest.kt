@@ -6,20 +6,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ConnectStep
@@ -82,6 +82,7 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import java.util.TimeZone
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -778,61 +779,34 @@ class ScreenshotTest {
             PrivacyPolicyScreen(version = "0.2.0 (2)", onBack = {})
         }
 
-    // M10's localisation review: the pseudo-locales built into the debug app (app/build.gradle.kts). en-XA makes every
-    // string about a third longer and accented, as longer languages are; ar-XB writes it right to left, as Arabic and
-    // Hebrew are, and Android mirrors the layout. Six screens in each, light theme, the top of the screen as it opens.
+    // M10's localisation review: right to left, as Arabic, Hebrew, Persian and Urdu are written. ProxyFlow declares
+    // supportsRtl, so on a phone set to one of them Android mirrors its screens, English words and all (it ships in
+    // English only until decision D8). Six screens, light theme, the top of the screen as it opens; the layout must be
+    // right to left (Robolectric's ldrtl), and the icons that point a way must turn round with it (defect M10-2).
 
     @Test
-    @Config(qualifiers = "+en-rXA")
-    fun longerTextHomeDisconnected() = capturePseudoLocale("en-XA", "B2_home_disconnected", english = "Connect") {
-        HomeScreen(home(ConnectionState.Idle), HomeActions())
-    }
+    @Config(qualifiers = "+ldrtl")
+    fun rightToLeftHomeDisconnected() = captureRightToLeft("B2_home_disconnected") { HomeScreen(home(ConnectionState.Idle), HomeActions()) }
 
     @Test
-    @Config(qualifiers = "+ar-rXB")
-    fun rightToLeftHomeDisconnected() = capturePseudoLocale("ar-XB", "B2_home_disconnected", english = "Connect") {
-        HomeScreen(home(ConnectionState.Idle), HomeActions())
-    }
+    @Config(qualifiers = "+ldrtl")
+    fun rightToLeftHomeConnected() = captureRightToLeft("B4_home_connected") { connectedHome() }
 
     @Test
-    @Config(qualifiers = "+en-rXA")
-    fun longerTextHomeConnected() = capturePseudoLocale("en-XA", "B4_home_connected", english = "Disconnect") { connectedHome() }
+    @Config(qualifiers = "+ldrtl")
+    fun rightToLeftConnectFailed() = captureRightToLeft("B6b_connect_failed") { connectFailedHome() }
 
     @Test
-    @Config(qualifiers = "+ar-rXB")
-    fun rightToLeftHomeConnected() = capturePseudoLocale("ar-XB", "B4_home_connected", english = "Disconnect") { connectedHome() }
+    @Config(qualifiers = "+ldrtl")
+    fun rightToLeftProfiles() = captureRightToLeft("C2_profiles_list") { profilesList() }
 
     @Test
-    @Config(qualifiers = "+en-rXA")
-    fun longerTextConnectFailed() = capturePseudoLocale("en-XA", "B6b_connect_failed", english = "Try again") { connectFailedHome() }
+    @Config(qualifiers = "+ldrtl")
+    fun rightToLeftAddProxy() = captureRightToLeft("D1_add_proxy") { addProxyForm() }
 
     @Test
-    @Config(qualifiers = "+ar-rXB")
-    fun rightToLeftConnectFailed() = capturePseudoLocale("ar-XB", "B6b_connect_failed", english = "Try again") { connectFailedHome() }
-
-    @Test
-    @Config(qualifiers = "+en-rXA")
-    fun longerTextProfiles() = capturePseudoLocale("en-XA", "C2_profiles_list", english = "Profiles") { profilesList() }
-
-    @Test
-    @Config(qualifiers = "+ar-rXB")
-    fun rightToLeftProfiles() = capturePseudoLocale("ar-XB", "C2_profiles_list", english = "Profiles") { profilesList() }
-
-    @Test
-    @Config(qualifiers = "+en-rXA")
-    fun longerTextAddProxy() = capturePseudoLocale("en-XA", "D1_add_proxy", english = "Test connection") { addProxyForm() }
-
-    @Test
-    @Config(qualifiers = "+ar-rXB")
-    fun rightToLeftAddProxy() = capturePseudoLocale("ar-XB", "D1_add_proxy", english = "Test connection") { addProxyForm() }
-
-    @Test
-    @Config(qualifiers = "+en-rXA")
-    fun longerTextSettings() = capturePseudoLocale("en-XA", "E1_settings", english = "Settings") { settingsScreen() }
-
-    @Test
-    @Config(qualifiers = "+ar-rXB")
-    fun rightToLeftSettings() = capturePseudoLocale("ar-XB", "E1_settings", english = "Settings") { settingsScreen() }
+    @Config(qualifiers = "+ldrtl")
+    fun rightToLeftSettings() = captureRightToLeft("E1_settings") { settingsScreen() }
 
     @Composable
     private fun connectedHome() {
@@ -860,15 +834,16 @@ class ScreenshotTest {
     private fun settingsScreen() = SettingsScreen(SettingsUiState(loading = false, theme = ThemePreference.System), onThemeChange = {
     }, onOpenAbout = {}, notificationsOn = true)
 
-    /**
-     * [content] in the pseudo-locale the test's @Config sets, which must be in force — the [english] words of the screen
-     * are nowhere — captured in screenshots/pseudo_locale and checked.
-     */
-    private fun capturePseudoLocale(locale: String, name: String, english: String, content: @Composable () -> Unit) {
-        compose.setContent { ProxyFlowTheme { content() } }
-        val captured = runCatching { compose.onRoot().captureRoboImage("$DIR/pseudo_locale/${name}_$locale.png") }
-        compose.onAllNodesWithText(english).assertCountEquals(0)
-        assertAccessible("$name ($locale)")
+    /** [content] laid out right to left, as the test's @Config sets — which must be in force — captured in screenshots/rtl and checked. */
+    private fun captureRightToLeft(name: String, content: @Composable () -> Unit) {
+        var direction: LayoutDirection? = null
+        compose.setContent {
+            direction = LocalLayoutDirection.current
+            ProxyFlowTheme { content() }
+        }
+        val captured = runCatching { compose.onRoot().captureRoboImage("$DIR/rtl/$name.png") }
+        assertEquals("laid out right to left", LayoutDirection.Rtl, direction)
+        assertAccessible("$name (right to left)")
         captured.getOrThrow()
     }
 
