@@ -8,10 +8,12 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -24,9 +26,12 @@ import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.DnsProblems
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
+import app.proxyflow.core.model.ReconnectInfo
+import app.proxyflow.core.model.ReconnectReason
 import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.TlsMode
 import app.proxyflow.core.model.TlsProblems
+import app.proxyflow.core.model.TrafficStats
 import app.proxyflow.core.model.UnsupportedTraffic
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -51,6 +56,9 @@ class HomeScreenTest {
         onConfirmStop = { calls += "confirm stop" },
         onExplainerContinue = { calls += "continue ${it.action}" },
         onDismissDialog = { calls += "dismiss" },
+        onRetryNow = { calls += "retry now" },
+        onOpenLogs = { calls += "logs" },
+        onOpenDateSettings = { calls += "date settings" },
     )
 
     @Test
@@ -74,9 +82,12 @@ class HomeScreenTest {
 
     @Test
     fun connectingShowsTheCheckBeforeAnythingChangesAndCanBeCancelled() {
-        show(ready(ConnectionState(ConnectionStatus.Connecting, "p1", "Office", step = ConnectStep.CheckingProxy)))
+        show(ready(ConnectionState(ConnectionStatus.Connecting, "p1", "Office", step = ConnectStep.ProxyHandshake)))
         compose.onNodeWithText("Connecting…").assertIsDisplayed()
         compose.onNodeWithText("Connecting to Office").assertIsDisplayed()
+        // One row per stage (ADR-0012): the ones before the current stage done, the ones after not started.
+        val rows = listOf("Getting ready", "VPN permission", "Checking proxy — TLS and sign-in", "Proxy accepted — starting the VPN")
+        assertEquals(listOf("Done", "Done", "In progress", "Not started"), rows.map { stateOf(it) })
         scrolledTo("Checking proxy — TLS and sign-in").assertIsDisplayed()
         scrolledTo(
             "Your phone's network is unchanged until the VPN starts. If the proxy check fails, nothing is switched over.",
@@ -170,7 +181,9 @@ class HomeScreenTest {
             val buttons = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().map { node ->
                 node.config.getOrNull(SemanticsProperties.Text)?.joinToString(" ").orEmpty()
             }
-            assertEquals("$code: $buttons", setOf("Try again", "Edit profile", "Use another proxy", "Change"), buttons.toSet())
+            val expected = setOf("Try again", "Edit profile", "Use another proxy", "Change", "View logs") +
+                (if (code == "TLS_EXPIRED") setOf("Date & time settings") else emptySet())
+            assertEquals("$code: $buttons", expected, buttons.toSet())
             assertTrue(compose.onAllNodesWithText("anyway", substring = true, ignoreCase = true).fetchSemanticsNodes().isEmpty())
         }
     }
@@ -287,12 +300,158 @@ class HomeScreenTest {
         assertEquals(listOf("dismiss", "connect"), calls)
     }
 
+    /** B4's counters (ADR-0012): the session's data sent and received, and the connections open now. */
+    @Test
+    fun connectedShowsTheSessionsTraffic() {
+        val since = 1_800_000_000_000L
+        val traffic = TrafficStats(bytesUp = 1_234, bytesDown = 34_500_000, activeConnections = 12, sinceMillis = since)
+        show(
+            ready(ConnectionState(ConnectionStatus.Connected, "p1", "Office", connectedSinceMillis = since), traffic = traffic),
+            now = since,
+        )
+        compose.onNodeWithContentDescription("Sent 1.2 kB").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Received 34.5 MB").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Active connections 12").assertIsDisplayed()
+        scrolledTo("Approximate: what apps sent and received through your proxy since you connected.").assertIsDisplayed()
+    }
+
+    @Test
+    fun trafficNotReadYetShowsADash() {
+        show(ready(ConnectionState(ConnectionStatus.Connected, "p1", "Office", connectedSinceMillis = 0)))
+        compose.onNodeWithContentDescription("Sent –").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Active connections –").assertIsDisplayed()
+    }
+
+    /** Board B5 (ADR-0012): the attempt, the wait before the next one, and every way on. */
+    @Test
+    fun reconnectingOnItsOwnShowsTheAttemptAndEveryWayOn() {
+        val now = 1_800_000_000_000L
+        val retry = ReconnectInfo(
+            ReconnectReason.ProxyFailures,
+            attempt = 2,
+            maxAttempts = 8,
+            nextAttemptAtMillis = now + 3_200,
+            lastError = ConnectionError("PROXY_UNREACHABLE", "no route to the proxy"),
+        )
+        show(
+            ready(ConnectionState(ConnectionStatus.Reconnecting, "p1", "Office", connectedSinceMillis = now - 60_000, reconnect = retry)),
+            now,
+        )
+        compose.onNodeWithText("Reconnecting").assertIsDisplayed()
+        compose.onNodeWithText("Traffic paused — ProxyFlow sends nothing around your proxy").assertIsDisplayed()
+        scrolledTo("Can't reach your proxy").assertIsDisplayed()
+        scrolledTo("ProxyFlow is trying your proxy again. Apps stay paused until it answers.").assertIsDisplayed()
+        scrolledTo("Attempt 2 of 8 · next try in 4 s").assertIsDisplayed()
+        scrolledTo("Code: PROXY_UNREACHABLE · no route to the proxy").assertIsDisplayed()
+        scrolledTo("Retry now").assertIsEnabled().performClick()
+        scrolledTo("Edit profile").performClick()
+        scrolledTo("Stop and use normal network").performClick()
+        scrolledTo("View logs").performClick()
+        assertEquals(listOf("retry now", "edit p1", "stop", "logs"), calls)
+    }
+
+    @Test
+    fun anAttemptThatRunsCannotBeRunSooner() {
+        val retry = ReconnectInfo(ReconnectReason.NetworkBack, attempt = 1, maxAttempts = 8, nextAttemptAtMillis = null, lastError = null)
+        show(ready(ConnectionState(ConnectionStatus.Reconnecting, "p1", "Office", connectedSinceMillis = 0, reconnect = retry)))
+        scrolledTo("Back online").assertIsDisplayed()
+        scrolledTo("Your phone has a network again. ProxyFlow is reconnecting to your proxy.").assertIsDisplayed()
+        scrolledTo("Attempt 1 of 8 · trying now…").assertIsDisplayed()
+        scrolledTo("Retry now").assertIsNotEnabled()
+    }
+
+    /** Board B7: no network, traffic held until one is back; stopping is still the user's choice. */
+    @Test
+    fun offlineWaitsForANetworkWithTrafficHeld() {
+        val offline = ConnectionState(ConnectionStatus.Offline, "p1", "Office", error = ConnectionError(ConnectionError.OFFLINE))
+        show(ready(offline))
+        compose.onNodeWithText("Waiting for network").assertIsDisplayed()
+        scrolledTo("You're offline").assertIsDisplayed()
+        scrolledTo("ProxyFlow will connect when a network is available. Traffic stays blocked meanwhile.").assertIsDisplayed()
+        scrolledTo("Code: OFFLINE").assertIsDisplayed()
+        compose.onNodeWithText("Try again").assertDoesNotExist()
+        scrolledTo("Stop and use normal network").performClick()
+        assertEquals(listOf("stop"), calls)
+    }
+
+    @Test
+    fun reconnectingThatStoppedSaysAfterHowManyAttempts() {
+        val gaveUp = ConnectionError("PROXY_UNREACHABLE", "reconnecting stopped after 8 attempts")
+        show(ready(ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = gaveUp)))
+        compose.onNodeWithText("Traffic blocked").assertIsDisplayed()
+        scrolledTo("Can't reach your proxy").assertIsDisplayed()
+        scrolledTo("Code: PROXY_UNREACHABLE · reconnecting stopped after 8 attempts").assertIsDisplayed()
+        scrolledTo("Try again").performClick()
+        scrolledTo("View logs").performClick()
+        assertEquals(listOf("connect", "logs"), calls)
+    }
+
+    /** What the profile fixes offers Edit profile first; what may pass by itself offers Try again first (docs/m1/04 §4). */
+    @Test
+    fun theFirstActionIsWhatFixesTheError() {
+        var state by mutableStateOf(ready(ConnectionState(profileId = "p1", error = ConnectionError("AUTH_FAILED"))))
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
+        val editFirst =
+            listOf("AUTH_REQUIRED", "AUTH_FAILED", "TLS_UNTRUSTED", "TLS_HOSTNAME", "TLS_HANDSHAKE", "PROTOCOL_ERROR", "PROXY_DNS_FAILED")
+        val retryFirst = listOf("PROXY_UNREACHABLE", "HANDSHAKE_TIMEOUT", "TLS_EXPIRED", "TARGET_UNREACHABLE")
+        for (code in editFirst + retryFirst) {
+            for (status in listOf(ConnectionStatus.Disconnected, ConnectionStatus.Blocked)) {
+                state = ready(ConnectionState(status, "p1", "Office", error = ConnectionError(code)))
+                compose.waitForIdle()
+                val buttons = compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().map { node ->
+                    node.config.getOrNull(SemanticsProperties.Text)?.joinToString(" ").orEmpty()
+                }
+                val edit = buttons.indexOf("Edit profile")
+                val retry = buttons.indexOf("Try again")
+                assertTrue("$code $status: $buttons", edit >= 0 && retry >= 0)
+                assertEquals("$code $status: $buttons", code in editFirst, edit < retry)
+            }
+        }
+    }
+
+    @Test
+    fun anExpiredLookingCertificateOffersTheDateSettings() {
+        show(ready(ConnectionState(profileId = "p1", error = ConnectionError("TLS_EXPIRED"))))
+        scrolledTo("Date & time settings").performClick()
+        assertEquals(listOf("date settings"), calls)
+    }
+
+    /** The catalogue's variants: a sign-in method ProxyFlow lacks, and an HTTP proxy that allows no tunnels at all. */
+    @Test
+    fun anUnsupportedSignInOrNoTunnelsAreSaidAsSuch() {
+        var state by mutableStateOf(
+            ready(
+                ConnectionState(
+                    profileId = "p1",
+                    error = ConnectionError("AUTH_FAILED", "proxy offers only digest authentication; V1 supports Basic"),
+                ),
+            ),
+        )
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions) } }
+        scrolledTo(
+            "This proxy only offers a sign-in method ProxyFlow doesn't support. " +
+                "ProxyFlow signs in to HTTP proxies with Basic sign-in: ask your provider for it, or use a SOCKS5 proxy.",
+        ).assertIsDisplayed()
+        state =
+            ready(ConnectionState(profileId = "p1", error = ConnectionError("PROTOCOL_ERROR", "proxy does not support CONNECT (HTTP 405)")))
+        compose.waitForIdle()
+        scrolledTo("This doesn't look like a HTTP proxy").assertIsDisplayed()
+        scrolledTo(
+            "This HTTP proxy doesn't allow tunnels (CONNECT), which ProxyFlow needs. " +
+                "Check the port, or ask your provider for a proxy that allows them.",
+        ).assertIsDisplayed()
+    }
+
+    private fun stateOf(text: String): String? =
+        compose.onNodeWithText(text, useUnmergedTree = false).fetchSemanticsNode().config.getOrNull(SemanticsProperties.StateDescription)
+
     private fun ready(
         connection: ConnectionState,
         canConnect: Boolean = true,
         dialog: HomeDialog? = null,
         diagnostics: RoutingDiagnostics? = null,
-    ) = HomeUiState.Ready(profile, connection, canConnect, dialog, diagnostics)
+        traffic: TrafficStats? = null,
+    ) = HomeUiState.Ready(profile, connection, canConnect, dialog, diagnostics, traffic)
 
     private fun show(state: HomeUiState, now: Long = 0L) {
         compose.setContent { ProxyFlowTheme { HomeScreen(state, actions, nowMillis = now) } }

@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.PluralsRes
@@ -35,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -59,9 +62,12 @@ import app.proxyflow.core.designsystem.theme.Spacing
 import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.Formats
 import app.proxyflow.core.model.ProxyProfile
+import app.proxyflow.core.model.ReconnectInfo
+import app.proxyflow.core.model.ReconnectReason
 import app.proxyflow.core.model.RoutingDiagnostics
-import java.util.Locale
+import app.proxyflow.core.model.TrafficStats
 import kotlinx.coroutines.delay
 
 /** What Home's buttons and dialogs do; the defaults do nothing (previews, screenshots, tests). */
@@ -79,10 +85,22 @@ data class HomeActions(
     /** B9's Continue: opens Android's consent screen. */
     val onExplainerContinue: (Intent) -> Unit = {},
     val onDismissDialog: () -> Unit = {},
+    /** "Retry now" while ProxyFlow reconnects on its own (B5). */
+    val onRetryNow: () -> Unit = {},
+    /** "View logs": the Logs tab (J10). */
+    val onOpenLogs: () -> Unit = {},
+    /** Android's date and time settings, for a certificate that reads as expired (catalogue: TLS_EXPIRED). */
+    val onOpenDateSettings: () -> Unit = {},
 )
 
 @Composable
-internal fun HomeRoute(viewModel: HomeViewModel, onAddProxy: () -> Unit, onChangeProfile: () -> Unit, onEditProfile: (String) -> Unit) {
+internal fun HomeRoute(
+    viewModel: HomeViewModel,
+    onAddProxy: () -> Unit,
+    onChangeProfile: () -> Unit,
+    onEditProfile: (String) -> Unit,
+    onOpenLogs: () -> Unit,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -100,10 +118,11 @@ internal fun HomeRoute(viewModel: HomeViewModel, onAddProxy: () -> Unit, onChang
             viewModel.connect()
         }
     }
-    val connected = (state as? HomeUiState.Ready)?.status == ConnectionStatus.Connected
-    // The connected timer ticks on whole seconds, only while connected.
-    val now by produceState(System.currentTimeMillis(), connected) {
-        while (connected) {
+    val connection = (state as? HomeUiState.Ready)?.connection
+    // The connected timer and the wait before the next attempt (B5) tick on whole seconds, only while shown.
+    val ticking = connection?.status == ConnectionStatus.Connected || connection?.reconnect?.nextAttemptAtMillis != null
+    val now by produceState(System.currentTimeMillis(), ticking) {
+        while (ticking) {
             value = System.currentTimeMillis()
             delay(MILLIS_PER_SECOND - value % MILLIS_PER_SECOND)
         }
@@ -134,6 +153,15 @@ internal fun HomeRoute(viewModel: HomeViewModel, onAddProxy: () -> Unit, onChang
                 }
             },
             onDismissDialog = viewModel::dismissDialog,
+            onRetryNow = viewModel::retryNow,
+            onOpenLogs = onOpenLogs,
+            onOpenDateSettings = {
+                try {
+                    context.startActivity(Intent(Settings.ACTION_DATE_SETTINGS))
+                } catch (e: ActivityNotFoundException) {
+                    // No such settings screen on this phone: the message already says what to check.
+                }
+            },
         ),
     )
 }
@@ -185,11 +213,17 @@ private fun AppHeader() {
 @Composable
 private fun ReadyContent(state: HomeUiState.Ready, actions: HomeActions, nowMillis: Long) {
     val error = state.error
+    val reconnect = state.connection.reconnect
     when (state.status) {
         ConnectionStatus.Connecting -> ConnectingContent(state, actions)
-        ConnectionStatus.Reconnecting -> ReconnectingContent(state, actions)
+        ConnectionStatus.Reconnecting -> if (reconnect != null) {
+            AutoReconnectContent(state, reconnect, actions, nowMillis)
+        } else {
+            ReconnectingContent(state, actions)
+        }
         ConnectionStatus.Connected -> ConnectedContent(state, actions, nowMillis)
-        ConnectionStatus.Blocked, ConnectionStatus.Offline -> BlockedContent(state, actions)
+        ConnectionStatus.Offline -> OfflineContent(actions)
+        ConnectionStatus.Blocked -> BlockedContent(state, actions)
         ConnectionStatus.Disconnected -> when {
             error == null -> DisconnectedContent(state, actions)
             // H1 is a dialog over the plain disconnected screen.
@@ -229,23 +263,13 @@ private fun ConnectFailedContent(state: HomeUiState.Ready, error: ConnectionErro
     Note(stringResource(R.string.home_not_connected_note))
     ErrorCode(error)
     ProfileCard(state.profile, actions.onChangeProfile)
-    PfPrimaryButton(
-        text = stringResource(R.string.home_try_again),
-        onClick = actions.onConnect,
-        icon = PfIcons.Refresh,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    PfSecondaryButton(
-        text = stringResource(R.string.home_edit_profile),
-        onClick = { actions.onEditProfile(state.profile.id) },
-        icon = PfIcons.Edit,
-        modifier = Modifier.fillMaxWidth(),
-    )
+    FixActions(error, state.profile, actions)
     PfTextButton(
         text = stringResource(R.string.home_use_another_proxy),
         onClick = actions.onChangeProfile,
         modifier = Modifier.fillMaxWidth(),
     )
+    ViewLogs(actions)
 }
 
 /** Board B6d: Android removed the VPN; apps use the normal network. */
@@ -276,11 +300,17 @@ private fun ConnectingContent(state: HomeUiState.Ready, actions: HomeActions) {
         StatusTone.Transition,
         stringResource(R.string.home_connecting_to, state.profile.displayName),
     )
+    // One row per stage of the attempt (ADR-0012): done, in progress, or not started yet.
     PfCard(modifier = Modifier.fillMaxWidth()) {
-        val checking = state.connection.step != ConnectStep.StartingProtection
-        Step(stringResource(R.string.home_step_permission), StepState.Done)
-        Step(stringResource(R.string.home_step_checking), if (checking) StepState.Current else StepState.Done)
-        Step(stringResource(R.string.home_step_starting), if (checking) StepState.Pending else StepState.Current)
+        val current = (state.connection.step ?: ConnectStep.Starting).ordinal
+        for ((step, label) in CONNECT_STEPS) {
+            val progress = when {
+                step.ordinal < current -> StepState.Done
+                step.ordinal == current -> StepState.Current
+                else -> StepState.Pending
+            }
+            Step(stringResource(label), progress)
+        }
     }
     Note(stringResource(R.string.home_connecting_note))
     PfSecondaryButton(
@@ -308,8 +338,8 @@ private fun ReconnectingContent(state: HomeUiState.Ready, actions: HomeActions) 
 }
 
 /**
- * Board B4: what goes through the proxy, and the diagnostics since connecting (ADR-0011).
- * Traffic counters and active connections arrive with statistics in M7.
+ * Board B4: the session's time and traffic (ADR-0012), what goes through the proxy, and the
+ * diagnostics since connecting (ADR-0011).
  */
 @Composable
 private fun ConnectedContent(state: HomeUiState.Ready, actions: HomeActions, nowMillis: Long) {
@@ -317,11 +347,12 @@ private fun ConnectedContent(state: HomeUiState.Ready, actions: HomeActions, now
     val since = state.connection.connectedSinceMillis
     if (since != null) {
         Text(
-            elapsed(nowMillis - since),
+            Formats.clock(nowMillis - since),
             style = MaterialTheme.typography.displaySmall,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
+        TrafficRow(state.traffic)
     }
     Text(
         stringResource(R.string.home_connected_note),
@@ -347,43 +378,140 @@ private fun ConnectedContent(state: HomeUiState.Ready, actions: HomeActions, now
     )
 }
 
+/**
+ * Board B5 while ProxyFlow reconnects on its own (ADR-0012): traffic stays held, the attempt and the
+ * wait before the next one are shown, and the user can retry now, fix the profile or stop.
+ */
+@Composable
+private fun AutoReconnectContent(state: HomeUiState.Ready, reconnect: ReconnectInfo, actions: HomeActions, nowMillis: Long) {
+    StatusHeader(stringResource(R.string.home_status_reconnecting), StatusTone.Transition, stringResource(R.string.home_traffic_paused))
+    val lastError = reconnect.lastError
+    PfBanner(
+        title = when {
+            lastError != null -> errorTitle(lastError, state.profile)
+            reconnect.reason == ReconnectReason.NetworkBack -> stringResource(R.string.home_reconnect_back_online_title)
+            else -> stringResource(R.string.home_reconnect_network_changed_title)
+        },
+        text = stringResource(
+            when (reconnect.reason) {
+                ReconnectReason.ProxyFailures -> R.string.home_reconnect_proxy_message
+                ReconnectReason.NetworkBack -> R.string.home_reconnect_back_online_message
+                ReconnectReason.NetworkChanged -> R.string.home_reconnect_network_changed_message
+            },
+        ),
+        tone = BannerTone.Warning,
+    )
+    val next = reconnect.nextAttemptAtMillis
+    Text(
+        listOf(
+            stringResource(R.string.home_reconnect_attempt, reconnect.attempt, reconnect.maxAttempts),
+            if (next == null || next <= nowMillis) {
+                stringResource(R.string.home_reconnect_trying)
+            } else {
+                stringResource(R.string.home_reconnect_next_try, ((next - nowMillis + MILLIS_PER_SECOND - 1) / MILLIS_PER_SECOND).toInt())
+            },
+        ).joinToString(" · "),
+        style = MaterialTheme.typography.titleMedium,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    lastError?.let { ErrorCode(it) }
+    PfPrimaryButton(
+        text = stringResource(R.string.home_retry_now),
+        onClick = actions.onRetryNow,
+        enabled = next != null, // an attempt that runs can't be run sooner
+        icon = PfIcons.Refresh,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    PfSecondaryButton(
+        text = stringResource(R.string.home_edit_profile),
+        onClick = { actions.onEditProfile(state.profile.id) },
+        icon = PfIcons.Edit,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    StopButton(actions)
+    ViewLogs(actions)
+}
+
+/** Board B7: no network, so traffic waits at the VPN interface; ProxyFlow reconnects when one is back. */
+@Composable
+private fun OfflineContent(actions: HomeActions) {
+    StatusHeader(stringResource(R.string.home_status_offline), StatusTone.Transition, stringResource(R.string.home_traffic_paused))
+    PfBanner(
+        title = stringResource(R.string.home_error_offline_title),
+        text = stringResource(R.string.home_error_offline_message),
+        tone = BannerTone.Warning,
+    )
+    Code(ConnectionError.OFFLINE)
+    StopButton(actions)
+    ViewLogs(actions)
+}
+
 /** The blocked layout (board B6a's): the interface stays up with nothing going around the proxy. */
 @Composable
 private fun BlockedContent(state: HomeUiState.Ready, actions: HomeActions) {
     val error = state.error ?: ConnectionError(ConnectionError.INTERNAL)
-    val status = if (state.status == ConnectionStatus.Offline) R.string.home_status_offline else R.string.home_status_blocked
-    StatusHeader(stringResource(status), StatusTone.Error, null)
+    StatusHeader(stringResource(R.string.home_status_blocked), StatusTone.Error, null)
     PfBanner(title = errorTitle(error, state.profile), text = errorMessage(error, state.profile), tone = BannerTone.Error)
     Note(stringResource(R.string.home_blocked_note))
     ErrorCode(error)
-    if (error.code == ConnectionError.PROFILE_DELETED) {
+    when (error.code) {
         // Nothing to restart or edit: stopping is the way out, and it is still confirmed.
-        PfPrimaryButton(
+        ConnectionError.PROFILE_DELETED -> PfPrimaryButton(
             text = stringResource(R.string.home_stop_normal_network),
             onClick = actions.onStop,
             modifier = Modifier.fillMaxWidth(),
         )
-    } else {
-        PfPrimaryButton(
-            text = stringResource(if (error.code == ConnectionError.ENGINE_STOPPED) R.string.home_restart else R.string.home_try_again),
-            onClick = actions.onConnect,
-            icon = PfIcons.Refresh,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (error.code != ConnectionError.ENGINE_STOPPED) {
-            PfSecondaryButton(
-                text = stringResource(R.string.home_edit_profile),
-                onClick = { actions.onEditProfile(state.profile.id) },
-                icon = PfIcons.Edit,
+        ConnectionError.ENGINE_STOPPED -> {
+            PfPrimaryButton(
+                text = stringResource(R.string.home_restart),
+                onClick = actions.onConnect,
+                icon = PfIcons.Refresh,
                 modifier = Modifier.fillMaxWidth(),
             )
+            StopButton(actions)
         }
-        PfTextButton(
-            text = stringResource(R.string.home_stop_normal_network),
-            onClick = actions.onStop,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        else -> {
+            FixActions(error, state.profile, actions)
+            StopButton(actions)
+        }
     }
+    ViewLogs(actions)
+}
+
+/**
+ * The way out of [error] first (docs/m1/04 §4): the profile for a refused sign-in, a certificate,
+ * the protocol or the proxy's name, otherwise trying again; a certificate that reads as expired also
+ * offers the phone's date and time, which is often what is wrong.
+ */
+@Composable
+private fun FixActions(error: ConnectionError, profile: ProxyProfile, actions: HomeActions) {
+    val editFirst = error.code in FIX_PROFILE_FIRST
+    val retry = stringResource(R.string.home_try_again)
+    val edit = stringResource(R.string.home_edit_profile)
+    val onEdit = { actions.onEditProfile(profile.id) }
+    val wide = Modifier.fillMaxWidth()
+    if (editFirst) {
+        PfPrimaryButton(text = edit, onClick = onEdit, icon = PfIcons.Edit, modifier = wide)
+        PfSecondaryButton(text = retry, onClick = actions.onConnect, icon = PfIcons.Refresh, modifier = wide)
+    } else {
+        PfPrimaryButton(text = retry, onClick = actions.onConnect, icon = PfIcons.Refresh, modifier = wide)
+        PfSecondaryButton(text = edit, onClick = onEdit, icon = PfIcons.Edit, modifier = wide)
+    }
+    if (error.code == "TLS_EXPIRED") {
+        PfTextButton(text = stringResource(R.string.home_date_settings), onClick = actions.onOpenDateSettings, modifier = wide)
+    }
+}
+
+@Composable
+private fun StopButton(actions: HomeActions) {
+    PfTextButton(text = stringResource(R.string.home_stop_normal_network), onClick = actions.onStop, modifier = Modifier.fillMaxWidth())
+}
+
+/** "Details" from an error (J10): the Logs tab, where each attempt's stage and code are listed. */
+@Composable
+private fun ViewLogs(actions: HomeActions) {
+    PfTextButton(text = stringResource(R.string.home_view_logs), onClick = actions.onOpenLogs, modifier = Modifier.fillMaxWidth())
 }
 
 @Composable
@@ -492,6 +620,43 @@ private fun Step(text: String, step: StepState) {
             style = MaterialTheme.typography.bodyLarge,
             color = if (step == StepState.Pending) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
         )
+    }
+}
+
+/**
+ * Board B4's counters (ADR-0012): what the session sent and received through the proxy so far — on
+ * through reconnections — and the connections open now. Each reads as one item for screen readers.
+ */
+@Composable
+private fun TrafficRow(traffic: TrafficStats?) {
+    val unknown = stringResource(R.string.home_traffic_unknown)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            TrafficStat("↑", traffic?.let { Formats.bytes(it.bytesUp) } ?: unknown, stringResource(R.string.home_traffic_sent))
+            TrafficStat("↓", traffic?.let { Formats.bytes(it.bytesDown) } ?: unknown, stringResource(R.string.home_traffic_received))
+            TrafficStat(null, traffic?.activeConnections?.toString() ?: unknown, stringResource(R.string.home_traffic_active))
+        }
+        Text(
+            stringResource(R.string.home_traffic_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun TrafficStat(arrow: String?, value: String, label: String) {
+    Column(
+        modifier = Modifier.clearAndSetSemantics { contentDescription = "$label $value" },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(listOfNotNull(arrow, value).joinToString(" "), style = MaterialTheme.typography.titleLarge)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -668,6 +833,7 @@ private fun errorTitle(error: ConnectionError, profile: ProxyProfile): String = 
     ConnectionError.CREDENTIAL_UNREADABLE -> stringResource(R.string.home_error_credentials_title)
     ConnectionError.ENGINE_STOPPED -> stringResource(R.string.home_error_engine_stopped_title)
     ConnectionError.PROFILE_DELETED -> stringResource(R.string.home_error_profile_deleted_title)
+    ConnectionError.OFFLINE -> stringResource(R.string.home_error_offline_title)
     else -> stringResource(R.string.home_error_internal_title)
 }
 
@@ -677,12 +843,16 @@ private fun errorMessage(error: ConnectionError, profile: ProxyProfile): String 
     "PROXY_UNREACHABLE" -> stringResource(R.string.home_error_unreachable_message, profile.endpoint)
     "PROXY_DNS_FAILED" -> stringResource(R.string.home_error_dns_message, profile.host)
     "AUTH_REQUIRED" -> stringResource(R.string.home_error_auth_required_message)
-    "AUTH_FAILED" -> stringResource(R.string.home_error_auth_failed_message)
+    "AUTH_FAILED" -> stringResource(
+        if (error.unsupportedSignIn) R.string.home_error_auth_unsupported_message else R.string.home_error_auth_failed_message,
+    )
     "TLS_UNTRUSTED" -> stringResource(R.string.home_error_tls_untrusted_message)
     "TLS_HOSTNAME" -> stringResource(R.string.home_error_tls_hostname_message, profile.tlsServerName ?: profile.host)
     "TLS_EXPIRED" -> stringResource(R.string.home_error_tls_expired_message)
     "TLS_HANDSHAKE" -> stringResource(R.string.home_error_tls_handshake_message)
-    "PROTOCOL_ERROR" -> stringResource(R.string.home_error_protocol_message)
+    "PROTOCOL_ERROR" -> stringResource(
+        if (error.noConnect) R.string.home_error_no_connect_message else R.string.home_error_protocol_message,
+    )
     "HANDSHAKE_TIMEOUT" -> stringResource(R.string.home_error_timeout_message)
     "TARGET_NOT_ALLOWED" -> stringResource(R.string.home_error_refused_message, profile.endpoint)
     "TARGET_UNREACHABLE", "TARGET_REFUSED" -> stringResource(R.string.home_error_unreachable_target_message, profile.endpoint)
@@ -691,12 +861,28 @@ private fun errorMessage(error: ConnectionError, profile: ProxyProfile): String 
     ConnectionError.CREDENTIAL_UNREADABLE -> stringResource(R.string.home_error_credentials_message)
     ConnectionError.ENGINE_STOPPED -> stringResource(R.string.home_error_engine_stopped_message)
     ConnectionError.PROFILE_DELETED -> stringResource(R.string.home_error_profile_deleted_message)
+    ConnectionError.OFFLINE -> stringResource(R.string.home_error_offline_message)
     else -> stringResource(R.string.home_error_internal_message)
 }
 
-private fun elapsed(millis: Long): String {
-    val seconds = (millis / MILLIS_PER_SECOND).coerceAtLeast(0)
-    return String.format(Locale.ROOT, "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
-}
+/** B3's rows: one per stage of an attempt, in order. */
+private val CONNECT_STEPS = listOf(
+    ConnectStep.Starting to R.string.home_step_getting_ready,
+    ConnectStep.VpnPermission to R.string.home_step_permission,
+    ConnectStep.ProxyHandshake to R.string.home_step_checking,
+    ConnectStep.Authenticated to R.string.home_step_starting,
+)
+
+/** Codes fixed in the profile, so Edit profile comes first (docs/m1/04 §4); otherwise trying again does. */
+private val FIX_PROFILE_FIRST = setOf(
+    "AUTH_REQUIRED",
+    "AUTH_FAILED",
+    "TLS_UNTRUSTED",
+    "TLS_HOSTNAME",
+    "TLS_HANDSHAKE",
+    "PROTOCOL_ERROR",
+    "PROXY_DNS_FAILED",
+    ConnectionError.CREDENTIAL_UNREADABLE,
+)
 
 private const val MILLIS_PER_SECOND = 1_000L

@@ -67,7 +67,9 @@ wifi_down() {
     case "$out" in *inet*) return 1 ;; esac
     return 0
 }
-# One uplink for the whole run, and the other one off: the app follows no network change until M7.
+# One uplink for the whole run, and the other one off. Since M7 the app follows network changes: losing the
+# uplink makes it wait Offline, and a move to another network resets every connection — in the middle of a test,
+# either fails it. The session's own reports of the network ("network: ...") are in the M7 evidence.
 # On API 35 mobile data sometimes comes up late or never, and Wi-Fi then switches itself back on
 # (runs 41219399550, 41233261642, 41234640020: routes lost in the middle of the tests). So mobile
 # data is waited for first; once it is up, Wi-Fi is switched off (its automatic re-enabling and
@@ -120,8 +122,10 @@ uplink_name() {
 choose_uplink() {
     UPLINK=""
     # The API 35 image's mobile data came up late or never, or dropped or appeared during the tests, in five of
-    # its last nine runs, while Wi-Fi alone held: there Wi-Fi is the uplink, in airplane mode.
-    if [ "$API" = 35 ]; then
+    # its last nine runs, and the API 34 image's in five of its last six (M7: it dropped during the tests in four,
+    # failing tests twice, and never came up in one), while Wi-Fi alone held on both: there Wi-Fi is the uplink, in
+    # airplane mode, and tcpdump inside the phone captures it.
+    if [ "$API" = 34 ] || [ "$API" = 35 ]; then
         wifi_in_airplane_mode
         if uplink_within 60; then
             UPLINK="$(uplink_name) (airplane mode, so the radio is off: mobile data is unreliable on this image)"
@@ -137,7 +141,7 @@ choose_uplink() {
             sleep 2
         done
     fi
-    if [ -n "$UPLINK" ] || [ "$API" = 35 ]; then
+    if [ -n "$UPLINK" ] || [ "$API" = 34 ] || [ "$API" = 35 ]; then
         : # chosen above
     elif cellular_up; then
         NOTE=""

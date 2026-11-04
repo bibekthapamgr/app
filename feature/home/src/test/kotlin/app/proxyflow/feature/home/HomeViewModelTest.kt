@@ -8,7 +8,10 @@ import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfileInput
+import app.proxyflow.core.model.ReconnectInfo
+import app.proxyflow.core.model.ReconnectReason
 import app.proxyflow.core.model.RoutingDiagnostics
+import app.proxyflow.core.model.TrafficStats
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
 import kotlinx.coroutines.flow.Flow
@@ -228,6 +231,48 @@ class HomeViewModelTest {
         assertNull("a switch shows no counters of the engine that stopped", ready(viewModel).diagnostics)
     }
 
+    /**
+     * The session's traffic shows while there is a connected session — on through reconnecting on its own
+     * and waiting for a network — and never a reading of another session (ADR-0012).
+     */
+    @Test
+    fun trafficShowsForTheSessionItBelongsTo() = runTest {
+        val controller = RecordingController()
+        val saved = profiles.save(null, ProxyProfileInput(server = "proxy.example.com", port = "1080"))
+        val viewModel = HomeViewModel(profiles, controller)
+        observe(viewModel)
+        val since = 1_800_000_000_000L
+        val reading = TrafficStats(bytesUp = 1_200, bytesDown = 34_000, activeConnections = 3, sinceMillis = since)
+        controller.trafficReadings.value = reading
+
+        assertNull("not connected", ready(viewModel).traffic)
+        controller.current.value = ConnectionState(ConnectionStatus.Connected, saved.id, profile = saved, connectedSinceMillis = since)
+        assertEquals(reading, ready(viewModel).traffic)
+        val retry =
+            ReconnectInfo(
+                ReconnectReason.ProxyFailures,
+                attempt = 2,
+                maxAttempts = 8,
+                nextAttemptAtMillis = since + 9_000,
+                lastError = null,
+            )
+        controller.current.value = controller.current.value.copy(status = ConnectionStatus.Reconnecting, reconnect = retry)
+        assertEquals("the session goes on while it reconnects", reading, ready(viewModel).traffic)
+        controller.current.value = controller.current.value.copy(status = ConnectionStatus.Connected, connectedSinceMillis = since + 60_000)
+        assertNull("a reading of another session is never shown", ready(viewModel).traffic)
+        controller.current.value =
+            ConnectionState(ConnectionStatus.Blocked, saved.id, profile = saved, error = ConnectionError("AUTH_FAILED"))
+        assertNull(ready(viewModel).traffic)
+    }
+
+    @Test
+    fun retryNowIsForwarded() = runTest {
+        val controller = RecordingController()
+        val viewModel = HomeViewModel(profiles, controller)
+        viewModel.retryNow()
+        assertEquals(listOf("retryNow"), controller.calls)
+    }
+
     @Test
     fun theNotificationPermissionIsRequestedOncePerRun() {
         val viewModel = HomeViewModel(profiles, RecordingController())
@@ -264,5 +309,12 @@ class HomeViewModelTest {
 
         val readings = MutableStateFlow<RoutingDiagnostics?>(null)
         override val diagnostics: Flow<RoutingDiagnostics?> = readings
+
+        val trafficReadings = MutableStateFlow<TrafficStats?>(null)
+        override val traffic: Flow<TrafficStats?> = trafficReadings
+
+        override fun retryNow() {
+            calls += "retryNow"
+        }
     }
 }

@@ -372,7 +372,7 @@ def connected_windows(logcat: list[str], year: int) -> tuple[list[tuple[datetime
     connects to its proxy right then). A test about to have Android revoke the VPN logs it first ("ProxyFlowE2E:
     revoking"), which ends the period: Android may take the VPN away before ProxyFlow hears of it, and apps then use the
     normal network by design. Each period carries what ended it, for the report."""
-    windows, starts, begun, label, last = [], [], None, "", None
+    windows, starts, begun, label, last, pending = [], [], None, "", None, None
     for line in logcat:
         when = logcat_time(line, year)
         if when is None:
@@ -387,9 +387,16 @@ def connected_windows(logcat: list[str], year: int) -> tuple[list[tuple[datetime
         if not m:
             continue
         event = m.group(1)
-        if event.startswith("connect ") and "no such profile" not in event:
-            starts.append(when)
-        elif event.startswith("connected ") and begun is None:
+        # An attempt (a connect, or a reconnection's attempt) counts once its proxy check ran — the session logs the
+        # check's answer, or the connection that followed it: one cancelled before its check opened no connection.
+        if (event.startswith("connect ") and "no such profile" not in event) or re.match(r"reconnect attempt \d+ of \d+$", event):
+            pending = when
+        elif pending is not None and event.startswith(("check ", "connected ", "reconnected ")):
+            starts.append(pending)
+            pending = None
+        elif event.startswith(("disconnect", "revoked", "service destroyed")):
+            pending = None
+        if event.startswith("connected ") and begun is None:
             begun, label = when, f"connected at {when:%H:%M:%S}"
         elif begun is not None and event.startswith(("disconnect", "revoked", "service destroyed")):
             windows.append((begun, when, f"{label} until {event[:40]!r}"))

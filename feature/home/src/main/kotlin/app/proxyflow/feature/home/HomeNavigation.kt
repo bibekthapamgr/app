@@ -15,6 +15,7 @@ fun NavGraphBuilder.homeScreen(
     onAddProxy: () -> Unit,
     onChangeProfile: () -> Unit,
     onEditProfile: (String) -> Unit,
+    onOpenLogs: () -> Unit,
 ) {
     composable<HomeDestination> {
         HomeRoute(
@@ -22,6 +23,7 @@ fun NavGraphBuilder.homeScreen(
             onAddProxy = onAddProxy,
             onChangeProfile = onChangeProfile,
             onEditProfile = onEditProfile,
+            onOpenLogs = onOpenLogs,
         )
     }
 }

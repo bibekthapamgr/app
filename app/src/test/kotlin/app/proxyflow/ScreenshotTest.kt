@@ -15,19 +15,26 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
+import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.DnsProblems
+import app.proxyflow.core.model.LogDetail
 import app.proxyflow.core.model.LogEntry
+import app.proxyflow.core.model.LogEvent
+import app.proxyflow.core.model.LogFilter
 import app.proxyflow.core.model.ProfileValidator
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
+import app.proxyflow.core.model.ReconnectInfo
+import app.proxyflow.core.model.ReconnectReason
 import app.proxyflow.core.model.RoutingDiagnostics
 import app.proxyflow.core.model.ThemePreference
 import app.proxyflow.core.model.TlsMode
 import app.proxyflow.core.model.TlsProblems
+import app.proxyflow.core.model.TrafficStats
 import app.proxyflow.core.model.UnsupportedTraffic
 import app.proxyflow.feature.about.AboutScreen
 import app.proxyflow.feature.home.HomeActions
@@ -58,7 +65,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Screenshots of every screen and state built so far (M2, M3, M5, M6) in light and dark
+ * Screenshots of every screen and state built so far (M2, M3, M5, M6, M7) in light and dark
  * theme, named after the M1 design boards, kept in app/screenshots. CI runs
  * `./gradlew :app:verifyAndRecordRoborazziDebug`: any screen that no longer
  * matches its committed copy fails the build, and the new image is published on
@@ -69,8 +76,8 @@ import org.robolectric.annotation.GraphicsMode
  * The proxy form states are the ones its ViewModel produces for that input (D3
  * takes its errors from the validator itself), so those images show what a user
  * sees. D5 shows the only answer "Test connection" can give before the engine
- * exists (M4): not available, never a pass. F2 shows sample log entries:
- * nothing writes to the log before M7.
+ * exists (M4): not available, never a pass. F2 and F3 show sample entries of the kinds the
+ * session writes (ADR-0012).
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -96,14 +103,19 @@ class ScreenshotTest {
 
     @Test
     fun homeConnecting() = captureBothThemes("B3_home_connecting") {
-        HomeScreen(home(ConnectionState(ConnectionStatus.Connecting, "p1", tokyo.name, step = ConnectStep.CheckingProxy)), HomeActions())
+        HomeScreen(home(ConnectionState(ConnectionStatus.Connecting, "p1", tokyo.name, step = ConnectStep.ProxyHandshake)), HomeActions())
     }
 
     @Test
     fun homeConnected() = captureBothThemes("B4_home_connected") {
         val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
         // 00:12:47 on the timer, as on the design board.
-        HomeScreen(home(connected, diagnostics = sampleDiagnostics), HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
+        HomeScreen(
+            home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic),
+            HomeActions(),
+            nowMillis =
+            SAMPLE_TIME + 767_000,
+        )
     }
 
     /**
@@ -113,12 +125,59 @@ class ScreenshotTest {
     @Test
     fun homeConnectedProblems() = captureBothThemes("B4_home_connected_problems") {
         val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
-        HomeScreen(home(connected, diagnostics = troubleDiagnostics), HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
+        HomeScreen(
+            home(connected, diagnostics = troubleDiagnostics, traffic = sampleTraffic),
+            HomeActions(),
+            nowMillis =
+            SAMPLE_TIME + 767_000,
+        )
     }
 
+    /** B5 (ADR-0012): reconnecting on its own after the proxy stopped answering, attempt 3 of 8 waiting its turn. */
     @Test
     fun homeReconnecting() = captureBothThemes("B5_home_reconnecting") {
-        HomeScreen(home(ConnectionState(ConnectionStatus.Reconnecting, "p1", tokyo.name, step = ConnectStep.CheckingProxy)), HomeActions())
+        val retry = ReconnectInfo(
+            ReconnectReason.ProxyFailures,
+            attempt = 3,
+            maxAttempts = 8,
+            nextAttemptAtMillis = SAMPLE_TIME + 4_000,
+            lastError = ConnectionError("PROXY_UNREACHABLE", "connection to the proxy timed out"),
+        )
+        val reconnecting =
+            ConnectionState(
+                ConnectionStatus.Reconnecting,
+                "p1",
+                tokyo.name,
+                connectedSinceMillis = SAMPLE_TIME - 600_000,
+                reconnect = retry,
+            )
+        HomeScreen(home(reconnecting), HomeActions(), nowMillis = SAMPLE_TIME)
+    }
+
+    /** A switch to another profile or a restart: the interface stays, so traffic is held while the new check runs. */
+    @Test
+    fun homeSwitching() = captureBothThemes("B5_home_switching") {
+        HomeScreen(home(ConnectionState(ConnectionStatus.Reconnecting, "p1", tokyo.name, step = ConnectStep.ProxyHandshake)), HomeActions())
+    }
+
+    /** B7: no network, traffic held until one is back. */
+    @Test
+    fun homeOffline() = captureBothThemes("B7_home_offline") {
+        val offline = ConnectionState(
+            ConnectionStatus.Offline,
+            "p1",
+            tokyo.name,
+            connectedSinceMillis = SAMPLE_TIME - 600_000,
+            error = ConnectionError(ConnectionError.OFFLINE),
+        )
+        HomeScreen(home(offline), HomeActions())
+    }
+
+    /** Reconnecting stopped after its last attempt: traffic stays held until the user tries again or stops. */
+    @Test
+    fun homeReconnectStopped() = captureBothThemes("B6_home_reconnect_stopped") {
+        val error = ConnectionError("PROXY_UNREACHABLE", "reconnecting stopped after 8 attempts")
+        HomeScreen(home(ConnectionState(ConnectionStatus.Blocked, "p1", tokyo.name, error = error)), HomeActions())
     }
 
     @Test
@@ -304,25 +363,56 @@ class ScreenshotTest {
     fun logsEmpty() = captureBothThemes("F1_logs_empty") { LogsScreen(LogsUiState(loading = false)) }
 
     @Test
-    fun logsWithSampleEntries() = captureBothThemes("F2_logs_sample") {
-        // Sample entries: in M2 nothing writes to the log yet (the engine does from M7).
-        LogsScreen(
-            LogsUiState(
-                loading = false,
-                entries = listOf(
-                    LogEntry(3, SAMPLE_TIME + 120_000, LogEntry.Level.Error, "AUTH_FAILED", "Proxy rejected the username or password"),
-                    LogEntry(2, SAMPLE_TIME + 60_000, LogEntry.Level.Warning, "RECONNECTING", "Network changed, reconnecting"),
-                    LogEntry(1, SAMPLE_TIME, LogEntry.Level.Info, null, "Connected to Tokyo residential"),
-                ),
-            ),
-        )
+    fun logsWithSampleEntries() = captureBothThemes("F2_logs") {
+        LogsScreen(LogsUiState(loading = false, entries = sampleLog, total = sampleLog.size))
+    }
+
+    @Test
+    fun logsFiltered() = captureBothThemes("F2_logs_errors") {
+        val errors = sampleLog.filter { LogFilter.Errors.matches(it) }
+        LogsScreen(LogsUiState(loading = false, entries = errors, total = sampleLog.size, filter = LogFilter.Errors))
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun logDetail() {
+        val failed = sampleLog.first { it.event == LogEvent.ReconnectAttemptFailed }
+        compose.setContent {
+            ProxyFlowTheme {
+                LogsScreen(
+                    LogsUiState(
+                        loading = false,
+                        entries = sampleLog,
+                        total = sampleLog.size,
+                        selected = failed,
+                        profileNames = mapOf("p1" to tokyo.name),
+                    ),
+                )
+            }
+        }
+        compose.waitForIdle() // let the sheet draw before the screen is captured
+        captureScreenRoboImage("$DIR/F3_log_detail_light.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun clearLogConfirmation() {
+        compose.setContent {
+            ProxyFlowTheme { LogsScreen(LogsUiState(loading = false, entries = sampleLog, total = sampleLog.size, confirmingClear = true)) }
+        }
+        compose.waitForIdle() // let the dialog draw before the screen is captured
+        captureScreenRoboImage("$DIR/F2_clear_confirm_light.png")
     }
 
     @Test
     fun about() = captureBothThemes("G1_about") { AboutScreen(version = "0.2.0 (2)", onBack = {}) }
 
-    private fun home(connection: ConnectionState, dialog: HomeDialog? = null, diagnostics: RoutingDiagnostics? = null) =
-        HomeUiState.Ready(tokyo, connection, canConnect = true, dialog = dialog, diagnostics = diagnostics)
+    private fun home(
+        connection: ConnectionState,
+        dialog: HomeDialog? = null,
+        diagnostics: RoutingDiagnostics? = null,
+        traffic: TrafficStats? = null,
+    ) = HomeUiState.Ready(tokyo, connection, canConnect = true, dialog = dialog, diagnostics = diagnostics, traffic = traffic)
 
     /** A screen with a dialog open, in the light theme (dialogs draw in their own window, so the whole screen is captured). */
     @OptIn(ExperimentalRoborazziApi::class)
@@ -353,6 +443,62 @@ class ScreenshotTest {
     private companion object {
         const val DIR = "screenshots"
         const val SAMPLE_TIME = 1_793_000_000_000L
+
+        /** What a session of 12 minutes carried. */
+        val sampleTraffic = TrafficStats(bytesUp = 4_820_000, bytesDown = 61_300_000, activeConnections = 14, sinceMillis = SAMPLE_TIME)
+
+        /**
+         * A session as the session logs it (ADR-0012): connected, the proxy stopped answering, one attempt
+         * failed and the next reconnected, then a disconnect and the session's summary. Newest first.
+         */
+        val sampleLog: List<LogEntry> = run {
+            fun entry(
+                id: Long,
+                afterMillis: Long,
+                event: LogEvent,
+                stage: ConnectionStage?,
+                level: LogEntry.Level = LogEntry.Level.Info,
+                code: String? = null,
+                details: Map<String, String> = emptyMap(),
+            ) = LogEntry(id, SAMPLE_TIME + afterMillis, level, event, stage, code, "p1", details)
+            listOf(
+                entry(1, 0, LogEvent.ConnectRequested, ConnectionStage.Starting, details = mapOf(LogDetail.PROTOCOL to "SOCKS5")),
+                entry(2, 1_380, LogEvent.Connected, ConnectionStage.Connected, details = mapOf(LogDetail.SETUP_MS to "1380")),
+                entry(3, 312_000, LogEvent.ReconnectStarted, ConnectionStage.Reconnecting, LogEntry.Level.Warning, "PROXY_UNREACHABLE"),
+                entry(
+                    4,
+                    314_100,
+                    LogEvent.ReconnectAttemptFailed,
+                    ConnectionStage.Reconnecting,
+                    LogEntry.Level.Warning,
+                    "PROXY_UNREACHABLE",
+                    mapOf(
+                        LogDetail.ATTEMPT to "1",
+                        LogDetail.MAX_ATTEMPTS to "8",
+                        LogDetail.NEXT_TRY_MS to "2000",
+                        LogDetail.DETAIL to "connection to the proxy timed out",
+                    ),
+                ),
+                entry(5, 317_600, LogEvent.Reconnected, ConnectionStage.Connected, details = mapOf(LogDetail.ATTEMPT to "2")),
+                entry(
+                    6,
+                    580_000,
+                    LogEvent.ConnectionProblems,
+                    ConnectionStage.Connected,
+                    LogEntry.Level.Warning,
+                    "TARGET_UNREACHABLE",
+                    mapOf(LogDetail.COUNT to "3"),
+                ),
+                entry(7, 767_000, LogEvent.Stopped, ConnectionStage.Stopped, details = mapOf(LogDetail.BY to "user")),
+                entry(
+                    8,
+                    767_000,
+                    LogEvent.SessionSummary,
+                    ConnectionStage.Stopped,
+                    details = mapOf(LogDetail.DURATION_MS to "767000", LogDetail.BYTES_UP to "4820000", LogDetail.BYTES_DOWN to "61300000"),
+                ),
+            ).reversed()
+        }
 
         /** A session without problems: what Home shows most of the time. */
         val sampleDiagnostics = RoutingDiagnostics(

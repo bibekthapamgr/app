@@ -72,6 +72,7 @@ fun ProxyFlowApp(
                 onAddProxy = { navController.navigateToAddEditProxy() },
                 onChangeProfile = { navController.navigateToTopLevel(TopLevelDestination.Profiles) },
                 onEditProfile = { id -> navController.navigateToAddEditProxy(id) },
+                onOpenLogs = { navController.navigateToTopLevel(TopLevelDestination.Logs) },
             )
             profilesScreen(
                 viewModelFactory = viewModelFactory,
@@ -83,7 +84,7 @@ fun ProxyFlowApp(
                 viewModelFactory = viewModelFactory,
                 onDone = { navController.popBackStack<AddEditProxyDestination>(inclusive = true) },
             )
-            logsScreen(viewModelFactory = viewModelFactory)
+            logsScreen(viewModelFactory = viewModelFactory, appVersion = version)
             settingsScreen(viewModelFactory = viewModelFactory, onOpenAbout = { navController.navigateToAbout() })
             aboutScreen(version = version, onBack = { navController.popBackStack() })
         }

@@ -22,18 +22,25 @@
     <string name="home_connect">Connect</string>
     <string name="home_connect_unavailable">Connecting isn\'t available in this build. It saves your proxies but doesn\'t connect.</string>
 
-    <!-- B3 -->
+    <!-- B3: one row per stage of the attempt (ADR-0012) -->
     <string name="home_connecting_to">Connecting to %1$s</string>
-    <string name="home_step_permission">VPN permission granted</string>
+    <string name="home_step_getting_ready">Getting ready</string>
+    <string name="home_step_permission">VPN permission</string>
     <string name="home_step_checking">Checking proxy — TLS and sign-in</string>
-    <string name="home_step_starting">Starting the VPN</string>
+    <string name="home_step_starting">Proxy accepted — starting the VPN</string>
     <string name="home_step_done">Done</string>
     <string name="home_step_current">In progress</string>
     <string name="home_step_pending">Not started</string>
     <string name="home_connecting_note">Your phone\'s network is unchanged until the VPN starts. If the proxy check fails, nothing is switched over.</string>
     <string name="home_cancel">Cancel</string>
 
-    <!-- B4: what goes through the proxy and the diagnostics (ADR-0011). Counts only, never destinations. -->
+    <!-- B4: the session's traffic (ADR-0012), what goes through the proxy and the diagnostics (ADR-0011). Counts only, never destinations. -->
+    <string name="home_traffic_sent">Sent</string>
+    <string name="home_traffic_received">Received</string>
+    <string name="home_traffic_active">Active connections</string>
+    <!-- Shown until the first reading. -->
+    <string name="home_traffic_unknown">–</string>
+    <string name="home_traffic_note">Approximate: what apps sent and received through your proxy since you connected.</string>
     <string name="home_connected_note">Apps\' TCP connections go through your proxy</string>
     <string name="home_protocol_with_tls">%1$s · TLS to proxy</string>
     <string name="home_route_title">Through your proxy</string>
@@ -116,6 +123,21 @@
     <string name="home_reconnecting_to">Reconnecting to %1$s</string>
     <string name="home_reconnecting_note">Apps\' traffic is paused until the proxy answers. ProxyFlow sends nothing around it.</string>
 
+    <!-- B5: reconnecting on its own, and B7: no network (ADR-0012). Traffic is held meanwhile. -->
+    <string name="home_traffic_paused">Traffic paused — ProxyFlow sends nothing around your proxy</string>
+    <string name="home_reconnect_proxy_message">ProxyFlow is trying your proxy again. Apps stay paused until it answers.</string>
+    <string name="home_reconnect_back_online_title">Back online</string>
+    <string name="home_reconnect_back_online_message">Your phone has a network again. ProxyFlow is reconnecting to your proxy.</string>
+    <string name="home_reconnect_network_changed_title">Network changed</string>
+    <string name="home_reconnect_network_changed_message">Your phone moved to another network. ProxyFlow is reconnecting to your proxy.</string>
+    <string name="home_reconnect_attempt">Attempt %1$d of %2$d</string>
+    <string name="home_reconnect_next_try">next try in %1$d s</string>
+    <string name="home_reconnect_trying">trying now…</string>
+    <string name="home_retry_now">Retry now</string>
+    <string name="home_view_logs">View logs</string>
+    <string name="home_error_offline_title">You\'re offline</string>
+    <string name="home_error_offline_message">ProxyFlow will connect when a network is available. Traffic stays blocked meanwhile.</string>
+
     <!-- B6b (pre-flight failures) and the blocked layout -->
     <string name="home_not_connected_note">You\'re not connected — apps are still using your normal network.</string>
     <string name="home_blocked_note">Apps can\'t go online until this is fixed — ProxyFlow sends nothing around your proxy.</string>
@@ -156,16 +178,21 @@
     <string name="home_error_auth_required_message">This proxy needs a username and password.</string>
     <string name="home_error_auth_failed_title">Username or password rejected</string>
     <string name="home_error_auth_failed_message">The proxy didn\'t accept your credentials. Check them with your proxy provider.</string>
+    <!-- The catalogue's Digest variant: an HTTP proxy offering only sign-in methods ProxyFlow lacks. -->
+    <string name="home_error_auth_unsupported_message">This proxy only offers a sign-in method ProxyFlow doesn\'t support. ProxyFlow signs in to HTTP proxies with Basic sign-in: ask your provider for it, or use a SOCKS5 proxy.</string>
     <string name="home_error_tls_untrusted_title">Certificate not trusted</string>
     <string name="home_error_tls_untrusted_message">The proxy\'s certificate isn\'t from an authority this phone trusts. ProxyFlow only connects to proxies with a valid certificate, and can\'t be told to skip the check.</string>
     <string name="home_error_tls_hostname_title">Certificate doesn\'t match</string>
     <string name="home_error_tls_hostname_message">The certificate isn\'t valid for %1$s. Check the server name in the profile.</string>
     <string name="home_error_tls_expired_title">Certificate expired</string>
     <string name="home_error_tls_expired_message">The proxy\'s certificate is expired or not yet valid. Check your phone\'s date and time, or contact your provider.</string>
+    <string name="home_date_settings">Date &amp; time settings</string>
     <string name="home_error_tls_handshake_title">TLS to proxy failed</string>
     <string name="home_error_tls_handshake_message">The proxy didn\'t answer with TLS. It may not support TLS on this port. ProxyFlow never falls back to an unencrypted connection.</string>
     <string name="home_error_protocol_title">This doesn\'t look like a %1$s proxy</string>
     <string name="home_error_protocol_message">The server answered in an unexpected way. Check the protocol and port.</string>
+    <!-- The catalogue's 405/501 variant. -->
+    <string name="home_error_no_connect_message">This HTTP proxy doesn\'t allow tunnels (CONNECT), which ProxyFlow needs. Check the port, or ask your provider for a proxy that allows them.</string>
     <string name="home_error_timeout_title">Proxy isn\'t responding</string>
     <string name="home_error_timeout_message">The proxy accepted the connection but didn\'t respond in time.</string>
     <string name="home_error_credentials_title">Re-enter your password</string>

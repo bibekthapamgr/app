@@ -1,8 +1,10 @@
 package adapters
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"net"
 )
 
 // SOCKS5 client handshake (RFC 1928) with optional username/password
@@ -67,9 +69,24 @@ func socks5Handshake(rw io.ReadWriter, creds *Credentials, t Target) error {
 	if _, err := rw.Write(req); err != nil {
 		return err
 	}
-	// 3. Reply.
-	return readSOCKS5Reply(rw)
+	// 3. Reply. The proxy has answered the method selection (and the sign-in), so it works: a reply that does not
+	//    come in time is the proxy still trying to reach the site — Dante waits for its own connect timeout before
+	//    it answers. Whether that is the site's failure depends on whose deadline passed, which only the dialer
+	//    knows (Dialer.handshake), so it is marked here, not classified.
+	if err := readSOCKS5Reply(rw); err != nil {
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			return fmt.Errorf("%w: %w", errConnectReplyLate, err)
+		}
+		return err
+	}
+	return nil
 }
+
+// errConnectReplyLate wraps the timeout of a SOCKS5 connection request's reply. Under the handshake's own deadline it
+// is the site's failure (TARGET_UNREACHABLE, never counted towards reconnecting: docs/m1/04 §4); under a caller's
+// earlier deadline, or once the caller's context has ended, it is that deadline's (HANDSHAKE_TIMEOUT or CANCELED).
+var errConnectReplyLate = errors.New("socks5: no reply to the connection request in time")
 
 // socks5UserPass sends VER ULEN UNAME PLEN PASSWD from one exactly-sized
 // buffer (so no reallocation leaves a copy behind) and zeroes it after writing.

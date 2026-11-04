@@ -176,7 +176,7 @@ jobs:
 
       - name: Unit, ViewModel and Robolectric UI tests
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
-        run: ./gradlew testDebugUnitTest :core:model:test --continue 2>&1 | tee "$RUNNER_TEMP/gradle-3-test.log"
+        run: ./gradlew testDebugUnitTest :core:model:test :lint-rules:test --continue 2>&1 | tee "$RUNNER_TEMP/gradle-3-test.log"
 
       # The tests above compiled core/data, which exports the Room schema to core/data/schemas.
       # A schema that changed without its file (and a migration, ADR-0009) being committed fails
@@ -383,7 +383,7 @@ jobs:
         run: |
           sudo chmod -R a+rX /tmp/pf
           status=0
-          for check in m5_evidence m6_evidence; do
+          for check in m5_evidence m6_evidence m7_evidence; do
             python3 "scripts/$check.py" --api ${{ matrix.api-level }} --pf /tmp/pf \
               --out "$RUNNER_TEMP/m5-api${{ matrix.api-level }}" --host-pcap "$RUNNER_TEMP/emulator-uplink.pcap" || status=1
           done
@@ -397,7 +397,7 @@ jobs:
           dir="$RUNNER_TEMP/m5-evidence-api${{ matrix.api-level }}"
           mkdir -p "$dir"
           for log in destination.log sink.log destination-address.log destination6.log destination-lan.log tls-destination.log \
-                     udp-sink.log gate.log stunnel.log dns-proxies.log dns-uplink.log squid-access.log danted.log log-baseline.properties; do
+                     udp-sink.log gate.log stunnel.log dns-proxies.log dns-uplink.log squid-access.log danted.log bulk.log log-baseline.properties; do
             sudo cp "/tmp/pf/$log" "$dir/" 2>/dev/null || true
           done
           sudo chown -R "$(id -u):$(id -g)" "$dir"

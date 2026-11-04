@@ -14,14 +14,15 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.ConnectionTester
 import app.proxyflow.core.data.DataStoreSettingsRepository
-import app.proxyflow.core.data.InMemoryLogRepository
 import app.proxyflow.core.data.LogRepository
+import app.proxyflow.core.data.LogStorage
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.data.ProfileStorage
 import app.proxyflow.core.data.SettingsRepository
 import app.proxyflow.core.data.UnavailableConnectionTester
 import app.proxyflow.core.data.crypto.AndroidKeystoreSecretKeyStore
 import app.proxyflow.core.data.crypto.SecretKeyStore
+import app.proxyflow.core.vpn.RetryPolicy
 import app.proxyflow.core.vpn.VpnRuntime
 import app.proxyflow.feature.home.HomeViewModel
 import app.proxyflow.feature.logs.LogsViewModel
@@ -32,6 +33,7 @@ import javax.net.ssl.X509TrustManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -45,11 +47,14 @@ import kotlinx.coroutines.launch
  * @param proxyTrust replaces the platform trust manager that checks TLS proxies' certificates;
  *   only the device tests pass one, which also trusts their run's test CA (ADR-0011). The app
  *   never does: [ProxyFlowApplication] builds this container with the default.
+ * @param retry how the connection reconnects on its own (ADR-0012); only the device tests pass
+ *   one, with shorter waits. The app always uses [RetryPolicy]'s default.
  */
 class AppContainer(
     context: Context,
     credentialKeys: SecretKeyStore = AndroidKeystoreSecretKeyStore(),
     proxyTrust: (() -> X509TrustManager)? = null,
+    retry: () -> RetryPolicy = { RetryPolicy() },
 ) {
     private val appContext = context.applicationContext
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -64,16 +69,26 @@ class AppContainer(
 
     val settingsRepository: SettingsRepository = DataStoreSettingsRepository(settingsStore)
     val profileRepository: ProfileRepository = profiles
-    val logRepository: LogRepository = InMemoryLogRepository()
+
+    /** The diagnostic log (ADR-0012), in its own database; the session writes it, the Logs screen reads and clears it. */
+    val logRepository: LogRepository = LogStorage.repository(appContext)
 
     /** The VPN layer: the session, and the service's way back to it (ProxyFlowApplication is its provider). */
-    val vpnRuntime = VpnRuntime(appContext, profiles, appScope, proxyTrust)
+    val vpnRuntime = VpnRuntime(appContext, profiles, appScope, proxyTrust, logs = logRepository, retry = retry)
     val connectionController: ConnectionController = vpnRuntime.controller
     val connectionTester: ConnectionTester = UnavailableConnectionTester()
 
     init {
         // Keys left behind by a delete that was interrupted (ADR-0006). A failure here only delays that clean-up.
         appScope.launch { runCatching { profiles.deleteOrphanedKeys() } }
+        // Entries past the log's bounds go at start and every hour while the process runs, not only at the next
+        // write (ADR-0012; docs/m1/03 J10: retention applied at least daily).
+        appScope.launch(Dispatchers.IO) {
+            while (true) {
+                runCatching { logRepository.purge() }
+                delay(LOG_PURGE_INTERVAL_MS)
+            }
+        }
     }
 
     /** Creates every screen's ViewModel; navigation passes it to each destination. */
@@ -82,10 +97,11 @@ class AppContainer(
         initializer { ProfilesViewModel(profileRepository, connectionController) }
         initializer { AddEditProxyViewModel(createSavedStateHandle(), profileRepository, connectionTester) }
         initializer { SettingsViewModel(settingsRepository) }
-        initializer { LogsViewModel(logRepository) }
+        initializer { LogsViewModel(logRepository, profileRepository) }
     }
 
     private companion object {
         const val SETTINGS_FILE = "settings"
+        const val LOG_PURGE_INTERVAL_MS = 60 * 60 * 1_000L
     }
 }

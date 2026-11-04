@@ -30,9 +30,10 @@ interface TunnelEngine {
     fun probe(profile: ProxyProfile, secret: EngineSecret?, target: String, timeoutMillis: Long, protect: (Int) -> Boolean): PreflightAnswer
 
     /**
-     * Starts the engine on [tun], which stays owned by the caller. [onFailure] is
-     * called once, from any thread, if the packet loop ends without [stop]
-     * (catalogue code `ENGINE_STOPPED`).
+     * Starts the engine on [tun], which stays owned by the caller. [signals] hears, from any
+     * thread, what the session acts on (ADR-0012): the packet loop ending without [stop]
+     * (catalogue code `ENGINE_STOPPED`, once), and each connection that failed — at the proxy
+     * itself, or for one site only.
      *
      * @throws app.proxyflow.core.engine.EngineException when the engine cannot start; other
      *   exceptions and a library that fails to load are possible too.
@@ -43,7 +44,7 @@ interface TunnelEngine {
         profile: ProxyProfile,
         secret: EngineSecret?,
         protect: (Int) -> Boolean,
-        onFailure: (ConnectionError) -> Unit,
+        signals: (EngineSignal) -> Unit,
     )
 
     /** Stops the engine and waits for it; it never closes the TUN descriptor. Safe at any time. */
@@ -54,6 +55,54 @@ interface TunnelEngine {
      * runs or they can't be read. Unlike the other calls, safe from any thread at any time.
      */
     fun diagnostics(): RoutingDiagnostics? = null
+
+    /**
+     * The engine's traffic counters (M7) while it runs, and after it failed until it is stopped; null
+     * when none was started or it stopped. Safe from any thread at any time.
+     */
+    fun traffic(): EngineTraffic? = null
+
+    /** Proxy-level failures in a row as the running engine counts them (a success resets it); 0 when none runs. */
+    fun consecutiveProxyFailures(): Long = 0
+
+    /** Ends every connection of the running engine — apps reconnect at once, on the phone's new network; how many it ended. */
+    fun resetFlows(): Int = 0
+}
+
+/** What a running engine tells the session (ADR-0012). */
+sealed interface EngineSignal {
+    /** The packet loop ended without stop(). */
+    data class Failed(val error: ConnectionError) : EngineSignal
+
+    /** A connection failed at the proxy itself (a proxy-level code: the escalation rule counts these). */
+    data class ProxyFailure(val error: ConnectionError) : EngineSignal
+
+    /** A connection to one site failed while the proxy worked (for the log, counted per minute). */
+    data class ConnectionFailure(val code: String) : EngineSignal
+}
+
+/**
+ * The engine's traffic counters since it started (M7): bytes relayed for the apps' TCP connections,
+ * connections relaying now, opened and refused, UDP datagrams refused and pings dropped.
+ */
+data class EngineTraffic(
+    val bytesUp: Long = 0,
+    val bytesDown: Long = 0,
+    val activeConnections: Long = 0,
+    val opened: Long = 0,
+    val failed: Long = 0,
+    val udpBlocked: Long = 0,
+    val pingsDropped: Long = 0,
+) {
+    operator fun plus(other: EngineTraffic) = EngineTraffic(
+        bytesUp + other.bytesUp,
+        bytesDown + other.bytesDown,
+        other.activeConnections,
+        opened + other.opened,
+        failed + other.failed,
+        udpBlocked + other.udpBlocked,
+        pingsDropped + other.pingsDropped,
+    )
 }
 
 /**
@@ -110,16 +159,12 @@ class ProxyTunnelEngine(
         profile: ProxyProfile,
         secret: EngineSecret?,
         protect: (Int) -> Boolean,
-        onFailure: (ConnectionError) -> Unit,
+        signals: (EngineSignal) -> Unit,
     ) {
         val platform = AndroidEnginePlatform(
             protector = protect,
             trustManager = trust(),
-            onEvent = { event ->
-                if (event.type == ENGINE_FAILED) {
-                    onFailure(ConnectionError(event.code ?: ConnectionError.ENGINE_STOPPED, event.detail))
-                }
-            },
+            onEvent = { event -> signalOf(event.type, event.code, event.detail)?.let(signals) },
         )
         // The engine's MTU must be the interface's: gVisor reads whole packets of up to that size.
         engine.start(tun.fd, profile.toEngineProfile().copy(mtu = config.mtu), secret, platform)
@@ -127,12 +172,45 @@ class ProxyTunnelEngine(
 
     override fun stop() = engine.stop()
 
-    override fun diagnostics(): RoutingDiagnostics? =
-        runCatching { engine.stats() }.getOrNull()?.takeIf { it.state == EngineState.Running }?.toDiagnostics()
+    override fun diagnostics(): RoutingDiagnostics? = statsWhile(EngineState.Running)?.toDiagnostics()
 
-    private companion object {
+    // A failed engine (its packet loop ended) keeps its counters until it is stopped: they are the session's traffic too.
+    override fun traffic(): EngineTraffic? = statsWhile(EngineState.Running, EngineState.Failed)?.let {
+        EngineTraffic(
+            bytesUp = it.bytesUp,
+            bytesDown = it.bytesDown,
+            activeConnections = it.tcpActive,
+            opened = it.tcpOpened,
+            failed = it.tcpFailed,
+            udpBlocked = it.udpRejected,
+            pingsDropped = it.icmpEchoRequestsDropped,
+        )
+    }
+
+    override fun consecutiveProxyFailures(): Long =
+        runCatching { engine.status() }.getOrNull()?.takeIf { it.state == EngineState.Running }?.consecutiveProxyFailures ?: 0
+
+    override fun resetFlows(): Int = runCatching { engine.resetFlows() }.getOrDefault(0)
+
+    private fun statsWhile(vararg states: EngineState) = runCatching { engine.stats() }.getOrNull()?.takeIf { it.state in states }
+
+    internal companion object {
         /** tunnel.EvEngineFailed: the packet loop ended without Stop. */
         const val ENGINE_FAILED = "engine_failed"
+
+        /** tunnel.EvConnFail: one connection failed. */
+        const val CONN_FAIL = "conn_fail"
+
+        /** A connection still being set up when the engine stopped or reset its flows: never a failure (docs/m1/04 §4). */
+        const val CANCELED = "CANCELED"
+
+        /** What an engine event means for the session, or null when it means nothing to it. */
+        fun signalOf(type: String, code: String?, detail: String?): EngineSignal? = when {
+            type == ENGINE_FAILED -> EngineSignal.Failed(ConnectionError(code ?: ConnectionError.ENGINE_STOPPED, detail))
+            type != CONN_FAIL || code == null || code == CANCELED -> null
+            code in RetryPolicy.PROXY_LEVEL -> EngineSignal.ProxyFailure(ConnectionError(code, detail))
+            else -> EngineSignal.ConnectionFailure(code)
+        }
     }
 }
 
