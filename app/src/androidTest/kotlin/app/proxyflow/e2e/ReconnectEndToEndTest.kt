@@ -245,6 +245,42 @@ class ReconnectEndToEndTest {
         assertSent("retry-now-back")
     }
 
+    /**
+     * M10: the phone's network asks for a sign-in (a captive portal), as Android would tell the session: every state says
+     * so, connected or not, and nothing else changes; the proxy then fails — a portal lets nothing through until the user
+     * signs in — and ProxyFlow reconnects, holding traffic; once signed in, the next attempt runs at once instead of after
+     * its wait.
+     */
+    @Test(timeout = TEST_TIMEOUT_MS)
+    fun signingInToTheNetworkReconnectsAtOnce() {
+        TestRetry.policy = RetryPolicy(delaysMillis = listOf(LONG_WAIT_MS, LONG_WAIT_MS, LONG_WAIT_MS), jitter = 0.0)
+        val real = awaitRealNetwork()
+        val profile = gated()
+        app.connect(profile.id)
+        assertSent("sign-in-up")
+        val resets = ProxyEngine().stats().resets
+
+        app.runtime.session.underlyingNetwork(real.copy(signIn = true))
+        val asked = app.await(what = "the state saying the network asks for a sign-in") { it.networkSignIn }
+        assertEquals("still connected: no move to another network", ConnectionStatus.Connected, asked.status)
+        assertEquals("nothing reset", resets, ProxyEngine().stats().resets)
+
+        gate.refuse()
+        val reconnecting = failUntilReconnecting("sign-in")
+        assertTrue("every state says so", reconnecting.networkSignIn)
+        val due = checkNotNull(reconnecting.reconnect?.nextAttemptAtMillis) { "no wait: $reconnecting" }
+        assertHeld("sign-in-reconnecting")
+
+        gate.forward(env.socksPort)
+        val waitLeft = due - System.currentTimeMillis()
+        assertTrue("$waitLeft ms of the wait left\n${history.describe()}", waitLeft > 2 * RETRY_NOW_MS)
+        app.runtime.session.underlyingNetwork(real)
+        val back = app.await(RETRY_NOW_MS, "Connected right after signing in") { it.status == ConnectionStatus.Connected }
+        assertFalse(back.networkSignIn)
+        assertEquals(ReconnectReason.NetworkBack, history.states.last { it.reconnect != null }.reconnect?.reason)
+        assertSent("sign-in-back")
+    }
+
     /** Without a network the engine stops and traffic waits at the interface (B7); with one back, it reconnects at once. */
     @Test(timeout = TEST_TIMEOUT_MS)
     fun withoutANetworkTrafficIsHeldUntilOneIsBack() {
@@ -354,7 +390,12 @@ class ReconnectEndToEndTest {
             else -> "other"
         }
         assertEquals(kind, reported.transport)
-        Log.i(LAB_TAG, "network monitor: ${reported.transport}")
+        assertEquals(
+            "a sign-in page as Android says (M10)",
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
+            reported.signIn,
+        )
+        Log.i(LAB_TAG, "network monitor: ${reported.transport}${if (reported.signIn) ", asks for a sign-in" else ""}")
     }
 
     /**

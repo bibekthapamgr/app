@@ -102,11 +102,14 @@ object PfIcons {
             "M6 18L18 6",
         )
     }
+
+    // "Forward" and "back" turn round in right-to-left languages (M10): Android mirrors the layout, these follow it.
     val ChevronRight: ImageVector by lazy {
         strokeIcon(
             "ChevronRight",
             2.0f,
             "M9 6l6 6-6 6",
+            autoMirror = true,
         )
     }
     val ChevronDown: ImageVector by lazy {
@@ -128,6 +131,7 @@ object PfIcons {
             "Back",
             2.0f,
             "M19 12H5M11 6l-6 6 6 6",
+            autoMirror = true,
         )
     }
     val Key: ImageVector by lazy {
@@ -287,13 +291,14 @@ object PfIcons {
     }
 }
 
-private fun strokeIcon(name: String, strokeWidth: Float, vararg paths: String): ImageVector {
+private fun strokeIcon(name: String, strokeWidth: Float, vararg paths: String, autoMirror: Boolean = false): ImageVector {
     val builder = ImageVector.Builder(
         name = "PfIcons.$name",
         defaultWidth = 24.dp,
         defaultHeight = 24.dp,
         viewportWidth = 24f,
         viewportHeight = 24f,
+        autoMirror = autoMirror,
     )
     for (d in paths) {
         builder.addPath(

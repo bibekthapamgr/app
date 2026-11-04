@@ -42,6 +42,7 @@ internal val HELP_SECTIONS = listOf(
         paragraphs = listOf(
             R.string.help_errors_home,
             R.string.help_errors_reach,
+            R.string.help_errors_network_sign_in,
             R.string.help_errors_sign_in,
             R.string.help_errors_protocol,
             R.string.help_errors_blocked,

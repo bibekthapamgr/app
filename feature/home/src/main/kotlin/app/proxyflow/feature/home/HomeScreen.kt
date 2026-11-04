@@ -7,6 +7,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.PluralsRes
+import androidx.annotation.StringRes
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -413,6 +414,7 @@ private fun exitReason(reason: ExitReason): String = stringResource(
 private fun ConnectFailedContent(state: HomeUiState.Ready, error: ConnectionError, actions: HomeActions) {
     StatusHeader(stringResource(R.string.home_status_disconnected), StatusTone.Off, null)
     PfBanner(title = errorTitle(error, state.profile), text = errorMessage(error, state.profile), tone = BannerTone.Error)
+    SignInNetwork(state, R.string.home_sign_in_network_connect_message)
     val blocking = state.killSwitch?.status == KillSwitchStatus.On
     val note = when {
         // Android started ProxyFlow as Always-on VPN: whether it blocks apps now, Android says only to a running VPN.
@@ -599,6 +601,7 @@ private fun AutoReconnectContent(state: HomeUiState.Ready, reconnect: ReconnectI
         ),
         tone = BannerTone.Warning,
     )
+    SignInNetwork(state, R.string.home_sign_in_network_reconnect_message)
     val next = reconnect.nextAttemptAtMillis
     Text(
         listOf(
@@ -651,6 +654,7 @@ private fun BlockedContent(state: HomeUiState.Ready, actions: HomeActions) {
     val error = state.error ?: ConnectionError(ConnectionError.INTERNAL)
     StatusHeader(stringResource(R.string.home_status_blocked), StatusTone.Error, null)
     PfBanner(title = errorTitle(error, state.profile), text = errorMessage(error, state.profile), tone = BannerTone.Error)
+    SignInNetwork(state, R.string.home_sign_in_network_blocked_message)
     Note(stringResource(R.string.home_blocked_note))
     ErrorCode(error)
     when (error.code) {
@@ -780,6 +784,16 @@ private fun StatusHeader(status: String, tone: StatusTone, line: String?) {
             )
         }
     }
+}
+
+/**
+ * M10: Android found a sign-in page on the phone's network (a captive portal), which explains a proxy that can't be
+ * reached; said beside the failure, in [message]'s words for what happens next.
+ */
+@Composable
+private fun SignInNetwork(state: HomeUiState.Ready, @StringRes message: Int) {
+    if (!state.connection.networkSignIn) return
+    PfBanner(title = stringResource(R.string.home_sign_in_network_title), text = stringResource(message), tone = BannerTone.Info)
 }
 
 @Composable

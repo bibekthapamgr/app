@@ -124,8 +124,13 @@ class VpnSession(
         val routingPollMillis: Long = 50,
     )
 
-    /** The phone's network as Android reports it to the service ([underlyingNetwork]). */
-    data class NetworkInfo(val id: String, val transport: String)
+    /**
+     * The phone's network as Android reports it to the service ([underlyingNetwork]).
+     *
+     * @param signIn Android found a sign-in page on it (NET_CAPABILITY_CAPTIVE_PORTAL): it carries nothing until the user
+     *   signs in ([ConnectionState.networkSignIn]).
+     */
+    data class NetworkInfo(val id: String, val transport: String, val signIn: Boolean = false)
 
     private val events = Channel<Event>(Channel.UNLIMITED)
 
@@ -1153,10 +1158,17 @@ class VpnSession(
     private fun onNetwork(info: NetworkInfo?) {
         val previous = network
         val known = networkKnown
+        val signedIn = lastNetwork?.signIn == true && info?.signIn == false && info.id == previous
         network = info?.id
         networkKnown = true
         lastNetwork = info
-        if (info?.id != previous || !known) log("network: ${info?.transport ?: "none"}${if (known) "" else " (first report)"}")
+        val signIn = if (info?.signIn == true) ", asks for a sign-in" else ""
+        when {
+            info?.id != previous || !known -> log("network: ${info?.transport ?: "none"}$signIn${if (known) "" else " (first report)"}")
+            signedIn -> log("network: ${info.transport}, signed in")
+            info != null && info.signIn -> log("network: ${info.transport}$signIn")
+        }
+        if (state.value.networkSignIn != (info?.signIn == true)) publish(state.value)
         if (!known) return // Android's first report says where the phone is, not that anything changed
         val status = state.value.status
         val heldForRetry = status == ConnectionStatus.Blocked && tun != null && RetryPolicy.recoverable(state.value.error?.code)
@@ -1164,7 +1176,14 @@ class VpnSession(
             if (status == ConnectionStatus.Connected || recovery != null || heldForRetry) goOffline()
             return
         }
-        if (info.id == previous) return
+        if (info.id == previous) {
+            // Signed in on the same network: it carries traffic now, as when a network is back, so the attempts its sign-in
+            // page held back start over at once.
+            if (signedIn && (recovery != null || heldForRetry)) {
+                startRecovery(ReconnectReason.NetworkBack, recovery?.lastError ?: state.value.error, immediate = true)
+            }
+            return
+        }
         when {
             status == ConnectionStatus.Offline -> {
                 noteNetwork(info, reset = null)
@@ -1372,8 +1391,9 @@ class VpnSession(
         released = current
     }
 
+    // Every state says whether the phone's network asks for a sign-in, as Android last reported it.
     private fun publish(next: ConnectionState) {
-        state.value = next
+        state.value = next.copy(networkSignIn = lastNetwork?.signIn == true)
     }
 
     private fun stageReached() {

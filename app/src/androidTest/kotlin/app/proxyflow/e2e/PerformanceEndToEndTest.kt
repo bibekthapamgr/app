@@ -120,24 +120,33 @@ class PerformanceEndToEndTest {
     /**
      * Latency: a new connection's set-up through each proxy. ProxyFlow answers the app's SYN only once the proxy's tunnel
      * is open (ADR-0002), so this is the round trips to the proxy and the proxy's own connection to the destination.
+     * Beside it, the same client's TCP connection straight to the proxy, before connecting: what the phone's uplink
+     * itself takes for one.
      */
     @Test(timeout = 300_000)
     fun connectionSetUpThroughTheProxy() {
         for ((protocol, profile) in listOf("socks5" to socks(), "http" to http())) {
+            val port = if (protocol == "socks5") env.socksPort else env.httpPort
+            setUpTimes(protocol, "direct_to_proxy") { FromShell.run("connect", env.proxyHost, port, PROBE_TIMEOUT_MS) }
             app.connect(profile.id)
-            val results = (1..SETUPS).map { FromShell.run("connect", env.destinationName, env.destinationPort, PROBE_TIMEOUT_MS) }
-            assertTrue("every connection through $protocol opened: $results", results.all { it.startsWith("CONNECTED ") })
-            val times = results.map { it.split(" ")[1].toLong() }
-            perf(
-                "setup",
-                "protocol" to protocol,
-                "n" to times.size,
-                "p50_ms" to percentile(times, 50),
-                "p90_ms" to percentile(times, 90),
-                "max_ms" to times.max(),
-            )
+            setUpTimes(protocol, "vpn") { FromShell.run("connect", env.destinationName, env.destinationPort, PROBE_TIMEOUT_MS) }
             app.disconnectAndSettle()
         }
+    }
+
+    private fun setUpTimes(protocol: String, path: String, connect: () -> String) {
+        val results = (1..SETUPS).map { connect() }
+        assertTrue("every connection ($protocol, $path) opened: $results", results.all { it.startsWith("CONNECTED ") })
+        val times = results.map { it.split(" ")[1].toLong() }
+        perf(
+            "setup",
+            "protocol" to protocol,
+            "path" to path,
+            "n" to times.size,
+            "p50_ms" to percentile(times, 50),
+            "p90_ms" to percentile(times, 90),
+            "max_ms" to times.max(),
+        )
     }
 
     /**
@@ -185,41 +194,46 @@ class PerformanceEndToEndTest {
 
     /**
      * Quality bar: at least 100 Mbit/s down through a local test proxy, under 50 % of one core at 50 Mbit/s. Each protocol
-     * carries [BULK_BYTES] each way to the lab's bulk server: first from this process straight through the proxy (the
-     * path's own speed, without ProxyFlow), then from the shell through ProxyFlow. The CPU is this process's (the engine's
-     * and the app's) during the transfer; the share of one core at 50 Mbit/s follows from the CPU seconds per gigabyte.
+     * carries [BULK_BYTES] each way to the lab's bulk server, [TRANSFERS] times: first from this process straight through
+     * the proxy (the path's own speed, without ProxyFlow), then from the shell through ProxyFlow; the median time of each
+     * is reported, with every one. The CPU is this process's (the engine's and the app's) over the transfers through
+     * ProxyFlow; the share of one core at 50 Mbit/s follows from the CPU seconds per gigabyte.
      */
     @Test(timeout = 480_000)
     fun throughputAndItsCpu() {
         for ((protocol, profile) in listOf("socks5" to socks(), "http" to http())) {
             for (direction in listOf("down", "up")) {
-                val millis = proxyOnly(protocol, direction, BULK_BYTES)
+                val times = (1..TRANSFERS).map { proxyOnly(protocol, direction, BULK_BYTES) }
                 perf(
                     "throughput",
                     "protocol" to protocol,
                     "direction" to direction,
                     "path" to "proxy_only",
                     "bytes" to BULK_BYTES,
-                    "ms" to millis,
-                    "mbit_s" to mbits(BULK_BYTES, millis),
+                    "ms" to percentile(times, 50),
+                    "mbit_s" to mbits(BULK_BYTES, percentile(times, 50)),
+                    "each_ms" to times.joinToString(","),
                 )
             }
             app.connect(profile.id)
             for (direction in listOf("down", "up")) {
                 val cpuBefore = cpuMillis()
-                val result = FromShell.run("rate", env.destinationName, lab.bulkPort, direction, BULK_BYTES, RATE_TIMEOUT_MS)
+                val times = (1..TRANSFERS).map {
+                    val result = FromShell.run("rate", env.destinationName, lab.bulkPort, direction, BULK_BYTES, RATE_TIMEOUT_MS)
+                    assertTrue("$direction through $protocol: $result", result.startsWith("RATE "))
+                    result.split(" ")[2].toLong()
+                }
                 val cpu = cpuMillis() - cpuBefore
-                assertTrue("$direction through $protocol: $result", result.startsWith("RATE "))
-                val millis = result.split(" ")[2].toLong()
-                val cpuSecondsPerGb = cpu / 1000.0 / (BULK_BYTES / 1e9)
+                val cpuSecondsPerGb = cpu / 1000.0 / (TRANSFERS * BULK_BYTES / 1e9)
                 perf(
                     "throughput",
                     "protocol" to protocol,
                     "direction" to direction,
                     "path" to "vpn",
                     "bytes" to BULK_BYTES,
-                    "ms" to millis,
-                    "mbit_s" to mbits(BULK_BYTES, millis),
+                    "ms" to percentile(times, 50),
+                    "mbit_s" to mbits(BULK_BYTES, percentile(times, 50)),
+                    "each_ms" to times.joinToString(","),
                     "cpu_ms" to cpu,
                     "cpu_s_per_gb" to "%.2f".format(Locale.ROOT, cpuSecondsPerGb),
                     "cpu_pct_at_50mbit" to "%.1f".format(Locale.ROOT, cpuSecondsPerGb * GB_PER_SECOND_AT_50_MBIT * 100),
@@ -404,7 +418,8 @@ class PerformanceEndToEndTest {
         const val PROBES = 5
         const val PROBE_TIMEOUT_MS = 5_000
         const val SILENT_PROBE_TIMEOUT_MS = 30_000
-        const val BULK_BYTES = 32L * 1024 * 1024
+        const val BULK_BYTES = 16L * 1024 * 1024
+        const val TRANSFERS = 3
         const val CHUNK = 64 * 1024
         const val RATE_TIMEOUT_MS = 120_000
         const val MANY = 200

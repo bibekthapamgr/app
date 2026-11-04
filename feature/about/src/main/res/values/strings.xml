@@ -66,6 +66,7 @@
     <string name="help_errors_title">When something goes wrong</string>
     <string name="help_errors_home">Home says what failed and what to try first, with a code such as AUTH_FAILED that Logs and your proxy provider can use.</string>
     <string name="help_errors_reach">Can\'t reach your proxy, or it isn\'t responding: check the server address and port, that your plan is active, and that your network allows the connection. Some networks block proxy ports.</string>
+    <string name="help_errors_network_sign_in">A network with a sign-in page, as in hotels and airports, carries nothing until you sign in, your proxy included: Home says so when Android finds one. Sign in from Android's notification. If its page doesn't open while ProxyFlow is connected, stop ProxyFlow first; with Android's Block connections without VPN on, Android may keep the page blocked until you turn that off.</string>
     <string name="help_errors_sign_in">Username or password rejected: check them with your provider. ProxyFlow supports the Basic sign-in of HTTP proxies and the username and password of SOCKS5, not Digest.</string>
     <string name="help_errors_protocol">This doesn\'t look like a SOCKS5 or HTTP proxy: the protocol or the port in the profile is probably wrong.</string>
     <string name="help_errors_blocked">Traffic blocked: while connected, ProxyFlow never sends traffic around your proxy. Try again, edit the profile, or choose Stop and use normal network.</string>

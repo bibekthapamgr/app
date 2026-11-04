@@ -560,6 +560,37 @@ class HomeScreenTest {
         assertEquals(listOf("connect", "logs"), calls)
     }
 
+    /**
+     * M10: a network with a sign-in page (a captive portal) is said beside a failure to reach the proxy, with what happens
+     * next in each state: connect again, ProxyFlow trying again at once, or try again; never when Android found none.
+     */
+    @Test
+    fun aSignInPageOnTheNetworkIsSaidBesideTheFailure() {
+        val unreachable = ConnectionError("PROXY_UNREACHABLE")
+        val retry = ReconnectInfo(ReconnectReason.ProxyFailures, 1, 8, nextAttemptAtMillis = 3_000, lastError = unreachable)
+        val cases = listOf(
+            ConnectionState(profileId = "p1", error = unreachable) to
+                "Sign in from Android's notification, then connect again.",
+            ConnectionState(ConnectionStatus.Reconnecting, "p1", "Office", connectedSinceMillis = 0, reconnect = retry) to
+                "Sign in from Android's notification and ProxyFlow tries again at once. If the page doesn't open, stop ProxyFlow first.",
+            ConnectionState(ConnectionStatus.Blocked, "p1", "Office", error = unreachable) to
+                "Sign in from Android's notification, then try again. If the page doesn't open, stop ProxyFlow first.",
+        )
+        var state by mutableStateOf(ready(cases.first().first))
+        compose.setContent { ProxyFlowTheme { HomeScreen(state, actions, nowMillis = 0) } }
+        for ((connection, next) in cases) {
+            state = ready(connection)
+            compose.onNodeWithText("This network asks you to sign in").assertDoesNotExist()
+            state = ready(connection.copy(networkSignIn = true))
+            scrolledTo("This network asks you to sign in").assertIsDisplayed()
+            scrolledTo(
+                "Android found a sign-in page on this network, as in hotels and airports: it carries nothing until you sign in, " +
+                    "your proxy included. $next",
+            ).assertIsDisplayed()
+            scrolledTo("Can't reach your proxy").assertIsDisplayed()
+        }
+    }
+
     /** What the profile fixes offers Edit profile first; what may pass by itself offers Try again first (docs/m1/04 §4). */
     @Test
     fun theFirstActionIsWhatFixesTheError() {

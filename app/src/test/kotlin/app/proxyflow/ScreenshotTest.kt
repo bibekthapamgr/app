@@ -7,11 +7,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -229,6 +231,27 @@ class ScreenshotTest {
                 connectedSinceMillis = SAMPLE_TIME - 600_000,
                 reconnect = retry,
             )
+        HomeScreen(home(reconnecting), HomeActions(), nowMillis = SAMPLE_TIME)
+    }
+
+    /** M10: reconnecting on a network that asks for a sign-in (a captive portal): Home says so beside the failure. */
+    @Test
+    fun homeReconnectingOnASignInNetwork() = captureBothThemes("B5_home_reconnecting_sign_in") {
+        val retry = ReconnectInfo(
+            ReconnectReason.ProxyFailures,
+            attempt = 2,
+            maxAttempts = 8,
+            nextAttemptAtMillis = SAMPLE_TIME + 4_000,
+            lastError = ConnectionError("PROXY_UNREACHABLE", "connection to the proxy timed out"),
+        )
+        val reconnecting = ConnectionState(
+            ConnectionStatus.Reconnecting,
+            "p1",
+            tokyo.name,
+            connectedSinceMillis = SAMPLE_TIME - 600_000,
+            reconnect = retry,
+            networkSignIn = true,
+        )
         HomeScreen(home(reconnecting), HomeActions(), nowMillis = SAMPLE_TIME)
     }
 
@@ -754,6 +777,100 @@ class ScreenshotTest {
         captureLargeFont("G2_privacy_policy", action = hasText("Changes and contact"), scroll = false, lazyList = true) {
             PrivacyPolicyScreen(version = "0.2.0 (2)", onBack = {})
         }
+
+    // M10's localisation review: the pseudo-locales built into the debug app (app/build.gradle.kts). en-XA makes every
+    // string about a third longer and accented, as longer languages are; ar-XB writes it right to left, as Arabic and
+    // Hebrew are, and Android mirrors the layout. Six screens in each, light theme, the top of the screen as it opens.
+
+    @Test
+    @Config(qualifiers = "+en-rXA")
+    fun longerTextHomeDisconnected() = capturePseudoLocale("en-XA", "B2_home_disconnected", english = "Connect") {
+        HomeScreen(home(ConnectionState.Idle), HomeActions())
+    }
+
+    @Test
+    @Config(qualifiers = "+ar-rXB")
+    fun rightToLeftHomeDisconnected() = capturePseudoLocale("ar-XB", "B2_home_disconnected", english = "Connect") {
+        HomeScreen(home(ConnectionState.Idle), HomeActions())
+    }
+
+    @Test
+    @Config(qualifiers = "+en-rXA")
+    fun longerTextHomeConnected() = capturePseudoLocale("en-XA", "B4_home_connected", english = "Disconnect") { connectedHome() }
+
+    @Test
+    @Config(qualifiers = "+ar-rXB")
+    fun rightToLeftHomeConnected() = capturePseudoLocale("ar-XB", "B4_home_connected", english = "Disconnect") { connectedHome() }
+
+    @Test
+    @Config(qualifiers = "+en-rXA")
+    fun longerTextConnectFailed() = capturePseudoLocale("en-XA", "B6b_connect_failed", english = "Try again") { connectFailedHome() }
+
+    @Test
+    @Config(qualifiers = "+ar-rXB")
+    fun rightToLeftConnectFailed() = capturePseudoLocale("ar-XB", "B6b_connect_failed", english = "Try again") { connectFailedHome() }
+
+    @Test
+    @Config(qualifiers = "+en-rXA")
+    fun longerTextProfiles() = capturePseudoLocale("en-XA", "C2_profiles_list", english = "Profiles") { profilesList() }
+
+    @Test
+    @Config(qualifiers = "+ar-rXB")
+    fun rightToLeftProfiles() = capturePseudoLocale("ar-XB", "C2_profiles_list", english = "Profiles") { profilesList() }
+
+    @Test
+    @Config(qualifiers = "+en-rXA")
+    fun longerTextAddProxy() = capturePseudoLocale("en-XA", "D1_add_proxy", english = "Test connection") { addProxyForm() }
+
+    @Test
+    @Config(qualifiers = "+ar-rXB")
+    fun rightToLeftAddProxy() = capturePseudoLocale("ar-XB", "D1_add_proxy", english = "Test connection") { addProxyForm() }
+
+    @Test
+    @Config(qualifiers = "+en-rXA")
+    fun longerTextSettings() = capturePseudoLocale("en-XA", "E1_settings", english = "Settings") { settingsScreen() }
+
+    @Test
+    @Config(qualifiers = "+ar-rXB")
+    fun rightToLeftSettings() = capturePseudoLocale("ar-XB", "E1_settings", english = "Settings") { settingsScreen() }
+
+    @Composable
+    private fun connectedHome() {
+        val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
+        HomeScreen(
+            home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic),
+            HomeActions(),
+            nowMillis =
+            SAMPLE_TIME + 767_000,
+        )
+    }
+
+    @Composable
+    private fun connectFailedHome() =
+        HomeScreen(home(ConnectionState(profileId = "p1", error = ConnectionError("PROXY_UNREACHABLE"))), HomeActions())
+
+    @Composable
+    private fun profilesList() =
+        ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}, nowMillis = SAMPLE_TIME)
+
+    @Composable
+    private fun addProxyForm() = AddEditProxyScreen(AddEditUiState(input = tokyoForm, dirty = true), AddEditActions())
+
+    @Composable
+    private fun settingsScreen() = SettingsScreen(SettingsUiState(loading = false, theme = ThemePreference.System), onThemeChange = {
+    }, onOpenAbout = {}, notificationsOn = true)
+
+    /**
+     * [content] in the pseudo-locale the test's @Config sets, which must be in force — the [english] words of the screen
+     * are nowhere — captured in screenshots/pseudo_locale and checked.
+     */
+    private fun capturePseudoLocale(locale: String, name: String, english: String, content: @Composable () -> Unit) {
+        compose.setContent { ProxyFlowTheme { content() } }
+        val captured = runCatching { compose.onRoot().captureRoboImage("$DIR/pseudo_locale/${name}_$locale.png") }
+        compose.onAllNodesWithText(english).assertCountEquals(0)
+        assertAccessible("$name ($locale)")
+        captured.getOrThrow()
+    }
 
     /**
      * [content] in the light theme at the font scale the test's @Config sets, scrolled to its main [action] (unless it

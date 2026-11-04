@@ -352,6 +352,21 @@ if [ "$GUEST_CAPTURE" = 1 ]; then
         fi
     done
 fi
+# M10: the phone without the notification permission, then a restart with ProxyFlow as Always-on VPN and "Block
+# connections without VPN" on (scripts/m10_scenarios.sh), last of all — the restart ends the captures, the socket samples
+# (all pulled above) and logcat — while the lab's files are still on the phone. Not run once the tests ran out of time.
+# adbd as the shell user again first: the VPN covers the shell, not root.
+if [ "$STATUS" = 124 ] || [ "$STATUS" = 137 ]; then
+    echo "::error title=M10 scenarios (API $API)::Not run: the device tests ran out of time."
+else
+    if [ "$GUEST_CAPTURE" = 1 ]; then restart_adbd unroot || true; fi
+    timeout --kill-after=2m "${M10_TIMEOUT:-16m}" bash scripts/m10_scenarios.sh "$API" "$OUT"
+    M10_STATUS=$?
+    if [ "$M10_STATUS" = 124 ] || [ "$M10_STATUS" = 137 ]; then
+        echo "::error title=M10 scenarios (API $API)::Stopped after ${M10_TIMEOUT:-16m}: the steps it took are in m10-scenarios.txt."
+    fi
+    if [ "$M10_STATUS" != 0 ] && [ "$STATUS" = 0 ]; then STATUS=$M10_STATUS; fi
+fi
 timeout 30 adb shell rm -f /data/local/tmp/proxyflow-e2e.properties /data/local/tmp/proxyflow-ca.pem /data/local/tmp/pf-client.apk \
     /data/local/tmp/pf-connecting.sh /data/local/tmp/pf-connecting.txt >/dev/null 2>&1 || true
 exit "$STATUS"

@@ -143,6 +143,11 @@
     <!-- B6b (pre-flight failures) and the blocked layout -->
     <string name="home_not_connected_note">You\'re not connected: apps use your normal network unless Android\'s system kill switch is on.</string>
     <string name="home_blocked_note">Apps can\'t go online until this is fixed — ProxyFlow sends nothing around your proxy.</string>
+    <!-- M10: Android found a sign-in page (a captive portal) on the phone's network; shown beside a failure to reach the proxy. -->
+    <string name="home_sign_in_network_title">This network asks you to sign in</string>
+    <string name="home_sign_in_network_connect_message">Android found a sign-in page on this network, as in hotels and airports: it carries nothing until you sign in, your proxy included. Sign in from Android's notification, then connect again.</string>
+    <string name="home_sign_in_network_reconnect_message">Android found a sign-in page on this network, as in hotels and airports: it carries nothing until you sign in, your proxy included. Sign in from Android's notification and ProxyFlow tries again at once. If the page doesn't open, stop ProxyFlow first.</string>
+    <string name="home_sign_in_network_blocked_message">Android found a sign-in page on this network, as in hotels and airports: it carries nothing until you sign in, your proxy included. Sign in from Android's notification, then try again. If the page doesn't open, stop ProxyFlow first.</string>
     <string name="home_code">Code: %1$s</string>
     <string name="home_try_again">Try again</string>
     <string name="home_restart">Restart</string>

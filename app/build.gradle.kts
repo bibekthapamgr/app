@@ -57,6 +57,9 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            // M10's localisation review: the pseudo-locales en-XA (longer, accented text) and ar-XB (right to left), for
+            // the screenshot tests and for trying the debug build in them; never in a release build.
+            isPseudoLocalesEnabled = true
         }
         release {
             isMinifyEnabled = true

@@ -693,6 +693,104 @@ class ReconnectTest {
         eventually("one wait at a time") { session.activeJobs() == 1 }
     }
 
+    /**
+     * A network with a sign-in page (M10): while connected it changes nothing but what the state says — no move, so no
+     * reset and no reconnection — and when the proxy then fails, signing in on the same network runs the next attempt at
+     * once, as a network that is back, instead of after its wait.
+     */
+    @Test
+    fun signingInOnTheSameNetworkRunsTheNextAttemptAtOnce() {
+        policy = RetryPolicy(delaysMillis = listOf(60_000, 60_000, 60_000), jitter = 0.0)
+        val profile = connect()
+        session.underlyingNetwork(WIFI)
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        val asked = await { it.networkSignIn }
+        assertEquals("connected still", ConnectionStatus.Connected, asked.status)
+        assertEquals("no move: nothing reset", 0, engine.resets.get())
+        assertEquals(0, entries.count { it.event == LogEvent.NetworkChanged || it.event == LogEvent.ReconnectStarted })
+
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        escalate()
+        val waiting = await { it.status == ConnectionStatus.Reconnecting && it.reconnect?.nextAttemptAtMillis == NOW + 60_000 }
+        assertTrue("every state says so", waiting.networkSignIn)
+        val probes = log.count("probe ${profile.id}")
+
+        engine.answer = PreflightAnswer(ok = true)
+        session.underlyingNetwork(WIFI)
+        val back = await { it.status == ConnectionStatus.Connected }
+
+        assertFalse(back.networkSignIn)
+        assertEquals("one attempt, at once", probes + 1, log.count("probe ${profile.id}"))
+        val again = state.history.last { it.reconnect != null }.reconnect
+        assertEquals(ReconnectReason.NetworkBack, again?.reason)
+        assertEquals(0, entries.count { it.event == LogEvent.NetworkChanged })
+        assertTrue(sessionLog.all.toString(), "network: wifi, asks for a sign-in" in sessionLog.all)
+        assertTrue(sessionLog.all.toString(), "network: wifi, signed in" in sessionLog.all)
+    }
+
+    /** Blocked after the last attempt, with traffic held for a retry: signing in tries again at once too. */
+    @Test
+    fun signingInAfterTheLastAttemptTriesAgain() {
+        val profile = connect()
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        escalate()
+        await { it.status == ConnectionStatus.Blocked }
+        val probes = log.count("probe ${profile.id}")
+
+        engine.answer = PreflightAnswer(ok = true)
+        session.underlyingNetwork(WIFI)
+        await { it.status == ConnectionStatus.Connected }
+        assertEquals(probes + 1, log.count("probe ${profile.id}"))
+
+        // Signing in again later (the page came back, and went) while connected changes nothing.
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        session.underlyingNetwork(WIFI)
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Connected, state.value.status)
+        assertEquals(probes + 1, log.count("probe ${profile.id}"))
+        assertEquals(0, engine.resets.get())
+    }
+
+    /** What no retry changes stays blocked when the user signs in: a refused sign-in or certificate is the proxy's answer. */
+    @Test
+    fun signingInNeverRetriesWhatNoRetryChanges() {
+        val profile = connect()
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        proxyFailure("TLS_UNTRUSTED")
+        await { it.status == ConnectionStatus.Blocked }
+        val probes = log.count("probe ${profile.id}")
+
+        session.underlyingNetwork(WIFI)
+        runBlocking { session.awaitIdle() }
+        assertEquals(ConnectionStatus.Blocked, state.value.status)
+        assertEquals("TLS_UNTRUSTED", state.value.error?.code)
+        assertEquals(probes, log.count("probe ${profile.id}"))
+        assertFalse(state.value.networkSignIn)
+    }
+
+    /** Without a connection, a sign-in page is said (a connect would fail for it) and nothing else changes. */
+    @Test
+    fun aSignInPageIsSaidWithoutAConnection() {
+        session.underlyingNetwork(WIFI_SIGN_IN)
+        await { it.networkSignIn }
+        assertEquals(ConnectionState.Idle.copy(networkSignIn = true), state.value)
+
+        // A connect that fails meanwhile keeps saying it: the failure and its likely cause are shown together.
+        val profile = save()
+        engine.answer = PreflightAnswer(ok = false, code = "PROXY_UNREACHABLE")
+        session.connect(profile.id)
+        val failed = await { it.status == ConnectionStatus.Disconnected && it.error != null }
+        assertTrue(failed.networkSignIn)
+        assertEquals("PROXY_UNREACHABLE", failed.error?.code)
+
+        session.underlyingNetwork(WIFI)
+        val signedIn = await { !it.networkSignIn }
+        assertEquals("nothing to retry: the user connects again", ConnectionStatus.Disconnected, signedIn.status)
+        assertEquals(1, log.count("probe ${profile.id}"))
+        assertEquals(emptyList<LogEvent>(), entries.map { it.event }.filter { it in NETWORK_EVENTS })
+    }
+
     @Test
     fun networkReportsWithoutAConnectionChangeNothing() {
         session.underlyingNetwork(WIFI)
@@ -872,6 +970,7 @@ class ReconnectTest {
         const val USER = "alice"
         const val PASSWORD = "hunter2-secret"
         val WIFI = VpnSession.NetworkInfo("net 101", "wifi")
+        val WIFI_SIGN_IN = WIFI.copy(signIn = true)
         val MOBILE = VpnSession.NetworkInfo("net 102", "cellular")
         val NETWORK_EVENTS = setOf(LogEvent.Offline, LogEvent.NetworkChanged, LogEvent.ReconnectStarted, LogEvent.Reconnected)
     }

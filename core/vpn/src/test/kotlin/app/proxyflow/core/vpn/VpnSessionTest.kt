@@ -848,7 +848,9 @@ class VpnSessionTest {
         host.onAbort = { gate.countDown() } // shutting the sockets down makes the engine's call return
         session.connect(profile.id)
         awaitLog("probe ${profile.id} ${VpnSession.PREFLIGHT_TARGET}")
-        assertEquals("the check runs", 1, session.activeJobs())
+        // The service's start wait, cancelled as the service attached just before the check began, may still be ending
+        // (M10: once in run 41811060838 it was, and counted): the check alone runs once it has.
+        eventually("the check alone runs; ${session.activeJobs()} jobs") { session.activeJobs() == 1 }
 
         session.disconnect()
         awaitStatus(ConnectionStatus.Disconnected)

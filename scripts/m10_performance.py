@@ -33,7 +33,7 @@ NAMES = {"socks5": "SOCKS5", "http": "HTTP"}
 # What PerformanceEndToEndTest logs when every test ran to the end: (measurement, the fields that tell its lines apart).
 EXPECTED = (
     [("connect", {"protocol": p}) for p in PROTOCOLS]
-    + [("setup", {"protocol": p}) for p in PROTOCOLS]
+    + [("setup", {"protocol": p, "path": path}) for p in PROTOCOLS for path in ("direct_to_proxy", "vpn")]
     + [("fail_closed", {"proxy": proxy}) for proxy in ("refusing", "silent")]
     + [("throughput", {"protocol": p, "direction": d, "path": path}) for p in PROTOCOLS for d in ("down", "up") for path in ("proxy_only", "vpn")]
     + [("memory", {}), ("idle", {})]
@@ -109,14 +109,17 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
     bars.append(bar("Time to connected", f"≤ {CONNECT_P90_MS} ms at p90", "?" if worst is None else f"{worst:.0f} ms (the slower protocol's p90)",
                     None if worst is None else worst <= CONNECT_P90_MS))
 
-    # A new connection's set-up through the proxy.
+    # A new connection's set-up through the proxy, beside a TCP connection straight to it.
     parts = []
     for protocol in PROTOCOLS:
-        m = find(found, "setup", protocol=protocol)
+        m, direct = find(found, "setup", protocol=protocol, path="vpn"), find(found, "setup", protocol=protocol, path="direct_to_proxy")
         if m:
-            parts.append(f"{NAMES[protocol]} p50 {m.get('p50_ms')} ms, p90 {m.get('p90_ms')} ms, max {m.get('max_ms')} ms (n={m.get('n')})")
+            parts.append(
+                f"{NAMES[protocol]} p50 {m.get('p50_ms')} ms, p90 {m.get('p90_ms')} ms, max {m.get('max_ms')} ms (n={m.get('n')})"
+                + (f", a TCP connection straight to the proxy p50 {direct.get('p50_ms')} ms, p90 {direct.get('p90_ms')} ms" if direct else "")
+            )
     if parts:
-        facts.append("a new connection's set-up through the proxy (the app's SYN to its SYN-ACK): " + "; ".join(parts))
+        facts.append("a new connection's set-up through ProxyFlow and the proxy (the app's SYN to its SYN-ACK): " + "; ".join(parts))
 
     # Fail closed.
     refusing, silent = find(found, "fail_closed", proxy="refusing"), find(found, "fail_closed", proxy="silent")
@@ -195,9 +198,11 @@ def report(found: list[dict[str, str]]) -> tuple[list[str], list[dict[str, objec
 
 
 def vpn_bytes(found: list[dict[str, str]]) -> str:
+    """How much each transfer carried, and how many of each kind the median is of."""
     m = find(found, "throughput")
     size = number(m.get("bytes")) if m else None
-    return "?" if size is None else f"{size / 1024 / 1024:.0f} MiB each"
+    count = len(m.get("each_ms", "").split(",")) if m and m.get("each_ms") else 1
+    return "?" if size is None else f"{size / 1024 / 1024:.0f} MiB each, the median of {count}"
 
 
 def main(argv: list[str]) -> int:

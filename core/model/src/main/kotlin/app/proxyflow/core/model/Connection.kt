@@ -59,7 +59,7 @@ enum class ReconnectReason {
     /** Connections in a row could not reach the proxy (the escalation rule, docs/m1/04 §4). */
     ProxyFailures,
 
-    /** The phone has a network again after being offline. */
+    /** The phone has a network again after being offline, or the user signed in to its network's sign-in page (M10). */
     NetworkBack,
 
     /** The phone moved to another network while ProxyFlow was already reconnecting: the attempts start over. */
@@ -147,6 +147,9 @@ data class ConnectionError(val code: String, val detail: String? = null) {
  * @param held while [ConnectionStatus.Connecting]: the VPN interface is already up and holds apps' traffic — Android
  *   started ProxyFlow as Always-on VPN (M8, ADR-0013 §3) — so cancelling sends apps to the normal network, unlike a
  *   connect that changes nothing on the phone until it passes.
+ * @param networkSignIn the phone's network asks for a sign-in: Android found a sign-in page on it (a captive portal,
+ *   as in hotels and airports), and until the user signs in it carries nothing, the way to the proxy included (M10).
+ *   Whatever the connection's status: it explains a failure to reach the proxy, and is said beside it.
  */
 data class ConnectionState(
     val status: ConnectionStatus = ConnectionStatus.Disconnected,
@@ -158,6 +161,7 @@ data class ConnectionState(
     val error: ConnectionError? = null,
     val reconnect: ReconnectInfo? = null,
     val held: Boolean = false,
+    val networkSignIn: Boolean = false,
 ) {
     /** Connecting or up: a new connect for the same profile has nothing to do. */
     val active: Boolean get() = status != ConnectionStatus.Disconnected
