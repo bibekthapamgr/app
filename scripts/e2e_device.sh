@@ -140,6 +140,15 @@ choose_uplink() {
         wifi_in_airplane_mode
         if uplink_within 60; then
             UPLINK="$(uplink_name) (airplane mode, so the radio is off: mobile data is unreliable on this image)"
+        elif {
+            # Wi-Fi once more before mobile data, which then dropped during the tests (run 41808719551, API 35: Wi-Fi
+            # had not reached the runner after 60 s, mobile data had, and two tests failed "Network is unreachable").
+            timeout 30 adb shell svc wifi disable >/dev/null 2>&1 || true
+            sleep 5
+            timeout 30 adb shell svc wifi enable >/dev/null 2>&1 || true
+            uplink_within 90
+        }; then
+            UPLINK="$(uplink_name) (airplane mode, after switching Wi-Fi off and on: mobile data is unreliable on this image)"
         else
             timeout 30 adb shell cmd connectivity airplane-mode disable >/dev/null 2>&1 || true
             timeout 30 adb shell svc data enable >/dev/null 2>&1 || true

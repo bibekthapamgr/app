@@ -46,7 +46,17 @@ import javax.net.ssl.TrustManagerFactory;
  *   bulk HOST PORT up BYTES TIMEOUT_MS LINGER_MS     SENT n REPLY text | ERROR ...
  *   bulk HOST PORT down BYTES TIMEOUT_MS LINGER_MS   RECEIVED n | ERROR ...
  *   hold HOST PORT SECONDS                    ENDED ms closed|reset|data|timeout | ERROR ...
+ *   rate HOST PORT up|down BYTES TIMEOUT_MS   RATE bytes ms | ERROR ...
+ *   connect HOST PORT TIMEOUT_MS              CONNECTED ms | FAILED ms exception | UNRESOLVED exception
+ *   many HOST PORT COUNT SECONDS              HELD opened OF count FAILED failures IN ms [first exception]
  * </pre>
+ *
+ * rate (M10) times one bulk transfer, from the connection's start to the last byte read or the
+ * server's count; connect resolves HOST, then times the connection's set-up alone (through ProxyFlow, it is accepted only
+ * once the proxy's tunnel is open, ADR-0002, so a refusing proxy shows as a quick failure); many
+ * opens COUNT connections one after another, each asking the bulk server to hold it for SECONDS,
+ * prints how long opening them took, and closes each a moment before its hold would end, so a test
+ * can read the engine's memory while all are open.
  *
  * bulk and hold talk to the lab's bulk server (scripts/e2e_servers.py): up sends BYTES after its
  * request line and prints the server's count, down reads BYTES, and both then keep the connection
@@ -89,6 +99,12 @@ public final class ShellClient {
                 return bulk(a[1], Integer.parseInt(a[2]), a[3], Long.parseLong(a[4]), Integer.parseInt(a[5]), Integer.parseInt(a[6]));
             case "hold":
                 return hold(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]));
+            case "rate":
+                return rate(a[1], Integer.parseInt(a[2]), a[3], Long.parseLong(a[4]), Integer.parseInt(a[5]));
+            case "connect":
+                return connect(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]));
+            case "many":
+                return many(a[1], Integer.parseInt(a[2]), Integer.parseInt(a[3]), Integer.parseInt(a[4]));
             default:
                 return "ERROR unknown command";
         }
@@ -134,6 +150,68 @@ public final class ShellClient {
             return "RECEIVED " + received;
         }
     }
+
+    private static String rate(String host, int port, String direction, long bytes, int timeout) throws Exception {
+        long start = System.nanoTime();
+        String result = bulk(host, port, direction, bytes, timeout, 0);
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        String expected = direction.equals("up") ? "SENT " + bytes + " REPLY GOT " + bytes : "RECEIVED " + bytes;
+        return result.equals(expected) ? "RATE " + bytes + " " + ms : "ERROR " + result;
+    }
+
+    private static String connect(String host, int port, int timeout) {
+        InetSocketAddress address;
+        try {
+            address = new InetSocketAddress(InetAddress.getByName(host), port);
+        } catch (Exception e) {
+            return "UNRESOLVED " + e.getClass().getSimpleName();
+        }
+        long start = System.nanoTime();
+        try (Socket socket = new Socket()) {
+            socket.connect(address, timeout);
+            return "CONNECTED " + (System.nanoTime() - start) / 1_000_000;
+        } catch (Exception e) {
+            return "FAILED " + (System.nanoTime() - start) / 1_000_000 + " " + e.getClass().getSimpleName();
+        }
+    }
+
+    private static String many(String host, int port, int count, int seconds) throws Exception {
+        List<Socket> open = new ArrayList<>();
+        List<Long> openedAt = new ArrayList<>();
+        int failed = 0;
+        String first = "";
+        long start = System.nanoTime();
+        try {
+            for (int i = 0; i < count; i++) {
+                Socket socket = new Socket();
+                try {
+                    socket.connect(new InetSocketAddress(host, port), 15_000);
+                    socket.getOutputStream().write(("HOLD " + seconds + "\n").getBytes(StandardCharsets.US_ASCII));
+                    socket.getOutputStream().flush();
+                    open.add(socket);
+                    openedAt.add(System.nanoTime());
+                } catch (IOException e) {
+                    failed++;
+                    if (first.isEmpty()) first = e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()).replace('\n', ' ');
+                    socket.close();
+                }
+            }
+            long openingMs = (System.nanoTime() - start) / 1_000_000;
+            // Each closes MANY_CLOSE_EARLY_S before the server's hold would end, so the server logs it closed by the client,
+            // never ended early (the network-change evidence's sign, scripts/m7_evidence.py), and all are open together
+            // from the last one opened until the first closes.
+            for (int i = 0; i < open.size(); i++) {
+                long waitMs = (openedAt.get(i) + (seconds - MANY_CLOSE_EARLY_S) * 1_000_000_000L - System.nanoTime()) / 1_000_000;
+                if (waitMs > 0) Thread.sleep(waitMs);
+                open.get(i).close();
+            }
+            return "HELD " + open.size() + " OF " + count + " FAILED " + failed + " IN " + openingMs + (first.isEmpty() ? "" : " " + first);
+        } finally {
+            for (Socket socket : open) socket.close();
+        }
+    }
+
+    private static final int MANY_CLOSE_EARLY_S = 2;
 
     private static String hold(String host, int port, int seconds) throws Exception {
         try (Socket socket = new Socket()) {

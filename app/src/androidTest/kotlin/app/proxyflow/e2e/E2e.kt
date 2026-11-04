@@ -376,7 +376,7 @@ class App {
     }
 
     /** Waits until [host]:[port] accepts a connection from this process, which ProxyFlow's VPN leaves out; the time taken. */
-    private fun awaitProxy(host: String, port: Int): Long {
+    fun awaitProxy(host: String, port: Int): Long {
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < UPLINK_WAIT_MS) {
             val reached = runCatching { Socket().use { it.connect(InetSocketAddress(host, port), 1_000) } }.isSuccess
@@ -447,7 +447,7 @@ private val VIEW_FIELDS = listOf(
 private const val VIEW_CHARS = 600
 
 /** What the engine reports when the phone has no route to the proxy at all: its own uplink is down. */
-private val UPLINK_DROPPED = ConnectionError("PROXY_UNREACHABLE", "no route to the proxy")
+internal val UPLINK_DROPPED = ConnectionError("PROXY_UNREACHABLE", "no route to the proxy")
 private const val UPLINK_RETRIES = 2
 private const val UPLINK_WAIT_MS = 15_000L
 

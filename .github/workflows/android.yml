@@ -340,6 +340,11 @@ jobs:
   #   without VPN" (set through the test APK's device owner), and a crash with a planted
   #   sign-in; scripts/m8_evidence.py checks the lab's witness (reached only around
   #   ProxyFlow), the captures and Android's crash report against the steps.
+  # - M10 performance baseline (PerformanceEndToEndTest): time to Connected, connection set-up,
+  #   a dead proxy's connections refused, throughput and its CPU beside the same transfer
+  #   straight through the proxy, memory with 200 connections open, CPU while idle with the
+  #   screen off; scripts/m10_performance.py sets each against the V1 quality bars
+  #   (docs/m1/01-scope.md §7) and saves m10-performance.json with the evidence.
   device:
     needs: engine
     if: ${{ !cancelled() }}
@@ -415,12 +420,12 @@ jobs:
           disable-animations: true
           script: bash scripts/e2e_device.sh ${{ matrix.api-level }}
 
-      - name: End-to-end evidence (the lab's logs, packet captures, logcat; emitted as annotations)
+      - name: End-to-end evidence and the performance baseline (the lab's logs, packet captures, logcat; emitted as annotations)
         if: ${{ !cancelled() && steps.proxies.outcome == 'success' && steps.emulator.outcome != 'skipped' }}
         run: |
           sudo chmod -R a+rX /tmp/pf
           status=0
-          for check in m5_evidence m6_evidence m7_evidence m8_evidence; do
+          for check in m5_evidence m6_evidence m7_evidence m8_evidence m10_performance; do
             python3 "scripts/$check.py" --api ${{ matrix.api-level }} --pf /tmp/pf \
               --out "$RUNNER_TEMP/m5-api${{ matrix.api-level }}" --host-pcap "$RUNNER_TEMP/emulator-uplink.pcap" || status=1
           done
