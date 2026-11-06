@@ -259,6 +259,11 @@ connected_now() { # <label> <what>: Android still has ProxyFlow's VPN and a line
     LAST_REPLY=""
     if vpn_up "$vpn" && line_through "$1"; then return 0; fi
     fail "P: $2: Android's VPN: $(echo "$vpn" | cut -c1-120); a line through the proxy: ${LAST_REPLY:-not sent}"
+    # What ProxyFlow's session and the phone's uplink were doing then (M10-131: on API 33 a line was refused with
+    # Battery Saver on, ProxyFlow's proxy unreachable to it for a moment, the cause unread): its last session lines, the
+    # uplink's addresses, and whether Android restricts the app's network under Battery Saver (its power-save allowance).
+    note "P: $2, then: ProxyFlow's session: $(timeout 30 adb logcat -d -v brief -t 40 -s ProxyFlowVpn 2>/dev/null | tr -d '\r' | grep -E 'connected |reconnect|blocked|failed|error|uplink' | tail -6 | paste -sd ';' | cut -c1-500)"
+    note "P: $2, then: the phone's addresses: $(timeout 30 adb shell 'ip -o -4 addr show' 2>/dev/null | tr -d '\r' | awk '{print $2, $4}' | paste -sd ';' | cut -c1-200); power-save allowance: $(timeout 30 adb shell 'dumpsys deviceidle whitelist' 2>/dev/null | tr -d '\r' | grep -c proxyflow) entries for ProxyFlow; firewall under Battery Saver: $(timeout 30 adb shell 'dumpsys netpolicy' 2>/dev/null | tr -d '\r' | grep -E -m2 'Restrict power|uid 10[0-9]+ .*proxyflow|Power save' | paste -sd ';' | cut -c1-200)"
     return 1
 }
 
