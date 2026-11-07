@@ -24,14 +24,22 @@ looks critical) and recorded in the release's defect register with the id the re
 2. **Assess**: reproduce with the owner's proxy or the lab (never the reporter's credentials); for a routing claim, a
    packet capture at the uplink and the witness (`scripts/e2e_env.sh`, `scripts/m8_failure_injection.sh` give the
    method); the severity by §1; which versions on Play are affected; whether a halt is needed now.
-3. **Contain** (critical): halt the staged rollout (`rollback.md` §3); if every user on Play is affected, the
-   known-issue notice (§3) goes out the same day on the listing's "What's new" cannot (Play has no banner), so on the
-   support page (`site/index.html`) and the repository's README, and as a reply to the reporter; the user's
-   mitigation is named (usually: disconnect and use the proxy another way, or turn on Android's "Block connections
-   without VPN" if the problem is a leak around the proxy when it should be blocked).
-4. **Fix** on a branch from the release's tag (`rollback.md` §4): the defect's regression test first (the lab, a
-   capture, the failure-injection harness — a test that fails on the tag and passes with the fix), then the fix,
-   then the whole suite three times green, then the signed-bundle smoke.
+3. **Contain** (critical): halt the staged rollout (`rollback.md` §3). If every user on Play is affected, the
+   known-issue notice (§3) goes out the same day. Play has no banner and the listing's "What's new" belongs to a
+   release, so the notice goes on the **support page**: the text is written into `docs/m12/known-issue.md` and
+   pushed to `main`; `pages.yml` renders it in a box at the top of the front page (`privacy_page.py --notice`) and
+   deploys it (the repository variable `PAGES_ENABLED` must be `true` and Pages on — `docs/m11/release-checklist.md`
+   §7; both are checked in the drill, §6). The same text goes in the README's status line and in the reply to the
+   reporter and to every report of the problem. The user's mitigation is named (usually: disconnect and use the proxy
+   another way, or turn on Android's "Block connections without VPN" if the problem is a leak around the proxy when
+   it should be blocked). When the fix has reached 100 %, the file is emptied in the same commit that dates the
+   changelog, and the box disappears.
+4. **Fix** on a branch `hotfix/<name>` from the release's tag (`rollback.md` §4, "a forward fix"): the defect's
+   regression test first (the lab, a capture, the failure-injection harness — a test that fails on the tag and passes
+   with the fix), then the fix, then the whole suite three times green on the branch's final commit — the `android`
+   workflow runs on the pull request to `main` (or by `workflow_dispatch` on the branch), and is rerun twice with
+   `gh run rerun <id>` without pushing — then the merge to `main` and the signed-bundle smoke of the `release` run
+   there. Or the rollback of `rollback.md` §4 when a fix cannot be proven in time.
 5. **Release** the fix with the next versionCode as a staged rollout, watched at each step (`rollback.md` §2); the
    changelog's *Security* section names what was fixed, without the exploit's details until 100 %.
 6. **Disclose** after 100 %: the GitHub security advisory (CVE if the reporter or the owner wants one), the
@@ -48,8 +56,11 @@ looks critical) and recorded in the release's defect register with the id the re
 > your phone unless it says so here: ‹it has not / your proxy password may have been visible to … — change it at
 > your provider›.
 
-Where: the support page (`site/index.html`, `pages.yml`'s deploy), the README's status line, the reply to every
-report of the problem; and the Play listing's "What's new" of the fixing release says what was fixed.
+Where: `docs/m12/known-issue.md` (the first line is the box's heading, each paragraph after it a line of the box;
+rendered on the front page of the Pages site by `scripts/release/privacy_page.py --notice`, which `pages.yml` runs
+on every push and deploys from `main`), the README's status line, the reply to every report of the problem; and the
+Play listing's "What's new" of the fixing release says what was fixed. The file is empty when no incident is open —
+`test_privacy_page` fails the build when it is not, so that a notice cannot be forgotten on the page.
 
 ## 4. A vulnerability in a library (OSV, govulncheck, a Play notice)
 
@@ -67,9 +78,13 @@ release, the allowlist entry with the reason meanwhile (`maintenance-runbook.md`
 ## 6. The drill (before the first production release, then yearly)
 
 The owner runs the process once on a pretend incident — "a line reached the witness on API 34" — with the lab:
-the acknowledgement written, the severity set, the halt done on the internal track (Play Console → Release → halt),
-a branch from the tag, a test that fails (`scripts/m8_failure_injection.sh`'s witness check inverted on purpose),
-a version bump, the signed-bundle smoke, the notice drafted. The date and what took longest go in this table:
+the acknowledgement written, the severity set, the halt rehearsed on the **closed-testing** track (the internal track
+has no staged rollout and so nothing to halt; closed testing does: a release there at a percentage, then Play Console
+→ Release → the release → Halt rollout, then resume), a branch from the tag, a test that fails
+(`scripts/m8_failure_injection.sh`'s witness check inverted on purpose), a version bump (the drill of `rollback.md`
+§6 is the same release), the signed-bundle smoke, the notice written into `docs/m12/known-issue.md` on a branch and
+checked on the pull request's Pages build artifact (and, once, on the deployed page from `main`, then emptied). The
+date and what took longest go in this table:
 
 | Date | Took longest | Changed afterwards |
 |---|---|---|

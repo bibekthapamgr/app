@@ -1,7 +1,11 @@
 # M12: dependency updates proposed on a schedule, as pull requests the full CI (android.yml, release.yml, secrets.yml)
 # runs on — a bump that breaks a routing, protocol or security test never merges (docs/m12/maintenance-runbook.md §3).
-# Grouped so that one PR a month carries the small bumps; majors come alone. The Android Gradle plugin, Kotlin and the
-# Go toolchain are deliberate upgrades (docs/m12/maintenance-runbook.md §3.2), not dependabot's.
+# Grouped so that one PR a month carries the small bumps; majors come alone. The Android Gradle plugin, Kotlin (and the
+# artefacts whose version follows one of them: KSP, lint-api) and the Go toolchain are deliberate upgrades
+# (docs/m12/maintenance-runbook.md §3.2), not dependabot's. kotlinx (coroutines, serialization) IS dependabot's: the
+# ignore patterns name "org.jetbrains.kotlin:" and the "org.jetbrains.kotlin." plugins, never "org.jetbrains.kotlin*",
+# which would also match kotlinx (review A F-1). Groups are matched in order: the test tools first, so that
+# androidx.test* lands in test-tools and not in the androidx group (F-3).
 version: 2
 updates:
   - package-ecosystem: gradle
@@ -13,16 +17,19 @@ updates:
       timezone: Asia/Tokyo
     open-pull-requests-limit: 5
     groups:
+      test-tools:
+        patterns: ["io.github.takahirom.roborazzi*", "org.robolectric:*", "junit:*", "androidx.test*"]
       androidx-minor-and-patch:
         patterns: ["androidx.*", "com.google.*", "org.jetbrains.kotlinx:*"]
         update-types: ["minor", "patch"]
-      test-tools:
-        patterns: ["io.github.takahirom.roborazzi*", "org.robolectric:*", "junit:*", "androidx.test*"]
     ignore:
       - dependency-name: "com.android.tools.build:gradle"
       - dependency-name: "com.android.application"
       - dependency-name: "com.android.library"
-      - dependency-name: "org.jetbrains.kotlin*"
+      - dependency-name: "com.android.tools.lint:*"          # version = AGP + 23
+      - dependency-name: "org.jetbrains.kotlin:*"            # the Kotlin artefacts
+      - dependency-name: "org.jetbrains.kotlin.*"            # the Kotlin Gradle plugins (kotlin.android, kotlin.plugin.compose, …)
+      - dependency-name: "com.google.devtools.ksp*"          # version follows Kotlin
     labels: ["dependencies", "gradle"]
   - package-ecosystem: gomod
     directory: /engine

@@ -6,13 +6,17 @@ and acceptance "policy and dependency reviews are scheduled".
 
 ## 1. When
 
-- **Whenever the data behaviour changes** — mechanically: `scripts/check_data_behavior.py` fails every build when
-  any of its ten items differs from `docs/m12/data-behavior.lock` (the manifests' permissions and services, the
-  connectivity-check destination, the Room schemas, the DataStore keys, the log's retention, the `privacy_*`
-  strings, the policy document, the declarations document, the dependency review). The build stays red until the
-  review below is done and the lock rewritten with who reviewed and what changed (`--update --reviewed-by --note`).
-  Adding a library is such a change (the dependency review's list changes): a library that phones home is a data
-  behaviour.
+- **Whenever the data behaviour changes** — mechanically: `scripts/check_data_behavior.py` fails CI on every push
+  and pull request (the `android` build, and the `pages` workflow for commits that touch only documents, which
+  `android.yml` ignores) when any of its fourteen items differs from `docs/m12/data-behavior.lock`: the manifests'
+  permissions, services and `<application>` attributes (backup, data-extraction and network-security rules) with the
+  XML files they name, the connectivity-check destination, the Room schemas, the DataStore keys, the log's
+  retention, what the log may hold (`LogDetail.ALLOWED`, `LogSanitizer`) and what its export shares (`LogExport`),
+  the `privacy_*` strings, the policy document (its version line left out), the declarations document, the version
+  catalog's `[versions]` and `[libraries]` tables and the dependency review. CI stays red until the review below is
+  done and the lock rewritten with who reviewed and what changed (`--update --reviewed-by --note`). Adding or
+  bumping a library is such a change (the catalog changes; dependabot's pull requests are red until reviewed — a
+  patch bump of a known library is a one-line review): a library that phones home is a data behaviour.
 - **Every quarter** (January, April, July, October), from the monthly maintenance issue, whether or not anything
   changed: Google's forms and policies move (the Data safety form's categories, the VpnService policy, the
   User Data policy), and the review is of the app against *today's* forms.

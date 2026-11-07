@@ -50,6 +50,26 @@ class TargetApi(unittest.TestCase):
         self.assertTrue(any("expected to be required from 2027-08-31, in 91 days" in w for w in before), before)
         self.assertTrue(any("10 days ago" in w for w in after), after)
 
+    def test_an_extension_turns_the_failure_into_a_warning_until_it_ends(self) -> None:
+        # Review A D-1: extension_until is honoured only when the owner says Google granted it (--extended).
+        with mock.patch.object(cta, "rules", lambda: RULES), mock.patch.object(cta, "target_sdk", lambda: 35):
+            failures, warnings = cta.check(dt.date(2026, 10, 1), 120, 180, extended=True)
+            self.assertEqual(failures, [])
+            self.assertTrue(any("extension that ends 2026-11-01, in 31 days" in w for w in warnings), warnings)
+            failures, _ = cta.check(dt.date(2026, 11, 2), 120, 180, extended=True)
+            self.assertTrue(any("required targetSdk 36" in f for f in failures), failures)
+            failures, _ = cta.check(dt.date(2026, 10, 1), 120, 180)
+            self.assertTrue(any("run with --extended" in f for f in failures), failures)
+
+    def test_an_expected_next_already_listed_is_flagged_instead_of_warning_twice(self) -> None:
+        # Review A D-2: once API 37 is in the requirements, expected_next must move to 38.
+        rules = dict(RULES, requirements=RULES["requirements"] + [{"api": 37, "android": "17", "new_apps_and_updates_from": "2027-08-31"}])
+        with mock.patch.object(cta, "rules", lambda: rules), mock.patch.object(cta, "target_sdk", lambda: 37):
+            failures, warnings = cta.check(dt.date(2027, 6, 1), 120, 9999)
+        self.assertEqual(failures, [])
+        self.assertEqual(len(warnings), 1, warnings)
+        self.assertIn("set it to 38", warnings[0])
+
     def test_a_stale_reading_warns(self) -> None:
         with mock.patch.object(cta, "rules", lambda: RULES):
             _, warnings = cta.check(dt.date(2027, 6, 1), 1, 180)

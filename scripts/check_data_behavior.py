@@ -6,15 +6,19 @@ without that review, so the privacy policy, the Data safety form and the VpnServ
 app by accident.
 
 What is fingerprinted (each a sha256 of the file or the lines named):
-  - the permissions and the foreground-service type: every <uses-permission>, <service> and foregroundServiceType in
-    the manifests of app/ and core/vpn/;
+  - the permissions, the foreground-service type and the <application> attributes (backup, data-extraction and
+    network-security configuration): every <uses-permission>, <service>, foregroundServiceType and the <application>
+    tag in the manifests of app/ and core/vpn/, and app/src/main/res/xml/*.xml (the backup and network-security rules);
   - the network destinations ProxyFlow itself opens: PREFLIGHT_TARGET in VpnSession.kt (the connectivity check);
   - what is stored: the Room schemas (core/data/schemas/**), the DataStore keys (the preference names of
-    SettingsRepository, ActiveProfileStore and DataStoreProtectionStore), the log's retention constants (LogRepository);
-  - what the app says about it: the privacy_* strings and docs/m9/privacy-policy.md;
+    SettingsRepository, ActiveProfileStore and DataStoreProtectionStore), the log's retention constants (LogRepository),
+    and what the log may contain and the export may share: LogDetail.ALLOWED, LogSanitizer and LogExport (Logs.kt);
+  - what the app says about it: the privacy_* strings and docs/m9/privacy-policy.md (its version line left out, so a
+    version bump alone does not break the lock);
   - the Play declarations: docs/m11/declarations.md;
-  - the libraries on the release runtime classpath, as docs/m4/dependency-review.md lists them (an SDK that phones home
-    is a data behaviour).
+  - the libraries: the [versions] and [libraries] tables of gradle/libs.versions.toml (a dependabot bump or a new
+    library is a data behaviour until reviewed: an SDK that phones home) and docs/m4/dependency-review.md, which must
+    then be brought up to date.
 
     python3 scripts/check_data_behavior.py            # compare with the lock; exit 1 on a change, naming it
     python3 scripts/check_data_behavior.py --update --reviewed-by "<name>" --note "<what was reviewed>"
@@ -31,6 +35,7 @@ import os
 import re
 import sys
 
+LOGS_KT = "core/model/src/main/kotlin/app/proxyflow/core/model/Logs.kt"
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 LOCK = os.path.join(ROOT, "docs", "m12", "data-behavior.lock")
 
@@ -46,7 +51,7 @@ def sha(text: str) -> str:
 
 def manifest_lines(path: str) -> str:
     text = read(path)
-    keep = re.findall(r"<uses-permission[^>]*>|<service\b[^>]*>|foregroundServiceType=\"[^\"]*\"|android:permission=\"[^\"]*\"|<uses-feature[^>]*>", text, re.S)
+    keep = re.findall(r"<uses-permission[^>]*>|<service\b[^>]*>|foregroundServiceType=\"[^\"]*\"|android:permission=\"[^\"]*\"|<uses-feature[^>]*>|<application\b[^>]*>", text, re.S)
     return "\n".join(re.sub(r"\s+", " ", k).strip() for k in keep)
 
 
@@ -76,6 +81,27 @@ def tree(path: str) -> str:
     return "\n".join(parts)
 
 
+def block(path: str, start: str, end: str | None) -> str:
+    """The text of path from the line holding `start` up to (not including) the line holding `end` (the end of the
+    file when None)."""
+    lines = read(path).splitlines()
+    try:
+        a = next(i for i, line in enumerate(lines) if start in line)
+        b = len(lines) if end is None else next(i for i, line in enumerate(lines) if i > a and end in line)
+    except StopIteration:
+        return f"<{start!r} .. {end!r} not found>"
+    return "\n".join(lines[a:b])
+
+
+def toml_tables(path: str, names: tuple[str, ...]) -> str:
+    text = read(path)
+    out = []
+    for name in names:
+        m = re.search(rf"^\[{name}\]\n(.*?)(?=^\[|\Z)", text, re.S | re.M)
+        out.append(f"[{name}]\n" + (m.group(1).strip() if m else "<not found>"))
+    return "\n".join(out)
+
+
 def datastore_keys(path: str) -> str:
     text = read(path)
     return "\n".join(sorted(set(re.findall(r"(?:stringPreferencesKey|booleanPreferencesKey|intPreferencesKey|longPreferencesKey|stringSetPreferencesKey)\(\"([^\"]+)\"\)", text))))
@@ -93,9 +119,13 @@ def items() -> dict[str, str]:
             for name in ("SettingsRepository", "ActiveProfileStore", "DataStoreProtectionStore")
         ),
         "stored:log-retention": constants("core/data/src/main/kotlin/app/proxyflow/core/data/LogRepository.kt", ["RETENTION_MILLIS", "MAX_ENTRIES"]),
+        "stored:log-contents": block(LOGS_KT, "val ALLOWED = setOf(", "object LogSanitizer") + "\n" + block(LOGS_KT, "object LogSanitizer", "object LogExport"),
+        "sent:log-export": block(LOGS_KT, "object LogExport", None),
+        "stored:backup-and-network-xml": tree("app/src/main/res/xml"),
         "says:privacy-strings": strings_named("feature/about/src/main/res/values/strings.xml", "privacy_"),
-        "says:privacy-policy-doc": read("docs/m9/privacy-policy.md"),
+        "says:privacy-policy-doc": re.sub(r"version \d+\.\d+\.\d+(?:-[\w.]+)? \(\d+\)", "version <current>", read("docs/m9/privacy-policy.md")),
         "says:play-declarations": read("docs/m11/declarations.md"),
+        "libraries:version-catalog": toml_tables("gradle/libs.versions.toml", ("versions", "libraries")),
         "libraries:dependency-review": read("docs/m4/dependency-review.md"),
     }
     return out

@@ -29,14 +29,17 @@ annotations give the current ones.
 
 ## 3. Before a release (the owner's list; `maintenance-runbook.md` §4 has the order)
 
-1. `android` and `release` runs green on the release commit; the `android` run re-run twice more
-   (`gh run rerun <id>`), nothing pushed to the branch meanwhile (a push cancels the attempt).
+1. `android` and `release` runs green on the release commit; each re-run twice more (`gh run rerun <id>`), nothing
+   pushed to the branch meanwhile (a push cancels the attempt). A branch other than `main` gets its `android` run
+   from its pull request (or `workflow_dispatch`); the `release` run with the upload key exists only on `main`.
 2. The signed-bundle smoke's screenshots and recording looked at once (the artifact), for the one thing a count
    cannot tell: that the screens look right.
 3. For a change in routing, the VPN, the engine or reconnecting: `docs/m10/physical-phone-checklist.md` on the
    owner's phone with the owner's proxy — the checks an emulator cannot give (a real move between Wi-Fi and mobile
    data, a network with a sign-in page, the maker's battery management).
-4. `scripts/release/check_release_ready.py --production`.
+4. `scripts/release/check_release_ready.py --release-run` before the `release` run (the row's commit and `android`
+   run filled, `[Unreleased]` empty) and `--production` before the upload (the `release` run's id too; the heading
+   dated or "release candidate").
 
 ## 4. A defect becomes a test
 

@@ -57,7 +57,7 @@ class Bump(unittest.TestCase):
         self.assertIn('versionName = "1.0.1"', self.read("app/build.gradle.kts"))
         self.assertIn("versionCode = 12", self.read("app/build.gradle.kts"))
         changelog = self.read("CHANGELOG.md")
-        self.assertIn("## [1.0.1 (12)] — not yet on Google Play\n\n### Fixed\n- Something held.", changelog)
+        self.assertIn("## [1.0.1 (12)] — release candidate\n\n### Fixed\n- Something held.", changelog)
         self.assertIn("## [Unreleased]\n\n## [1.0.1 (12)]", changelog)
         self.assertIn("[1.0.1 (12)]: https://github.com/bibekthapamgr/app/releases/tag/v1.0.1", changelog)
         self.assertIn("| 1.0.1 (12) | pending | pending | pending | pending | pending | — | — |", self.read("docs/m12/release-history.md"))

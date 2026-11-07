@@ -3,20 +3,25 @@
 
   - app/build.gradle.kts's versionName and versionCode are read; the code must be above the last one in
     docs/m12/release-history.md (Google Play refuses a code already uploaded);
-  - CHANGELOG.md has a section for exactly that version, "## [<name> (<code>)] — <date>", not "Unreleased" and not
-    "not yet on Google Play" when --production is asked, with at least one entry under it;
+  - CHANGELOG.md has a section for exactly that version, "## [<name> (<code>)] — <date or 'release candidate'>", not
+    "Unreleased", with at least one entry under it;
   - docs/m12/release-history.md has a row for the version with the verified commit, the `android` and `release` run
-    ids and the crash-free rate column (a placeholder is allowed until the release is out: the row says "pending");
+    ids and the crash-free rate column ("pending" is allowed until each is known);
   - the data-behaviour lock matches the tree (scripts/check_data_behavior.py), so the policy was reviewed for what
     this release keeps and sends;
   - docs/m9/privacy-policy.md describes this version (scripts/privacy_policy.py keeps it so);
   - the Play "What's new" (the listing's listing-notes block) is under 500 characters (check_listing_claims.py does
     the rest).
 
-    python3 scripts/release/check_release_ready.py [--production]
+    python3 scripts/release/check_release_ready.py                 # CI, every push: the documents exist and agree
+    python3 scripts/release/check_release_ready.py --release-run   # before the hand-started release run: the row
+                                                                   # names the verified commit and its green android run
+    python3 scripts/release/check_release_ready.py --production    # before the Play upload: the release run too, the
+                                                                   # changelog heading dated or "release candidate",
+                                                                   # nothing left under [Unreleased]
 
-Run in CI on every push (without --production: the changelog section may still say the release is not out), and by
-the owner with --production before the hand-started release run.
+The production date is written into the changelog heading and the history row after the rollout, in a docs-only
+commit (docs/m12/maintenance-runbook.md §4), so the tagged commit's heading says "release candidate".
 """
 
 from __future__ import annotations
@@ -59,12 +64,13 @@ def history_rows() -> list[dict[str, str]]:
     rows = []
     for line in text.splitlines():
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) >= 6 and re.match(r"^\d+\.\d+\.\d+ \(\d+\)$", cells[0]):
+        if len(cells) >= 6 and re.match(r"^\d+\.\d+\.\d+(?:-[\w.]+)? \(\d+\)$", cells[0]):
             rows.append({"version": cells[0], "commit": cells[1], "android": cells[2], "release": cells[3], "date": cells[4], "crash_free": cells[5]})
     return rows
 
 
-def check(production: bool) -> list[str]:
+def check(production: bool, release_run: bool = False) -> list[str]:
+    release_run = release_run or production
     problems: list[str] = []
     name, code = version()
     label = f"{name} ({code})"
@@ -76,14 +82,12 @@ def check(production: bool) -> list[str]:
         heading, body = section
         if "unreleased" in heading.lower():
             problems.append(f"CHANGELOG.md: the section of {label} is marked Unreleased")
-        if production and "not yet" in heading.lower():
-            problems.append(f"CHANGELOG.md: the section of {label} says the release is not yet out; put the date (— YYYY-MM-DD)")
-        if production and not re.search(r"\d{4}-\d{2}-\d{2}", heading):
-            problems.append(f"CHANGELOG.md: the section of {label} has no release date")
+        if production and not re.search(r"\d{4}-\d{2}-\d{2}", heading) and "release candidate" not in heading.lower():
+            problems.append(f"CHANGELOG.md: the section of {label} is neither dated (— YYYY-MM-DD) nor marked 'release candidate'")
         if not re.search(r"^- ", body, re.M):
             problems.append(f"CHANGELOG.md: the section of {label} has no entry")
     unreleased = re.search(r"^## \[Unreleased\]\n(.*?)(?=^## \[|\Z)", read("CHANGELOG.md"), re.M | re.S)
-    if production and unreleased and re.search(r"^- ", unreleased.group(1), re.M):
+    if release_run and unreleased and re.search(r"^- ", unreleased.group(1), re.M):
         problems.append("CHANGELOG.md: [Unreleased] still has entries; move them to the release's section")
 
     rows = history_rows()
@@ -99,8 +103,10 @@ def check(production: bool) -> list[str]:
         for field in ("commit", "android", "release"):
             if not re.search(r"[0-9a-f]{7,}|\d{8,}", row[field]) and "pending" not in row[field].lower():
                 problems.append(f"docs/m12/release-history.md: {label}'s {field} column is '{row[field]}', not a commit or run id (or 'pending')")
-        if production and any("pending" in row[f].lower() for f in ("commit", "android", "release")):
-            problems.append(f"docs/m12/release-history.md: {label}'s row still says pending; put the verified commit and the green runs' ids")
+        if release_run and any("pending" in row[f].lower() for f in ("commit", "android")):
+            problems.append(f"docs/m12/release-history.md: {label}'s row still says pending; put the verified commit and its green android run's id before the release run")
+        if production and "pending" in row["release"].lower():
+            problems.append(f"docs/m12/release-history.md: {label}'s release run is still pending; put the green release run's id (three attempts) before the upload")
 
     policy = read("docs/m9/privacy-policy.md")
     if f"version {label}" not in policy:
@@ -108,7 +114,8 @@ def check(production: bool) -> list[str]:
 
     result = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "check_data_behavior.py")], capture_output=True, text=True)
     if result.returncode != 0:
-        problems.append("the data behaviour changed since the last policy review (scripts/check_data_behavior.py)")
+        detail = (result.stdout + result.stderr).strip().replace("\n", " / ")
+        problems.append(f"scripts/check_data_behavior.py failed (exit {result.returncode}: the data behaviour changed since the last policy review, or the script could not run): {detail}")
 
     listing = read("docs/m11/store-listing.md")
     notes = re.search(r"```listing-notes\n(.*?)```", listing, re.S)
@@ -121,16 +128,17 @@ def check(production: bool) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--production", action="store_true", help="the checks a release to Play must pass (dates, no pending)")
+    parser.add_argument("--release-run", action="store_true", help="before the hand-started release run: the row's commit and android run must be filled, [Unreleased] empty")
+    parser.add_argument("--production", action="store_true", help="before the Play upload: --release-run plus the release run's id and a dated or 'release candidate' heading")
     args = parser.parse_args(argv)
-    problems = check(args.production)
+    problems = check(args.production, args.release_run)
     for p in problems:
         print(f"PROBLEM {p}")
     if problems:
         print(f"::error title=Release readiness::{'; '.join(problems)}")
         return 1
     name, code = version()
-    print(f"OK: {name} ({code}) has its changelog section, its release-history row, the policy describes it, the data behaviour is as reviewed{' — ready for Play' if args.production else ''}")
+    print(f"OK: {name} ({code}) has its changelog section, its release-history row, the policy describes it, the data behaviour is as reviewed{' — ready for Play' if args.production else (' — ready for the release run' if args.release_run else '')}")
     return 0
 
 

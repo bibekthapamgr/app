@@ -86,13 +86,30 @@ rules change, so §2 is re-read on the day of submission and the date updated.
 | ☐ | The three GitHub secrets set (and the variable `PROXYFLOW_KEY_ALIAS` if the alias is not `proxyflow-upload`); a hand-started `release` run says `mode=upload-key` and the fingerprint matches | | |
 | ☐ | The keystore and the password are nowhere in the repository, its history, CI logs, chats or e-mail (`secrets` run green; a search of the owner's mailbox and chat for the file name) | | |
 
+## 6a. After launch, the channels that must be open (M12)
+
+- [ ] **GitHub private vulnerability reporting is on**: repository Settings → Code security (and analysis) → *Private
+      vulnerability reporting* → Enable. It is off by default, and `SECURITY.md` and the issue chooser send reporters
+      to `…/security/advisories/new`, which outsiders cannot use until it is on. Checked by opening that address
+      signed out.
+- [ ] GitHub Pages is on (Settings → Pages → Source: GitHub Actions) and the repository variable `PAGES_ENABLED` is
+      `true`, so the privacy policy and a known-issue notice (`docs/m12/incident-response.md` §3) deploy from `main`.
+- [ ] The support mailbox's auto-reply is the text of `docs/m12/support.md` §3.
+- [ ] The second person of `docs/m12/maintenance-runbook.md` §1.1 is named below, and has the Play Console user, the
+      key backup, the repository admin and the mailbox access.
+- [ ] The drill of `docs/m12/incident-response.md` §6 and `docs/m12/rollback.md` §6 is done and dated.
+- [ ] A calendar reminder on the 8th of each month: "the issue *Maintenance review YYYY-MM* exists" (§2 of the runbook).
+
 ## 7. Sign-off
 
-Submission to **production** is allowed when every line in §1–§6 is ticked and the open items below are empty.
+Submission to **production** is allowed when every line in §1–§6a is ticked and the open items below are empty.
 
 | Role | Name | Date | Signature |
 |---|---|---|---|
 | Owner | | | |
+
+Second person (`docs/m12/maintenance-runbook.md` §1.1): named on ‹date› — the name and how to reach them are not
+written in this public repository; they are in the owner's password manager beside the key's password.
 
 Open items at sign-off (must be empty): ‹…›
 

@@ -40,6 +40,26 @@ class LogRepositoryTest {
         context.deleteDatabase(name)
     }
 
+    @Test
+    fun aLogDatabaseFromANewerVersionIsDroppedAndRecreatedNotRefused() = runTest {
+        // M12 (docs/m12/rollback.md §5): a rollback installs an older release over a newer one; the ephemeral log
+        // must not keep the Logs screen from opening. The opposite of the profiles database's rule
+        // (DatabaseMigrationTest.aDatabaseFromANewerVersionFailsLoudlyAndKeepsItsData).
+        val first = LogDatabase.create(context, name)
+        first.logEventDao().insertAll(listOf(LogEventEntity(timeMillis = 1, level = "INFO", event = "connected", stage = null, code = null, profileId = null, details = "")))
+        first.close()
+        android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, android.database.sqlite.SQLiteDatabase.OPEN_READWRITE).use { raw ->
+            raw.execSQL("ALTER TABLE log_events ADD COLUMN newer_column TEXT") // as a newer schema would have
+            raw.version = raw.version + 1
+        }
+
+        val reopened = LogDatabase.create(context, name).also { opened += it }
+        val rows = reopened.logEventDao().observeLatest(10).first()
+        assertTrue("the newer log was dropped, not read: $rows", rows.isEmpty())
+        reopened.logEventDao().insertAll(listOf(LogEventEntity(timeMillis = 2, level = "INFO", event = "connected", stage = null, code = null, profileId = null, details = "")))
+        assertEquals(1, reopened.logEventDao().observeLatest(10).first().size)
+    }
+
     private fun room(maxEntries: Int = LogRepository.MAX_ENTRIES, file: Boolean = false): RoomLogRepository {
         val db = (if (file) LogDatabase.create(context, name) else LogDatabase.inMemory(context)).also { opened += it }
         return RoomLogRepository(db, clock = { now }, maxEntries = maxEntries)

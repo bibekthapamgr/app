@@ -24,8 +24,8 @@ reported privately, and they are answered by a named person on a stated clock.
 | Named owner | The repository owner (`bibekthapamgr`), who signs the releases and holds the upload key; there is no other maintainer in V1 |
 | Acknowledgement | Within **3 days** of the report |
 | First assessment (severity, affected versions, whether a fix or a halt is needed) | Within **7 days** |
-| Fix for a **critical** finding (a leak around the proxy while connected, a credential exposed, the kill switch not holding) | A fixed release to Play's internal track within **14 days**, then the staged rollout of `docs/m12/rollback.md`; while it is being fixed, the current rollout is halted and the known-issue notice is published (`docs/m12/incident-response.md`) |
-| Fix for **high** (a crash a remote peer can cause, a sanitizer missing a field, TLS checks weakened) | Within **30 days** |
+| Fix for a **critical** finding (a leak around the proxy while connected, a credential exposed, the kill switch not holding, a crash a remote peer can cause with a crafted reply or packet) | A fixed release to Play's internal track within **14 days**, then the staged rollout of `docs/m12/rollback.md`; while it is being fixed, the current rollout is halted and the known-issue notice is published (`docs/m12/incident-response.md`) |
+| Fix for **high** (a sanitizer missing a field, TLS checks weakened, a weakness without a demonstrated leak) | Within **30 days** |
 | **Medium and low** | The next planned release; recorded in the changelog |
 | Disclosure | After the fixed release has reached 100 % of the rollout, in the changelog and the GitHub advisory, crediting the reporter if they wish; a reporter who wants to publish earlier is asked to wait until users have the fix, and told the dates |
 

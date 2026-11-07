@@ -100,10 +100,18 @@ abstract class LogDatabase : RoomDatabase() {
     companion object {
         const val NAME = "logs.db"
 
+        /**
+         * The log is ephemeral by design (24 hours, [app.proxyflow.core.data.LogRepository.RETENTION_MILLIS]), so a
+         * `logs.db` written by a newer schema — an older release installed over a newer one, which is what a Play
+         * rollback is (docs/m12/rollback.md §5) — is dropped and recreated rather than refused: the Logs screen must
+         * open after a rollback. Only here: the profiles database ([ProxyFlowDatabase]) never falls back to a
+         * destructive migration, in either direction (ADR-0009; CI greps for it).
+         */
         fun create(context: Context, name: String = NAME): LogDatabase =
             Room.databaseBuilder(context.applicationContext, LogDatabase::class.java, name)
                 .setJournalMode(JournalMode.TRUNCATE)
                 .addCallback(SecureDelete)
+                .fallbackToDestructiveMigrationOnDowngrade(true)
                 .build()
 
         /** In memory, for tests. */

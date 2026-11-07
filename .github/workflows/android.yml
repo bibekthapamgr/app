@@ -84,6 +84,16 @@ jobs:
           python3 scripts/release/check_release_ready.py
           python3 scripts/check_target_api.py
 
+      # M12 (docs/m12/rollback.md §5): the profiles database never falls back to a destructive migration, forward or
+      # downgrade — profiles are kept or the app refuses to open; the ephemeral log database is the one place allowed.
+      - name: No destructive migration on the profiles database
+        if: ${{ !cancelled() }}
+        run: |
+          if grep -rn "fallbackToDestructive" --include=*.kt core app feature | grep -v "core/data/src/main/kotlin/app/proxyflow/core/data/db/LogDatabase.kt"; then
+            echo "::error title=Destructive migration::fallbackToDestructiveMigration* is allowed only in LogDatabase.create (docs/m12/rollback.md §5)"; exit 1
+          fi
+          grep -q "fallbackToDestructiveMigrationOnDowngrade(true)" core/data/src/main/kotlin/app/proxyflow/core/data/db/LogDatabase.kt
+
       - name: Design tokens and generated colours agree
         if: ${{ !cancelled() }}
         run: |

@@ -9,13 +9,14 @@ here, or whose section still says "Unreleased".
 
 ## [Unreleased]
 
-## [1.0.0 (11)] — not yet on Google Play
+## [1.0.0 (11)] — release candidate
 
 The first release: closed testing on Google Play, then production (`docs/m11/release-checklist.md`).
 
 ### Added
-- Help → Feedback says never to send a proxy password or username, and that the exported log already leaves out
-  passwords, server names and site names (M12).
+- Help → "Getting help" says never to send a proxy password, username or token, that the developer never needs
+  them, to change one already sent, and that the exported log already leaves out passwords, server names and site
+  names (M12).
 - HTTP CONNECT and SOCKS5 proxies, with a username and password and optional TLS to the proxy (the proxy's certificate
   and name checked).
 - Apps' TCP connections and site names go through the proxy; UDP, QUIC and ping are blocked and never sent around it;
