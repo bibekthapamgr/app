@@ -19,7 +19,7 @@ All are Google's `google_apis` x86_64 system images, booted fresh for each job w
 | 15 (35) | Wi-Fi | 75, 6 | 0 | M10 performance: ✓; M10 scenarios: a restart with Always-on VPN: ✓; M10 scenarios: no notification permission: ✓; M5 VPN lifecycle: ✓; M5 end-to-end evidence: ✓; M6 end-to-end evidence: ✓; M7 evidence: ✓; M8 evidence: ✓ | success |
 | 16 (36) | mobile data | 75, 6 | 0 | M10 performance: ✓; M10 scenarios: a restart with Always-on VPN: ✓; M10 scenarios: no notification permission: ✓; M5 VPN lifecycle: ✓; M5 end-to-end evidence: ✓; M6 end-to-end evidence: ✓; M7 evidence: ✓; M8 evidence: ✓ | success |
 
-The counts are the first attempt's; the second and third attempts ran the same suite on each level with the same result. The 6 "skipped" are the same on every level: the five steps of `KillSwitchEndToEndTest` and `NotificationPermissionEndToEndTest`, which the plain test run leaves to the scripts that drive them (M8's failure injection and scenario N) and which ran there, counted under the evidence. The job column is the attempt's conclusion.
+The counts are the first attempt's; the second and third attempts ran the same suite on each level with the same result. The 6 "skipped" are the same on every level: the five steps of `KillSwitchEndToEndTest` and `NotificationPermissionEndToEndTest`, which the plain test run leaves to the scripts that drive them (M8's failure injection and scenario N) and which ran there, counted under the evidence. Scenario N's ✓ on API 29 to 32 is the step saying it does not apply there (Android asks for no notification permission before 13); it tests the permission on API 33 to 36. The job column is the attempt's conclusion.
 
 ## 2. What differs between the versions, and how it is covered
 

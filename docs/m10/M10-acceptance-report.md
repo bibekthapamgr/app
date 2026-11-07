@@ -62,10 +62,10 @@ Each review is an independent reading of the code, the runs' logs, annotations a
 | C | M8's mitigation checklist re-checked on the candidate, and what is new since M8 | One gap since M5 (the notification's Disconnect from a locked shade, M10-17), fixed |
 | F | The fixes of A and C | Fixed |
 | G | The fixes of B | Fixed |
-| H, I, J | Each round's fixes: the fail-closed timing, the memory measurement, the paced upload, the right-to-left layout, the string checker, the restart scenario | Fixed, or documented (M10-63: the engine's memory with data in flight) |
+| H, I, J | Each round's fixes: the fail-closed timing, the memory measurement, the paced upload, the right-to-left layout, the string checker, the restart scenario | Fixed (M10-63, the engine's memory with data in flight, was the CI runs' finding of that time, accepted for V1) |
 | K | J's fixes: found API 33's uplink would have had no capture (M10-89, high) | Fixed |
-| L, M, N | The text direction of the user's own text, the tile's subtitle on every Android version, the CI scripts' resilience | Fixed, or documented (M10-102, M10-111, M10-125, M10-126) |
-| O, P | API 33's capture through `su`, the pulls of the phone's captures, API 29's stall | Fixed, or documented (M10-137) |
+| L, M, N | The text direction of the user's own text, the tile's subtitle on every Android version, the CI scripts' resilience | Fixed, or documented (M10-102, M10-111) |
+| O, P | API 33's capture through `su`, the pulls of the phone's captures, API 29's stall | Fixed, or documented (M10-125, M10-126, M10-137) |
 
 138 findings were filed in M10 (M10-1 to M10-138): no critical, 1 high, 42 medium, 95 low; 128 fixed, 9 kept as documented trade-offs (M10-5 and M10-63 accepted for V1; M10-93, M10-102, M10-111, M10-125, M10-126, M10-137; M10-97, an emulator's), 1 open with its diagnostics in place (M10-131).
 
@@ -74,7 +74,7 @@ Each review is an independent reading of the code, the runs' logs, annotations a
 - **M10-131:** on API 33's emulator, whose uplink is its Wi-Fi, ProxyFlow twice could not reach its proxy for a moment in runs before the verified one — one line through the proxy refused under Battery Saver, as fail-closed should refuse, and one connect of `ReconnectEndToEndTest` timed out — and in neither did anything get around the proxy. Not seen in the verified run's three attempts. The scenario now records ProxyFlow's session, the phone's addresses and Android's power-save state when it happens again; a real phone on a real network is the checklist's.
 - **The owner's phone:** `docs/m10/physical-phone-checklist.md` — the lab checks with a capture at a laptop's hotspot, the battery bar overnight, a real move between networks, a network with a sign-in page, Private DNS strict, a restart with Always-on VPN, the maker's battery management, the tile with TalkBack. Its table in the compatibility matrix (§3) is filled when run.
 - **M11:** signing (the upload key, Play App Signing), the store listing and closed testing, where the crash-free bar (≥ 99.8 %) and the real-device spread (`docs/m10/compatibility-matrix.md` §4) are measured; the first translations (decision D8).
-- **Accepted for V1:** M10-5 (SI symbols in code until D8), M10-63 (the engine's memory with 200 connections and 256 KiB in flight on each: 57 to 71 MB against 50, the buffers that carry the throughput bar).
+- **Accepted for V1:** M10-5 (SI symbols in code until D8), M10-63 (the engine's memory with 200 connections and 256 KiB in flight on each: 54.9 to 71.0 MB against 50, the buffers that carry the throughput bar).
 
 ## How to check
 
