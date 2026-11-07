@@ -275,9 +275,9 @@ jobs:
             echo "native-libraries=$(unzip -Z1 "$out/universal.apk" 'lib/*' 2>/dev/null | cut -d/ -f2 | sort -u | tr '\n' ' ' || true)"
             echo "bundle-sha256=$(sha256sum "$aab" | cut -d' ' -f1)"
             echo "bundle-bytes=$(stat -c %s "$aab")"
-            echo "download-size-bytes-min-max=$(tail -1 "$out/download-size.txt")"
+            echo "download-size-bytes-min-max=$(tail -1 "$out/download-size.txt" | tr -d '\r\n')"
           } > "$out/release-facts.txt"
-          echo "::notice title=Release bundle (${{ steps.key.outputs.mode }})::$GITHUB_EVENT_NAME on $GITHUB_REF; $(basename "$aab"): $(stat -c %s "$aab") bytes, SHA-256 $(sha256sum "$aab" | cut -d' ' -f1); download size per device $(tail -1 "$out/download-size.txt") bytes (min,max); the universal APK $(stat -c %s "$out/universal.apk") bytes; native libraries: $(unzip -Z1 "$out/universal.apk" 'lib/*' 2>/dev/null | sort | tr '\n' ' ' || true)"
+          echo "::notice title=Release bundle (${{ steps.key.outputs.mode }})::$GITHUB_EVENT_NAME on $GITHUB_REF; $(basename "$aab"): $(stat -c %s "$aab") bytes, SHA-256 $(sha256sum "$aab" | cut -d' ' -f1); download size per device $(tail -1 "$out/download-size.txt" | tr -d '\r\n') bytes (min,max); the universal APK $(stat -c %s "$out/universal.apk") bytes; native libraries: $(unzip -Z1 "$out/universal.apk" 'lib/*' 2>/dev/null | sort | tr '\n' ' ' || true)"
 
       - name: Remove the key
         if: ${{ always() }}

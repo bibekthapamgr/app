@@ -41,6 +41,9 @@ android {
         // The VPN's end-to-end tests (src/androidTest): the real service, engine and proxies on emulators. The runner
         // lets a test trust the lab's CA for TLS proxies (ADR-0011); the app as installed never does.
         testInstrumentationRunner = "app.proxyflow.e2e.E2eTestRunner"
+        // M11: the ABIs the engine is built for (engine/build-aar.sh). Two AndroidX libraries also ship x86; without
+        // this, the bundle would declare x86 too, and Play would hand an x86-only device a build with no engine.
+        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64") }
     }
 
     signingConfigs {
