@@ -69,13 +69,17 @@ three green runs on *that* commit (`qa-process.md` §1: a green run of another c
 The example: 1.0.1 (12) went wrong; the rollback is 1.0.2 (13) with 1.0.0 (11)'s code.
 
 1. `git checkout -b rollback/<name> main`.
-2. **Revert the code, keep the bookkeeping.** `git revert -n` the bad release's commits (`git revert -n -m 1 <merge
-   commit>` when it was merged as a merge commit), then put the release bookkeeping back as `main` has it before
-   committing: `git checkout main -- app/build.gradle.kts CHANGELOG.md docs/m12/release-history.md
-   docs/m9/privacy-policy.md docs/m12/data-behavior.lock`. The tree is now the old tag's sources at the bad release's
-   version: `git diff v1.0.0 --stat -- app core engine feature` shows only `app/build.gradle.kts` (and, after step
-   4, the migration). 1.0.1 (12)'s changelog section and history row **stay**, since Play has that code for good; the
-   row's *Rollout* column gets "halted at N % on ‹date› (M12-x), superseded by 1.0.2 (13)".
+2. **Restore the code, keep everything else.** The code is taken from the good tag, file for file, and nothing
+   outside the code is touched — the bad release's changelog section, history row, defect register, ADRs, policy
+   notes and lock all stay, since they are the record of what Play has (`git revert` would take them back too):
+   `git checkout v1.0.0 -- app core engine feature gradle/libs.versions.toml` (the catalog only when the bad release
+   bumped a library the rollback should not carry; `engine/` holds the Go sources the AAR is built from), then
+   `git checkout main -- app/build.gradle.kts` so the version stays the bad release's for step 3 to raise, and
+   commit. The tree is now the old tag's code at the bad release's version: `git diff v1.0.0 --stat -- app core
+   engine feature` shows only `app/build.gradle.kts` (and, after step 4, the migration); `git status` shows nothing
+   under `docs/`. A file the bad release **added** under those directories is not removed by the checkout: `git diff
+   v1.0.0 --stat --diff-filter=A -- app core engine feature` lists them, `git rm` each. 1.0.1 (12)'s row's
+   *Rollout* column gets "halted at N % on ‹date› (M12-x), superseded by 1.0.2 (13)".
 3. `scripts/release/bump_version.py 1.0.2` — the next forward name, and a code above both the gradle file's and
    every row of the history (13 here). In the new changelog section's first line: "Re-releases the code of 1.0.0
    (11); 1.0.1 (12) ‹what went wrong, the defect's id›". The history row the script added says "rollback of 1.0.1
@@ -87,12 +91,15 @@ The example: 1.0.1 (12) went wrong; the rollback is 1.0.2 (13) with 1.0.0 (11)'s
    whole): `git show v1.0.1:core/data/schemas/app.proxyflow.core.data.db.ProxyFlowDatabase/4.json >
    core/data/src/test/assets/rollback/app.proxyflow.core.data.db.ProxyFlowDatabase/4.json`, read by a second
    `MigrationTestHelper(instrumentation, "rollback/app.proxyflow.core.data.db.ProxyFlowDatabase")` in the test
-   (`src/test/assets` is on the Robolectric test's asset path already). Without the migration the release is not
-   uploaded. The log database needs nothing (§5).
+   (`src/test/assets` is on the Robolectric test's asset path already; that `(Instrumentation, String)` constructor
+   is deprecated in Room 2.4+ and still present in 2.8.5 — `@Suppress("DEPRECATION")` on the test, or the
+   `(Instrumentation, Class, …)` form with the JSON laid out as `rollback/<the database's canonical name>/4.json`
+   under its own assets root). Without the migration the release is not uploaded. The log database needs nothing
+   (§5).
 5. The data-behaviour lock: a rollback restores a reviewed behaviour, so `check_data_behavior.py` passes as it is
    (the policy's version line is left out of the lock; the schema directory is unchanged by step 4). It fails only
    when the bad release had changed the behaviour *and* the lock was updated for it (step 2 kept the bad release's
-   lock): then the revert brings the old behaviour back and the lock is updated once more, `--note "rollback to
+   lock): then the restored code brings the old behaviour back and the lock is updated once more, `--note "rollback to
    1.0.0 (11)'s behaviour"`, and `docs/m9/privacy-policy.md` is checked to say the old thing.
 6. The pull request to `main` and its `android` run green (a first proof; the run is of GitHub's test merge of the
    branch into `main`, not of the branch head). Merge it with **Create a merge commit** (GitHub's other buttons
@@ -159,8 +166,8 @@ the old bugs back.
 ## 6. The test of this document
 
 Before the first production release, the owner does §4 once on the internal track with a throwaway version — not a
-real rollback (there is nothing to revert yet: in this drill 1.0.1 (12) is the harmless throwaway, whereas §1 and §4
-use it as the example of a bad release) but the same steps with an empty revert: **`1.0.1 (12)`, made with
+real rollback (there is nothing to restore yet: in this drill 1.0.1 (12) is the harmless throwaway, whereas §1 and §4
+use it as the example of a bad release) but the same steps with the code unchanged: **`1.0.1 (12)`, made with
 `bump_version.py 1.0.1` on a branch, committed and merged to `main` like any release**, since the code 12 is consumed on Play for good once uploaded and the next real release must then be
 `1.0.2 (13)` (`bump_version.py` counts from `app/build.gradle.kts` and the history's rows); its history row says "internal only: rollback
 drill" in *Notes* and its changelog section "Rollback drill; no change". Uploaded to the internal track, installed over

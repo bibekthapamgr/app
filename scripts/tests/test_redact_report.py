@@ -83,6 +83,15 @@ class Redaction(unittest.TestCase):
             ("creds bibek:hunter22", "hunter22"),
             ("Password    hunter22", "hunter22"),
             ("credentials: bibek/hunter22", "hunter22"),
+            # Re-review C RC-3, RC-9: a pair with a slash between spaces; an XML element; the arrow separators.
+            ("credentials: bibek / hunter22", "hunter22"),
+            ("login details: bibek / hunter22", "hunter22"),
+            ("<password>hunter22</password>", "hunter22"),
+            ("password => hunter22", "hunter22"),
+            ("password -> hunter22", "hunter22"),
+            ("pass hunter22", "hunter22"),
+            ("* Basic YmliZWs6aHVudGVyMjI= sent", "YmliZWs6aHVudGVyMjI="),
+            ("basic YmliZWs6aHVudGVyMjI= sent", "YmliZWs6aHVudGVyMjI="),
         ):
             with self.subTest(text=text):
                 out = self.gone(text, secret)
@@ -156,12 +165,30 @@ class Redaction(unittest.TestCase):
             "python3 -u run.py",
             "attempt:10 and Reconnecting:30",
             "| username | password |",
+            # RC-1, RC-2: a value after spaces alone must look like a secret; "Basic" starts sentences.
+            "The password  was wrong.",
+            "I typed the password    twice",
+            "the auth  token expired",
+            "Password  (the same as on the website)",
+            "Proxy auth 10:16:30 failed, retried at 10:17",
+            "bypass  enabled",
+            "password 2 times, changed on 2026-11-08",
+            "reason=auth  profile=x",
+            "Basic connectivity check failed",
+            "Basic troubleshooting done, Basic 12345678 plan",
         ):
             with self.subTest(text=text):
                 self.kept(text)
 
     def test_the_rotate_line_only_for_a_real_credential(self) -> None:
-        for text in ("Password: [redacted]", "a password-protected proxy", "the password field was empty"):
+        for text in (
+            "Password: [redacted]",
+            "a password-protected proxy",
+            "the password field was empty",
+            "The password  was wrong.",
+            "Proxy auth 10:16:30 failed",
+            "Basic connectivity check failed",
+        ):
             _, counts = rr.redact(text)
             self.assertFalse(any(k in counts for k in rr.CREDENTIAL_KINDS), text)
         _, counts = rr.redact("Password: hunter22")

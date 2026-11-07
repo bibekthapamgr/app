@@ -74,9 +74,7 @@ class Bump(unittest.TestCase):
         # codes Google Play has already seen, and a placeholder bullet is written when [Unreleased] has only headings.
         self.assertEqual(self.run_bump("1.0.1").returncode, 0)  # 1.0.1 (12)
         shutil.copy(os.path.join(ROOT, "app/build.gradle.kts"), os.path.join(self.dir.name, "app/build.gradle.kts"))  # back to 1.0.0 (11)
-        with open(os.path.join(self.dir.name, "CHANGELOG.md"), "a", encoding="utf-8") as f:
-            f.write("")
-        result = self.run_bump("1.0.2")
+        result = self.run_bump("1.0.2")  # [Unreleased] is empty now: the first bump took its entries
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("versionCode = 13", self.read("app/build.gradle.kts"))
         self.assertIn("| 1.0.2 (13) | pending |", self.read("docs/m12/release-history.md"))

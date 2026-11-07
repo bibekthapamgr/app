@@ -101,7 +101,8 @@ docs-only commit, because the tooling is built for that order (`check_release_re
 
 1. `scripts/release/bump_version.py <name>` — the version everywhere at once: `app/build.gradle.kts`, the changelog's
    new section (heading "— release candidate"; written from the merged changes; a placeholder bullet if `[Unreleased]`
-   was empty, to be replaced), a `pending` row in `release-history.md`, the privacy policy's version line. Then the
+   was empty — replaced **before the first push**: `check_release_ready.py` refuses it on every push, not only at
+   the release), a `pending` row in `release-history.md`, the privacy policy's version line. Then the
    "What's new" in `docs/m11/store-listing.md` §7 (≤ 500 characters, the checker reads it).
 2. **If what the app keeps or sends changed** (and only then — the lock leaves the policy's version line out, so a
    bump alone does not touch it): `policy-review.md`, then `scripts/check_data_behavior.py --update --reviewed-by

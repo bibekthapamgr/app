@@ -40,7 +40,7 @@ rules change, so §2 is re-read on the day of submission and the date updated.
 
 | | Line | By | Date | Proof |
 |---|---|---|---|---|
-| ☐ | The release commit is on `main` (PR #10 merged after PR #9 and #8), its `android` run green in three attempts | | | run id |
+| ☐ | The release commit is on `main` (the merge commit of PR #11, M12, which carries #10, #9 and #8 — `docs/m12/maintenance-runbook.md` §4 step 3), its `android` run green in three attempts | | | run id |
 | ☐ | Its `release` run (hand-started on `main`, input `fingerprint` = the upload certificate's) green: `bundle` and both `smoke` jobs | | | run id, `release-facts.txt`: `mode=upload-key`, `event=workflow_dispatch`, `ref=refs/heads/main`, the fingerprint |
 | ☐ | The bundle's certificate fingerprint equals the upload certificate's in Play Console → Setup → App signing | | | both values written here: ‹…› |
 | ☐ | `secrets` run green on the commit (no key, password or token in the repository or its history) | | | run id |

@@ -56,7 +56,7 @@ def check(today: dt.date, lead: int, stale: int, extended: bool = False) -> tupl
             if due <= today and granted and extension and today <= extension:
                 warnings.append(f"Google Play has required targetSdk {rule['api']} (Android {rule['android']}) since {due}; the app targets {target} under an extension that ends {extension}, in {(extension - today).days} days")
             elif due <= today:
-                failures.append(f"Google Play has required targetSdk {rule['api']} (Android {rule['android']}) for new apps and updates since {due}; the app targets {target}" + (f" (an extension, if Google granted one, would end {extension}: run with --extended)" if extension and today <= extension else ""))
+                failures.append(f"Google Play has required targetSdk {rule['api']} (Android {rule['android']}) for new apps and updates since {due}; the app targets {target}" + (f' (an extension, if Google granted one, would end {extension}: once Play Console confirms it, set "extension_granted": true on this rule in docs/m12/play-target-api.json — docs/m12/maintenance-runbook.md §3.3)' if extension and today <= extension else ""))
             elif (due - today).days <= lead:
                 warnings.append(f"Google Play requires targetSdk {rule['api']} (Android {rule['android']}) from {due}, in {(due - today).days} days; the app targets {target}")
     nxt = data.get("expected_next")

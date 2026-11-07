@@ -36,10 +36,12 @@ looks critical) and recorded in the release's defect register with the id the re
    changelog, and the box disappears.
 4. **Fix** on a branch `hotfix/<name>` from the release's tag (`rollback.md` §4, "a forward fix"): the defect's
    regression test first (the lab, a capture, the failure-injection harness — a test that fails on the tag and passes
-   with the fix), then the fix, then the whole suite three times green on the branch's final commit — the `android`
-   workflow runs on the pull request to `main` (or by `workflow_dispatch` on the branch), and is rerun twice with
-   `gh run rerun <id>` without pushing — then the merge to `main` and the signed-bundle smoke of the `release` run
-   there. Or the rollback of `rollback.md` §4 when a fix cannot be proven in time.
+   with the fix), then the fix, then the release order of `maintenance-runbook.md` §4 steps 3–4, the same as for
+   every release: the pull request's `android` run green (a first proof only — it builds GitHub's test merge, not
+   the branch), the merge to `main` with *Create a merge commit*, **the merge commit's own `android` run rerun twice**
+   with `gh run rerun <id>` and nothing pushed meanwhile (that commit is the verified commit, the row's and the
+   tag's), then the hand-started `release` run on `main` green three times. Or the rollback of `rollback.md` §4 when
+   a fix cannot be proven in time.
 5. **Release** the fix with the next versionCode as a staged rollout, watched at each step (`rollback.md` §2); the
    changelog's *Security* section names what was fixed, without the exploit's details until 100 %.
 6. **Disclose** after 100 %: the GitHub security advisory (CVE if the reporter or the owner wants one), the

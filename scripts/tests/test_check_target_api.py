@@ -59,7 +59,17 @@ class TargetApi(unittest.TestCase):
             failures, _ = cta.check(dt.date(2026, 11, 2), 120, 180, extended=True)
             self.assertTrue(any("required targetSdk 36" in f for f in failures), failures)
             failures, _ = cta.check(dt.date(2026, 10, 1), 120, 180)
-            self.assertTrue(any("run with --extended" in f for f in failures), failures)
+            self.assertTrue(any('set "extension_granted": true' in f for f in failures), failures)
+
+    def test_a_granted_extension_in_the_rules_file_is_honoured_without_a_flag(self) -> None:
+        # Re-review A RA-9 / C RC-7: CI never passes --extended; the owner sets extension_granted in the rules file.
+        rules = {**RULES, "requirements": [dict(RULES["requirements"][0], extension_granted=True), RULES["requirements"][1]]}
+        with mock.patch.object(cta, "rules", lambda: rules), mock.patch.object(cta, "target_sdk", lambda: 35):
+            failures, warnings = cta.check(dt.date(2026, 10, 1), 120, 180)
+            self.assertEqual(failures, [])
+            self.assertTrue(any("extension that ends 2026-11-01" in w for w in warnings), warnings)
+            failures, _ = cta.check(dt.date(2026, 11, 2), 120, 180)
+            self.assertTrue(any("required targetSdk 36" in f for f in failures), failures)
 
     def test_an_expected_next_already_listed_is_flagged_instead_of_warning_twice(self) -> None:
         # Review A D-2: once API 37 is in the requirements, expected_next must move to 38.

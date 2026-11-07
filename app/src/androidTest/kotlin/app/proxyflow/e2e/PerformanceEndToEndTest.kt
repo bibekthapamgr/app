@@ -87,8 +87,15 @@ class PerformanceEndToEndTest {
             if (::gate.isInitialized) runCatching { gate.forward(env.socksPort) }
             wakeAndUnlock()
         } finally {
-            app.disconnectAndSettle()
-            app.deleteAllProfiles()
+            try {
+                app.disconnectAndSettle()
+                app.deleteAllProfiles()
+            } finally {
+                // The idle test's wake lock is held through the tear-down, so that a phone which slept through the
+                // test's own wake-up cannot sleep through these shell calls too (RC-6).
+                awakeLock?.takeIf { it.isHeld }?.release()
+                awakeLock = null
+            }
         }
     }
 
@@ -660,16 +667,14 @@ class PerformanceEndToEndTest {
                 after.goroutines <= allowed,
             )
         } finally {
-            try {
-                wakeAndUnlock()
-            } finally {
-                awakeLock?.takeIf { it.isHeld }?.release()
-                awakeLock = null
-            }
+            wakeAndUnlock()
         }
     }
 
-    /** The partial wake lock [idleWhileConnected] holds from the end of its idle period until the screen is back on. */
+    /**
+     * The partial wake lock [idleWhileConnected] holds from the end of its idle period until the screen is back on and
+     * the tear-down is done (at most [WAKE_LOCK_MS]).
+     */
     private var awakeLock: PowerManager.WakeLock? = null
 
     /**
@@ -755,7 +760,7 @@ class PerformanceEndToEndTest {
         const val IDLE_MS = 5 * 60_000L
         const val IDLE_STEP_MS = 1_000L
         const val SCREEN_MS = 10_000L
-        const val WAKE_LOCK_MS = 60_000L
+        const val WAKE_LOCK_MS = 180_000L
         const val SETTLE_MS = 3_000L
         const val CLIENT_JOIN_MS = 15_000L
 

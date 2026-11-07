@@ -140,9 +140,12 @@ object Shell {
         return text ?: throw AssertionError("the shell command did not return within $timeoutMillis ms: $command")
     }
 
-    /** Ends every shell client still running, as a test that may have left one does before it disconnects. */
+    /**
+     * Ends every shell client still running, as a test that may have left one does before it disconnects. Bounded: it
+     * is the first shell call of a tear-down, which a sleeping phone must not hold either (RC-6).
+     */
     fun stopClients() {
-        exec("pkill -f $SHELL_CLIENT")
+        runCatching { runBounded("pkill -f $SHELL_CLIENT") }
     }
 
     private const val BOUNDED_MS = 30_000L

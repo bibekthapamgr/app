@@ -33,11 +33,18 @@ USER_WORDS = r"user(?:name)?|login|benutzer(?:name)?|usuario|ユーザー(?:名)
 # "is", or Japanese "は"; it stays on one line (a table header is not a label for the next line's first word).
 WRAP = r"(?:[\"'`*_「」]|</?\w+>)*"
 AFTER_SEP = r"(?:[`*_]+|</?\w+>)*[ \t]*"
-SEP = rf"[ \t]*(?:[:：=→|]+[ \t]*|[ \t]+-[ \t]+|は[ \t]*){AFTER_SEP}"
-# "the password is hunter22" — "is" alone separates a password; not a username ("user is confused" is prose); and a
-# 「…」 value needs no separator at all (パスワード「x」).
-SEP_PASSWORD = rf"[ \t]*(?:[:：=→|]+[ \t]*(?:is[ \t]*[:=]?[ \t]*)?|[ \t]+-[ \t]+|は[ \t]*|is[ \t]*[:=]?[ \t]*|(?=「)|[ \t]+(?=\S+:\S)|[ \t]{{2,}}){AFTER_SEP}"
-VALUE = rf"(?![`*_]+(?:\s|$))(?!(?:{PASSWORD_WORDS}|{USER_WORDS})\b[ \t]*(?:[|:：=]|$))(\"[^\"\n]{{1,200}}\"|'[^'\n]{{1,200}}'|「[^」\n]{{1,200}}」|[^\s\"'|,;。。]{{1,200}})"
+PUNCT_SEP = r"(?:->|=>|[:：=→|]+)"
+SEP = rf"[ \t]*(?:{PUNCT_SEP}[ \t]*|[ \t]+-[ \t]+|は[ \t]*){AFTER_SEP}"
+# A value after nothing but spaces ("pass hunter22", "creds bibek:hunter22") must look like a secret — six or more
+# characters with a digit, a symbol, a colon or a slash, not a time, a date or a URL — so that "the password  was
+# wrong", "Proxy auth 10:16:30 failed" and "the auth token expired" stay prose (re-review C, RC-1).
+SECRET_SHAPED = r"(?!\d{1,2}:\d{2}(?::\d{2})?\b)(?!\d{4}-\d\d-\d\d\b)(?![a-z][a-z0-9+.-]*://)(?=\S{6,})(?=\S*[\d!@#$%^&*+~:/])"
+# "the password is hunter22" — "is" alone separates a password; not a username ("user is confused" is prose); a
+# 「…」 value needs no separator at all (パスワード「x」); an XML element (<password>x</password>) is its own rule.
+SEP_PASSWORD = rf"[ \t]*(?:{PUNCT_SEP}[ \t]*(?:is[ \t]*[:=]?[ \t]*)?|[ \t]+-[ \t]+|は[ \t]*|is[ \t]*[:=]?[ \t]*|(?=「)|[ \t]+{SECRET_SHAPED}){AFTER_SEP}"
+VALUE = rf"(?![`*_]+(?:\s|$))(?!(?:{PASSWORD_WORDS}|{USER_WORDS})\b[ \t]*(?:[|:：=]|$))(\"[^\"\n]{{1,200}}\"|'[^'\n]{{1,200}}'|「[^」\n]{{1,200}}」|[^\s\"'|,;。。<]{{1,200}})"
+# "credentials: bibek / hunter22" — a pair with a slash between spaces goes as one value (RC-3).
+PAIR_VALUE = r"([^\s\"'|,;。。<]{1,64}[ \t]*/[ \t]*[^\s\"'|,;。。<]{1,200})"
 
 
 def _value_sub(kind: str, prefix_groups: int):
@@ -76,7 +83,12 @@ RULES: list[tuple[str, re.Pattern[str], object]] = [
     ("curl credentials", re.compile(r"(?i)(?<![\w-])(?:(-U|-u)[ \t]*|(--proxy-user|--user|--proxy-basic)(?:\s+|=))(\"[^\"]+\"|'[^']+'|\S*:\S*)"), _curl_sub),
     ("basic auth header", re.compile(r"(?i)\b(Proxy-Authorization|Authorization)\s*:\s*(Basic|Bearer|Digest|Negotiate|NTLM)\s+\S+"), r"\1: \2 <redacted>"),
     # "Basic YmliZWs6…" as a debugging tool or logcat prints it, without the header's name ("Basic authentication" is prose).
-    ("basic auth header", re.compile(r"\b(Basic|Bearer)[ \t]+(?![Aa]uth)([A-Za-z0-9+/=._~-]{8,})(?![\w+/=])"), r"\1 <redacted>"),
+    # The token must be base64-shaped (twelve or more characters with a digit, "+", "/" or "="): "Basic connectivity
+    # check failed" and "Basic troubleshooting done" are sentences (RC-2).
+    ("basic auth header", re.compile(r"(?i)\b(Basic|Bearer)[ \t]+(?!auth)(?=[A-Za-z0-9+/=._~-]*[\d+/=])([A-Za-z0-9+/=._~-]{12,})(?![\w+/=])"), r"\1 <redacted>"),
+    # An exported XML configuration: <password>hunter22</password> (RC-9).
+    ("password field", re.compile(rf"(?i)(<(?:{PASSWORD_WORDS})>)([^<\n]{{1,200}})(?=</)"), _value_sub("<redacted>", 1)),
+    ("password field", re.compile(rf"(?i)({WRAP}(?:{PASSWORD_WORDS}){WRAP}{SEP_PASSWORD}){PAIR_VALUE}"), _value_sub("<redacted>", 1)),
     ("password field", re.compile(rf"(?i)({WRAP}(?:{PASSWORD_WORDS}){WRAP}{SEP_PASSWORD}){VALUE}"), _value_sub("<redacted>", 1)),
     ("username field", re.compile(rf"(?i)({WRAP}(?:{USER_WORDS}){WRAP}{SEP}){VALUE}"), _value_sub("<user>", 1)),
     # curl -v: "* Proxy auth using Basic with user 'bibek'"
