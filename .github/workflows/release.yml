@@ -158,9 +158,14 @@ jobs:
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
           grep -E "^(package|sdkVersion|targetSdkVersion|native-code|application-debuggable)" "$RUNNER_TEMP/badging.txt" || true
-          min="$(grep -o "sdkVersion:'[0-9]*'" "$RUNNER_TEMP/badging.txt" | grep -v target | grep -o '[0-9]*' | head -1)"
-          target="$(grep -o "targetSdkVersion:'[0-9]*'" "$RUNNER_TEMP/badging.txt" | grep -o '[0-9]*' | head -1)"
-          echo "::notice title=Release version::$id $name ($code), minSdk ${min:-?}, targetSdk ${target:-?}; native code $(grep -o "native-code:.*" "$RUNNER_TEMP/badging.txt" | head -1)"
+          # The badging of this APK printed no sdkVersion line in run 42359705613 (the target, yes); the minimum is read from
+          # the manifest's own attribute, and the smoke on API 29 is what proves it installs there.
+          min="$("$tools/aapt2" dump xmltree "$apk" --file AndroidManifest.xml 2>/dev/null | grep -o 'minSdkVersion[^=]*=(type 0x10)0x[0-9a-f]*' | head -1 | sed 's/.*0x//' || true)"
+          [ -n "$min" ] && min=$((16#$min))
+          target="$(grep -o "targetSdkVersion:'[0-9]*'" "$RUNNER_TEMP/badging.txt" | grep -o '[0-9]*' | head -1 || true)"
+          native="$(grep -o "native-code:.*" "$RUNNER_TEMP/badging.txt" | head -1 || true)"
+          [ "$target" = "36" ] || { echo "::error title=Release::the release APK targets SDK '${target:-?}', not 36 (Google Play's requirement for new apps since 31 August 2026)"; exit 1; }
+          echo "::notice title=Release version::$id $name ($code), minSdk ${min:-?}, targetSdk $target; $native"
 
       # Signed by the key, and by no other: the bundle's jar signature (what Play checks on upload) verifies, and the
       # certificate in its signature block is the key's; the APK's v2/v3 signature carries exactly one certificate, the key's.
