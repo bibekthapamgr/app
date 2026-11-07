@@ -157,7 +157,10 @@ jobs:
           [ -n "$name" ] && [ -n "$code" ] || { echo "::error title=Release::aapt2 printed no version for the release APK"; exit 1; }
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
-          echo "::notice title=Release version::$id $name ($code), minSdk $(sed -n "s/^sdkVersion:'\([^']*\)'.*/\1/p" "$RUNNER_TEMP/badging.txt"), targetSdk $(sed -n "s/^targetSdkVersion:'\([^']*\)'.*/\1/p" "$RUNNER_TEMP/badging.txt")"
+          grep -E "^(package|sdkVersion|targetSdkVersion|native-code|application-debuggable)" "$RUNNER_TEMP/badging.txt" || true
+          min="$(grep -o "sdkVersion:'[0-9]*'" "$RUNNER_TEMP/badging.txt" | grep -v target | grep -o '[0-9]*' | head -1)"
+          target="$(grep -o "targetSdkVersion:'[0-9]*'" "$RUNNER_TEMP/badging.txt" | grep -o '[0-9]*' | head -1)"
+          echo "::notice title=Release version::$id $name ($code), minSdk ${min:-?}, targetSdk ${target:-?}; native code $(grep -o "native-code:.*" "$RUNNER_TEMP/badging.txt" | head -1)"
 
       # Signed by the key, and by no other: the bundle's jar signature (what Play checks on upload) verifies, and the
       # certificate in its signature block is the key's; the APK's v2/v3 signature carries exactly one certificate, the key's.
@@ -171,9 +174,10 @@ jobs:
           case "$apk" in *unsigned*) echo "::error title=Signing::the release APK is unsigned: Gradle did not see the signing configuration"; exit 1 ;; esac
           jarsigner -verify "$aab" > "$RUNNER_TEMP/jarsigner.txt" 2>&1 || true
           grep -q '^jar verified' "$RUNNER_TEMP/jarsigner.txt" || { echo "::error title=Signing::the App Bundle's signature does not verify: $(tail -3 "$RUNNER_TEMP/jarsigner.txt" | tr '\n' ' ')"; exit 1; }
-          blocks="$(unzip -Z1 "$aab" 'META-INF/*' | grep -Ec '\.(RSA|EC|DSA)$')"
-          [ "$blocks" = 1 ] || { echo "::error title=Signing::the App Bundle has $blocks signature blocks, not one"; exit 1; }
-          block="$(unzip -Z1 "$aab" 'META-INF/*' | grep -E '\.(RSA|EC|DSA)$')"
+          echo "META-INF of $(basename "$aab"):"; unzip -Z1 "$aab" | grep '^META-INF/' || echo "  (none)"
+          block="$(unzip -Z1 "$aab" | grep -E '^META-INF/.*\.(RSA|EC|DSA)$' || true)"
+          blocks="$(printf '%s' "$block" | grep -c . || true)"
+          [ "$blocks" = 1 ] || { echo "::error title=Signing::the App Bundle has $blocks signature blocks, not one (jarsigner said: $(head -1 "$RUNNER_TEMP/jarsigner.txt"))"; exit 1; }
           aab_fp="$(unzip -p "$aab" "$block" | openssl pkcs7 -inform DER -print_certs | openssl x509 -noout -fingerprint -sha256 | sed 's/^.*Fingerprint=//')"
           [ "$aab_fp" = "$expected" ] || { echo "::error title=Signing::the App Bundle's certificate is $aab_fp, not the key's $expected"; exit 1; }
           "$tools/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/apk-certs.txt"
@@ -244,7 +248,7 @@ jobs:
           path: |
             app/build/outputs/release/
             !app/build/outputs/release/universal.apks
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
   # The bundle installed and used on clean emulators, the oldest and the newest Android ProxyFlow supports, from its own

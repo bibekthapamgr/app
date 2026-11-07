@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""The Google Play listing's text (docs/m11/store-listing.md) checked like the app's own strings (M11).
+
+What is read: the fenced blocks ```listing-title, ```listing-short, ```listing-full and ```listing-notes, and the
+screenshot captions in the §4 table (`| N | `source` | caption |`). What fails:
+
+  - any claim the app may not make (CopyClaimsTest's rules, ported): coverage of all traffic or every app, a full or
+    system-wide VPN, anonymity, hiding identity, blanket security, encrypting everything, protection, "no logs", games
+    and calls, a guarantee — unless the sentence denies it ("does not make you anonymous");
+  - Play's metadata rules this can check: the title over 30 characters, the short description over 80, the full over
+    4,000, the release notes over 500; "best", "#1", "top", "free" or an emoji in the title or a caption; a title or
+    short description in capitals;
+  - anything left to fill in: ‹…›;
+  - a limitation not stated in the full description: TCP, UDP blocked, ping, what the proxy provider can see, not
+    anonymous, Android's VPN feature (Play's VpnService policy: the listing documents the use), no VPN server.
+
+Run: python3 scripts/check_listing_claims.py [docs/m11/store-listing.md]
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+
+FORBIDDEN: list[tuple[str, re.Pattern[str]]] = [
+    ("guarantee", re.compile(r"(?i)\bguarantee")),
+    (
+        "all traffic",
+        re.compile(
+            r"(?i)\ball\s+(of\s+)?(your\s+|the\s+|this\s+)?"
+            r"(device's\s+|device\s+|phone's\s+|phone\s+|apps'\s+|internet\s+|network\s+)?traffic"
+        ),
+    ),
+    (
+        "every app",
+        re.compile(
+            r"(?i)\b(all|every)\s+(of\s+)?(your\s+|the\s+)?(apps?|applications?)\b"
+            r"|\bworks?\s+with\s+(any|every)\s+(apps?|applications?)\b"
+        ),
+    ),
+    ("full VPN", re.compile(r"(?i)\b(full|complete|whole)[ -](device\s+)?(vpn|tunnel|protection|coverage)|\b(system|device)[ -]?wide\b")),
+    ("anonymity", re.compile(r"(?i)\banonym|\buntrace|\buntrack|\bincognito|\binvisible online")),
+    ("hiding identity", re.compile(r"(?i)\b(hid(e|es|ing)|mask(s|ing)?|conceal(s|ing)?)\s+(your\s+)?(real\s+)?(ip|identity|location|activity)")),
+    (
+        "blanket security",
+        re.compile(
+            r"(?i)\b(military|bank)[ -](grade|level)|\b100\s?%|\bcompletely\s+(private|secure|safe)"
+            r"|\bfully\s+(private|secure|encrypted)|\bsecures?\s+(every|all)\b"
+        ),
+    ),
+    ("encrypts everything", re.compile(r"(?i)\bencrypt(s|ed)?\s+(all|everything|your\s+traffic|all\s+your)")),
+    (
+        "protection",
+        re.compile(r"(?i)\bprotection\b|\bprotect(s|ed|ing)?\s+(you|your)\b|\b(is|are|stays?|keeps?(\s+\w+){1,3})\s+protected\b"),
+    ),
+    ("no logs", re.compile(r"(?i)\bno[- ]logs?\b")),
+    (
+        "games and calls",
+        re.compile(
+            r"(?i)\bsupports?\s+(\w+\s+)?(games|gaming|calls|quic|udp)"
+            r"|\bworks?\s+(with|for)\s+(\w+\s+)?(games|gaming|calls|voip|quic|udp)|\bgreat\s+for\s+(gaming|games|calls)"
+        ),
+    ),
+]
+NEGATION = re.compile(r"(?i)\b(doesn't|does not|don't|do not|isn't|is not|never|not|no)\b")
+# Play's metadata policy: no performance, ranking or promotional words in the title (and so in the captions, which are
+# pictures of the listing), and no emoji there.
+PROMOTIONAL = re.compile(r"(?i)\b(best|top|free|#\s?1|number one|award)\b")
+EMOJI = re.compile(r"[\U0001F300-\U0001FAFF☀-➿]")
+PLACEHOLDER = re.compile(r"‹[^›]*›")
+LIMITS = {"listing-title": 30, "listing-short": 80, "listing-full": 4000, "listing-notes": 500}
+REQUIRED_IN_FULL = [
+    ("TCP", r"\bTCP\b"),
+    ("UDP blocked", r"(?i)\bUDP\b.*\b(blocked|do not work|fall back)"),
+    ("ping", r"(?i)\bping\b"),
+    ("what the proxy provider sees", r"(?i)provider can see"),
+    ("not anonymous", r"(?i)\b(does not|doesn't) make you anonymous"),
+    ("Android's VPN feature", r"(?i)Android's VPN feature"),
+    ("no VPN server", r"(?i)\bno VPN server\b"),
+    ("the privacy policy", r"(?i)privacy policy"),
+]
+
+
+def normalized(text: str) -> str:
+    return (
+        re.sub(r"[   -   　]", " ", text)
+        .translate(str.maketrans({c: "-" for c in "‐‑‒–−"}))
+        .replace("’", "'")
+    )
+
+
+def sentences(text: str) -> list[str]:
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()]
+
+
+def blocks(markdown: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    name = None
+    for line in markdown.splitlines():
+        if line.startswith("```listing-"):
+            name = line[3:].strip()
+            out[name] = ""
+        elif line.startswith("```"):
+            name = None
+        elif name:
+            out[name] += line + "\n"
+    return {k: v.strip() for k, v in out.items()}
+
+
+def captions(markdown: str) -> list[str]:
+    out = []
+    for line in markdown.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) == 3 and cells[0].isdigit() and cells[1].startswith("`"):
+            out.append(cells[2])
+    return out
+
+
+def check(markdown: str) -> list[str]:
+    problems: list[str] = []
+    found = blocks(markdown)
+    for name in LIMITS:
+        if name not in found:
+            problems.append(f"no ```{name} block")
+    texts = {name: normalized(text) for name, text in found.items()}
+    shots = [normalized(c) for c in captions(markdown)]
+    for i, caption in enumerate(shots, start=1):
+        texts[f"caption {i}"] = caption
+    if not 2 <= len(shots) <= 8:
+        problems.append(f"{len(shots)} screenshot captions; Play takes two to eight screenshots")
+
+    for name, text in texts.items():
+        for sentence in sentences(text):
+            for claim, pattern in FORBIDDEN:
+                m = pattern.search(sentence)
+                if m and not NEGATION.search(sentence[: m.start()]):
+                    problems.append(f"{name}: \"{sentence[:120]}\" ({claim})")
+        if name in LIMITS and len(text) > LIMITS[name]:
+            problems.append(f"{name}: {len(text)} characters, over Play's {LIMITS[name]}")
+        if (name == "listing-title" or name.startswith("caption")) and PROMOTIONAL.search(text):
+            problems.append(f"{name}: \"{text[:80]}\" has a promotional or ranking word (Play's metadata policy)")
+        if (name == "listing-title" or name.startswith("caption")) and EMOJI.search(text):
+            problems.append(f"{name}: has an emoji (Play's metadata policy)")
+        if name in ("listing-title", "listing-short") and text.isupper():
+            problems.append(f"{name}: in capitals (Play's metadata policy)")
+        if PLACEHOLDER.search(text):
+            problems.append(f"{name}: has something left to fill in: {PLACEHOLDER.search(text).group(0)}")
+    for what, pattern in REQUIRED_IN_FULL:
+        if "listing-full" in texts and not re.search(pattern, texts["listing-full"]):
+            problems.append(f"listing-full does not say: {what}")
+    return problems
+
+
+def left_to_owner(markdown: str) -> list[str]:
+    """What the document outside the blocks leaves to fill in (the owner's decisions): reported, not failed."""
+    return [m.group(0) for m in PLACEHOLDER.finditer(markdown)]
+
+
+def main(argv: list[str]) -> int:
+    path = argv[1] if len(argv) > 1 else "docs/m11/store-listing.md"
+    with open(path, encoding="utf-8") as f:
+        markdown = f.read()
+    problems = check(markdown)
+    for problem in problems:
+        print(f"PROBLEM {problem}")
+    if problems:
+        print(f"::error title=Store listing::{'; '.join(p.replace(chr(10), ' ') for p in problems)[:1500]}")
+        return 1
+    for item in left_to_owner(markdown):
+        print(f"::warning title=Store listing::left to the owner: {item}")
+    found = blocks(markdown)
+    print(
+        f"OK: title {len(found['listing-title'])}/30, short {len(found['listing-short'])}/80, "
+        f"full {len(found['listing-full'])}/4000, notes {len(found['listing-notes'])}/500 characters, "
+        f"{len(captions(markdown))} captions; no forbidden claim, nothing left to fill in, every limitation stated"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

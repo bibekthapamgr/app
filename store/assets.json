@@ -1,0 +1,46 @@
+{
+  "icon": "icon-512.png",
+  "feature_graphic": "feature-graphic-1024x500.png",
+  "screenshots": [
+    {
+      "file": "1-B4_home_connected_light.png",
+      "source": "app/screenshots/B4_home_connected_light.png",
+      "caption": "Your apps' TCP connections, through your own proxy"
+    },
+    {
+      "file": "2-D1_add_proxy_light.png",
+      "source": "app/screenshots/D1_add_proxy_light.png",
+      "caption": "HTTP CONNECT or SOCKS5, with a username and password if needed"
+    },
+    {
+      "file": "3-A2_onboarding_how_it_works_light.png",
+      "source": "app/screenshots/A2_onboarding_how_it_works_light.png",
+      "caption": "What goes through, what is blocked \u2014 said before you connect"
+    },
+    {
+      "file": "4-B2_home_disconnected_light.png",
+      "source": "app/screenshots/B2_home_disconnected_light.png",
+      "caption": "Status at a glance, connect in one tap"
+    },
+    {
+      "file": "5-C2_profiles_list_light.png",
+      "source": "app/screenshots/C2_profiles_list_light.png",
+      "caption": "A profile for each proxy you use"
+    },
+    {
+      "file": "6-F2_logs_light.png",
+      "source": "app/screenshots/F2_logs_light.png",
+      "caption": "A diagnostic log kept on this phone only"
+    },
+    {
+      "file": "7-B4_home_connected_dark.png",
+      "source": "app/screenshots/B4_home_connected_dark.png",
+      "caption": "Dark theme"
+    },
+    {
+      "file": "8-G2_privacy_policy_light.png",
+      "source": "app/screenshots/G2_privacy_policy_light.png",
+      "caption": "The privacy policy, in the app"
+    }
+  ]
+}

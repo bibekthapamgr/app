@@ -66,6 +66,14 @@ jobs:
       - name: String resources Android's resource compiler takes (apostrophes, quotes, escapes)
         run: python3 scripts/check_strings.py
 
+      # M11: the Play listing's text, checked like the app's strings (no claim the app may not make, Play's lengths and
+      # title words, the limitations stated), and the store assets' sizes and formats against Play's specifications.
+      - name: The store listing's claims and the store assets (Google Play)
+        if: ${{ !cancelled() }}
+        run: |
+          python3 scripts/check_listing_claims.py
+          python3 scripts/release/store_assets.py check
+
       - name: Design tokens and generated colours agree
         if: ${{ !cancelled() }}
         run: |
