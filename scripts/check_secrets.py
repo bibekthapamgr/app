@@ -47,7 +47,7 @@ def _content(label: str, regex: str, paths: str | None = None) -> ContentRule:
 
 NAME_RULES = [
     _name("signing keystore", r"\.(jks|keystore|bks)(\.[^/]*)?$"),
-    _name("private key or certificate bundle", r"\.(p12|pfx|key|p8)$"),
+    _name("private key or certificate bundle", r"\.(p12|pfx|key|p8)(\.[^/]*)?$"),
     _name("SSH private key", r"^id_(rsa|dsa|ecdsa|ed25519)$"),
     _name(
         "machine-local or secret configuration",
@@ -57,7 +57,7 @@ NAME_RULES = [
 ]
 
 # Environment-variable style names that hold credentials, e.g. a *_PASSWORD or *_TOKEN variable.
-_CREDENTIAL_NAME = r"(?<![A-Za-z0-9_])[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)"
+_CREDENTIAL_NAME = r"(?<![A-Za-z0-9_])[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|KEYSTORE_BASE64|PRIVATE_KEY)"
 # Files where values are usually unquoted: .env, properties, shell and YAML.
 _KEY_VALUE_FILES = r"(^|/)\.env(\.[^/]+)?$|\.(properties|sh|bash|ya?ml)$"
 
@@ -78,11 +78,42 @@ CONTENT_RULES = [
         r"^\s*(?:storePassword|keyPassword|store\.password|key\.password)\s*[=:]\s*\S",
         paths=r"\.properties$",
     ),
-    _content("credential written as a quoted literal", _CREDENTIAL_NAME + r"\s*[:=]\s*[\"'][^\"'$<{(\s]{4,}[\"']"),
+    # M11 (A-2, F-5): a signing password as an unquoted value in any text file ("storePassword=hunter22" in notes.txt,
+    # with or without a trailing comment), the value neither a reference ($, {, <, () nor a comment; a build script's
+    # quoted form is the rule above.
+    _content(
+        "signing password written as a literal value",
+        r"^\s*(?:storePassword|keyPassword|store\.password|key\.password)\s*[=:]\s*[^\s\"'$<{(#]{4,}\s*(#.*)?$",
+    ),
+    # M11 (A-2): a keystore or private key as base64 on one line (a PKCS12 or DER file starts with 0x30 0x82, "MII" in
+    # base64; a JKS with FE ED FE ED, "/u3+7Q"): 200 or more base64 characters beginning so, in any text file. Wrapped
+    # base64 (several lines) is joined and read by check_blobs; a PEM certificate's body (public) is left out there.
+    _content("keystore or private key as base64", r"(?<![A-Za-z0-9+/_-])(MII|/u3\+7Q)[A-Za-z0-9+/_-]{194,}"),
+    # A quoted value may hold spaces (a passphrase of up to four words); a longer phrase is a description (H-3).
+    _content("credential written as a quoted literal", _CREDENTIAL_NAME + r"\"?\s*[:=]\s*[\"'][^\"'$<{(\s]{4,}(?:\s[^\"'$<{(\s]+){0,3}[\"']"),
+    # M11 (G-3): JSON's "storePassword": "…"; a password flag on a command line (keytool -storepass, bundletool
+    # --ks-pass=pass:, the forms the release workflow never uses); the workflow's own PF_STORE_PASS=…; a NAME=value that
+    # starts a command line (the variable, "=", the password, then the command).
+    _content("signing password written in JSON", r"(?i)\"[a-z_.]*(?:store|key|keystore)_?\.?password\"\s*:\s*\"[^\"$]{4,}\""),
+    # A placeholder (YOUR_PASSWORD, changeme, xxxx) is no password (H-3).
+    _content(
+        "password on a command line",
+        r"(?:-(?:src|dest)?(?:store|key)pass)\s+(?!:env\b|:file\b|[A-Z_]{4,}\b|(?:changeme|example|placeholder|x{4,})\b)[^\s\"'$<{(:]{4,}"
+        r"|--(?:ks|key)-pass[= ]\"?pass:(?![A-Z_]{4,}\b|(?:changeme|example|placeholder|x{4,})\b)[^\s\"'$]{4,}",
+    ),
+    _content("credential written as a literal value", r"(?i)^\s*(?:export\s+)?(?:[a-z][a-z0-9_]*_)?(?:store|key|ks)_pass\s*[:=]\s*(?!(?:true|false|null|none|yes|no|nil|changeme|example)\b)[^\s\"'$<{(#]{4,}"),
+    _content("credential written as a literal value", r"(?i)(?<![a-z0-9_])[a-z][a-z0-9_]*_(?:password|passwd|secret|token|api_key|keystore_base64|private_key)=(?!(?:true|false|null|none|yes|no|nil|changeme|example)\b)[^\s\"'$<{(#`|\\]{4,}(?:\s+\S|[`|.\\]\s*$|[`|.]\s)"),
     _content(
         "credential written as a literal value",
         r"^\s*(?:export\s+)?" + _CREDENTIAL_NAME + r"\s*[:=]\s*[^\s\"'$<{(#]{4,}",
         paths=_KEY_VALUE_FILES,
+    ),
+    # M11 (A-2, F-5): the same at the start of a line of any text file ("PROXYFLOW_KEYSTORE_PASSWORD=hunter22" or
+    # "PROXYFLOW_KEYSTORE_PASSWORD: hunter22" in notes, a trailing comment allowed), in either case.
+    _content(
+        "credential written as a literal value",
+        r"(?i)^\s*(?:export\s+)?[a-z][a-z0-9_]*_(?:password|passwd|secret|token|api_key|keystore_base64|private_key)"
+        r"\s*[:=]\s*(?!(?:true|false|null|none|yes|no|nil)\b)[^\s\"'$<{(#]{4,}\s*(#.*)?$",
     ),
 ]
 
@@ -98,11 +129,70 @@ def check_name(path: str) -> list[Finding]:
     return [Finding(rule.label, path) for rule in NAME_RULES if rule.pattern.search(name)]
 
 
-def check_content(path: str, data: bytes) -> list[Finding]:
-    if b"\0" in data[:8000]:  # binary, as git decides it
-        return []
-    rules = [rule for rule in CONTENT_RULES if rule.paths is None or rule.paths.search(path)]
+# M11 (A-2): a keystore under any name, by its first bytes: a JKS file starts with FE ED FE ED; a PKCS12 (or any DER)
+# file with 30 82 (a SEQUENCE with a two-byte length) followed, for PKCS12, by a version INTEGER of 3 (02 01 03).
+def check_binary(path: str, data: bytes) -> list[Finding]:
+    """A keystore by its first bytes: JKS (FE ED FE ED); PKCS12 — a DER SEQUENCE with a two-, three- or four-byte
+    length (30 82, 30 83, 30 84: a store of 64 KiB or more, with a CA chain, has three) followed by the version INTEGER 3."""
+    if data.startswith(b"\xfe\xed\xfe\xed"):
+        return [Finding("signing keystore (JKS by content)", path)]
+    if len(data) > 10 and data[0] == 0x30 and data[1] in (0x82, 0x83, 0x84):
+        offset = 2 + (data[1] - 0x80)
+        if data[offset : offset + 3] == b"\x02\x01\x03":
+            return [Finding("PKCS12 keystore by content", path)]
+    return []
+
+
+# A base64 line, with a Markdown quote's, a list's, a table's or a comment's marker before it allowed (up to two markers,
+# then spaces), 40 to 196 characters (the one-line rule takes 197 and more).
+_BASE64_LINE = re.compile(rb"^(?:(?:[>#*|-]|//|--|;;|\d{1,2}\.)[ \t]*){0,2}([A-Za-z0-9+/=_-]{40,196})[ \t]*\|?$")
+
+
+def check_blobs(path: str, data: bytes) -> list[Finding]:
+    """A keystore pasted as wrapped base64 (what `base64` prints without -w0: 76-column lines): three or more
+    consecutive base64 lines are joined, and the first bytes they decode to are checked like a binary file (M11, F-5).
+    The lines of a PEM certificate (between BEGIN/END CERTIFICATE) are a public certificate and are left out."""
+    import base64
+    import binascii
+
     findings = []
+    run: list[bytes] = []
+    start = 0
+    in_certificate = False
+    lines = data.splitlines()
+    for number, line in enumerate(lines + [b""], start=1):
+        stripped = line.strip()
+        if stripped.lstrip(b"># /*").startswith(b"-----BEGIN CERTIFICATE"):
+            in_certificate = True
+        elif stripped.lstrip(b"># /*").startswith(b"-----END CERTIFICATE"):
+            in_certificate = False
+        m = _BASE64_LINE.match(stripped)
+        if m and not in_certificate and ALLOW_MARKER not in line:
+            if not run:
+                start = number
+            run.append(m.group(1))
+            continue
+        if len(run) >= 3:
+            # The first bytes of the blob, and of each line of it (a hash or another blob may stand first: G-3).
+            for offset, piece in enumerate(run):
+                chunk = piece[:64].replace(b"-", b"+").replace(b"_", b"/")
+                try:
+                    head = base64.b64decode(chunk + b"=" * (-len(chunk) % 4), validate=False)
+                except (binascii.Error, ValueError):
+                    continue
+                found = check_binary(path, head + b"\0" * 16)
+                if found:
+                    findings += [Finding(f.label + " (wrapped base64)", f"{path}:{start + offset}") for f in found]
+                    break
+        run = []
+    return findings
+
+
+def check_content(path: str, data: bytes) -> list[Finding]:
+    if b"\0" in data[:8000]:  # binary, as git decides it: only its first bytes are read
+        return check_binary(path, data)
+    findings = check_blobs(path, data)
+    rules = [rule for rule in CONTENT_RULES if rule.paths is None or rule.paths.search(path)]
     for number, line in enumerate(data.splitlines(), start=1):
         if ALLOW_MARKER in line:
             continue
@@ -175,7 +265,7 @@ def self_test() -> int:
     store, key = "store" + "Password", "key" + "Password"
     caught = {
         "signing keystore": ["release.JKS", "upload.keystore", "upload.jks.bak"],
-        "private key or certificate bundle": ["key.p12", "server.key"],
+        "private key or certificate bundle": ["key.p12", "server.key", "upload.p12.bak"],
         "SSH private key": ["id_ed25519"],
         "machine-local or secret configuration": ["keystore.properties", "local.properties", "google-services.json"],
         "environment file": [".env", ".env.production"],
@@ -196,7 +286,44 @@ def self_test() -> int:
         ("Config.kt", "const val API_" + 'TOKEN = "abcd1234"'),
         (".env", "export DB_" + "PASSWORD=hunter22"),
         ("ci.yml", "  SIGNING_" + "SECRET: hunter22"),
+        ("release.txt", "PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22"),
+        ("b.txt", "PROXYFLOW_KEYSTORE_" + "PASSWORD: hunter22hunter22"),
+        ("c.txt", "proxyflow_keystore_" + "password=hunter22hunter22"),
+        ("d.txt", "PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22 # my pw"),
+        ("signing.cfg", store + "=hunter22"),
+        ("e.cfg", store + " = hunter22   # prod"),
+        ("notes.yml", "PROXYFLOW_KEYSTORE_" + "BASE64: " + "MII" + "A" * 300),
+        ("notes.md", "the keystore: " + "MII" + "Q" * 240 + "=="),
+        ("jks.txt", "/u3+7Q" + "A" * 240),
+        ("wrapped.txt", "\n".join(["MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["A" * 76] * 4)),
+        ("wrapped-jks.txt", "\n".join(["/u3+7QAAAAIAAAABAAAAAQAIcHJveHlmbG93AAABkQ" + "A" * 34] + ["A" * 76] * 3)),
+        ("quoted.md", "\n".join(["> MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["> " + "A" * 76] * 4)),
+        ("commented.kt", "\n".join(["// MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["// " + "A" * 76] * 4)),
+        ("w50.txt", "\n".join(["MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCC"] + ["A" * 50] * 4)),
+        ("sha-then.txt", "\n".join(["a" * 64, "MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["A" * 76] * 3)),
+        ("a.json", '  "PROXYFLOW_KEYSTORE_' + 'PASSWORD": "hunter22hunter22",'),
+        ("secrets.json", '  "' + store + '": "hunter22hunter22"'),
+        ("b.txt", "PROXYFLOW_KEYSTORE_" + 'PASSWORD="correct horse battery staple"'),
+        ("c.md", "Run it as `PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22 ./gradlew bundleRelease`"),
+        ("d.txt", "PF_STORE_" + "PASS=hunter22hunter22"),
+        ("e.txt", "keytool -genkeypair -store" + "pass hunter22hunter22 -alias up"),
+        ("e2.txt", "bundletool build-apks --ks-" + "pass=pass:hunter22hunter22"),
+        ("e3.txt", "apksigner sign --ks-" + "pass pass:hunter22hunter22 app.apk"),
+        ("e4.txt", "keytool -importkeystore -srckey" + "pass hunter22hunter22 -destkey" + "pass hunter22hunter22"),
+        ("snake.json", '  "keystore_' + 'password": "hunter22hunter22"'),
+        ("vars.yml", "PF_STORE_" + "PASS: hunter22hunter22"),
+        ("f.md", "Set `PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22` and run"),
+        ("g.md", "The password is PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22."),
+        ("list.md", "\n".join(["- MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["- " + "A" * 76] * 4)),
+        ("table.md", "\n".join(["| MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF |"] + ["| " + "A" * 76 + " |"] * 4)),
+        ("w120.txt", "\n".join(["MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF" + "A" * 40] + ["A" * 120] * 3)),
     ]
+    binary_hits = [
+        ("release.bin", b"\xfe\xed\xfe\xed" + b"\0" * 100),
+        ("upload.dat", b"\x30\x82\x12\x34\x02\x01\x03" + b"\0" * 100),
+        ("big.dat", b"\x30\x83\x01\x12\x34\x02\x01\x03" + b"\0" * 100),
+    ]
+    binary_passes = [("a.png", b"\x89PNG\r\n\x1a\n" + b"\0" * 100), ("cert.der", b"\x30\x82\x05\x00\x30\x82\x03" + b"\0" * 100)]
     content_passes = [
         ("keystore.properties.example", store + "="),
         ("build.gradle.kts", store + ' = signing.getValue("' + store + '")'),
@@ -206,6 +333,24 @@ def self_test() -> int:
         ("main.go", 'cfg.Password = os.Getenv("PF_PROXY_' + 'PASSWORD")'),
         ("Notes.kt", 'val x = "' + "AKIA" + "Q" * 17 + '"'),
         ("allowed.txt", "ghp_" + k + "  # check-secrets: " + "allow"),
+        ("README.md", "storePassword=       # left empty"),
+        ("Screen.kt", "                hasSaved" + "Password = true,"),
+        ("release.yml", "keytool -list -keystore x -store" + "pass:env PF_STORE_PASS -alias up"),
+        ("release.yml", "--ks-" + "pass=\"file:$RUNNER_TEMP/ks-pass.txt\""),
+        ("script.sh", "export PF_STORE_" + 'PASS="$store_pass"'),
+        ("doc.md", "the variable PROXYFLOW_KEYSTORE_" + "PASSWORD holds the password you typed"),
+        ("doc2.md", "keytool -list -keystore x -store" + "pass YOUR_PASSWORD -alias up"),
+        ("doc3.md", "the -store" + "pass:env form is never a password"),
+        (".env.example", "PF_STORE_" + "PASS=changeme"),
+        ("ci.yml", "  PROXYFLOW_KEYSTORE_" + 'PASSWORD: "the keystore password, from the secret of that name"'),
+        ("hashes.md", "\n".join(["- " + "a" * 64] * 5)),
+        ("Vm.kt", "            keepsSaved" + "Password = keeps,"),
+        ("flags.ini", "keystore_" + "password = false"),
+        ("sha.txt", "a" * 64),
+        ("cert.pem", "MIIB" + "a" * 60),
+        ("cert.pem", "-----BEGIN CERTIFICATE-----\n" + "\n".join(["MIIDszCCAp" + "a" * 54] + ["a" * 64] * 5) + "\n-----END CERTIFICATE-----"),
+        ("hashes.txt", "\n".join(["a" * 64] * 5)),
+        ("notes.md", "the fingerprint SHA256: " + ":".join(["AB"] * 32)),
     ]
     failures = []
     for label, names in caught.items():
@@ -221,6 +366,12 @@ def self_test() -> int:
     for path, text in content_passes:
         if check_content(path, text.encode()):
             failures.append(f"content rules flagged a near miss in {path}: {[f.label for f in check_content(path, text.encode())]}")
+    for path, data in binary_hits:
+        if not check_content(path, data):
+            failures.append(f"the keystore-by-content rule missed {path}")
+    for path, data in binary_passes:
+        if check_content(path, data):
+            failures.append(f"the keystore-by-content rule flagged {path}")
     for failure in failures:
         print(f"check-secrets self-test: {failure}", file=sys.stderr)
     if failures:
