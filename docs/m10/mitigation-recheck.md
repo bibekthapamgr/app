@@ -1,6 +1,6 @@
 # M10 — Mitigation checklist re-checked for the release candidate
 
-**Milestone:** M10 · **Release candidate:** `{SHA}` (version 0.10.0, code 10) · **CI:** run {RUN} · **Checklist:** `docs/m8/mitigation-checklist.md` ("before every release candidate, each line is re-checked against the build that ships; a line that no longer holds blocks the release") · **Re-checked by:** an independent review of the code at c28645f (review C), whose findings were fixed (M10-17 to M10-21), then each line again against the verified commit's CI run
+**Milestone:** M10 · **Release candidate:** `d48f4f8` (version 0.10.0, code 10) · **CI:** run 42344467318 · **Checklist:** `docs/m8/mitigation-checklist.md` ("before every release candidate, each line is re-checked against the build that ships; a line that no longer holds blocks the release") · **Re-checked by:** an independent review of the code at c28645f (review C), whose findings were fixed (M10-17 to M10-21), then each line again against the verified commit's CI run
 
 ## Verdict
 
@@ -52,6 +52,10 @@ Every line holds on the release candidate, or is a residual risk M8 accepted, or
 | 🔁 The disconnected notification's wording | Holds, read for this release | `core/vpn` strings: "Apps use your normal network unless Android's system kill switch is on" |
 | Limitations stated | Holds | `CopyClaimsTest.theLimitationsAreStated` |
 | 🔁 Store listing and support texts | M11 (none exists yet); Help, the privacy policy and onboarding say no more than `docs/m6/routing-and-limitations.md` | Read for this release |
+
+## After the re-check
+
+Review C re-checked the candidate of its day; the fix rounds after it (re-reviews F to P, `docs/m10/defect-register.md`) changed no mitigation: in the app, the screens' text direction and the isolation of the user's own text (M10-64 to M10-106), the tile's subtitle (M10-106, M10-115), the form's fields and a name of invisible characters (M10-91, M10-123); the rest in the tests, the evidence scripts and CI. Each round's re-review read the diff against the lab's rules (nothing contacts a lab destination disconnected, destination connections equal tunnels, the witness only refused or blocked, no credential or payload logged, no silent bypass) and found them held, and the verified run's evidence holds every line above on the release candidate `d48f4f8`.
 
 ## What the re-check added
 

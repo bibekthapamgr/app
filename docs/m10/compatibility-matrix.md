@@ -1,6 +1,6 @@
 # M10 — Device and OS compatibility matrix
 
-**Milestone:** M10 · **Verified commit:** `{SHA}` · **CI:** run {RUN}, attempts 1–3 · **Decisions:** ADR-0015 §1
+**Milestone:** M10 · **Verified commit:** `d48f4f8` · **CI:** run 42344467318, attempts 1–3 · **Decisions:** ADR-0015 §1
 
 ProxyFlow declares Android 10 to 16 (minSdk 29, targetSdk 36). Every one of those versions runs the whole device suite in CI, on an emulator, in each attempt of the verified run. Physical phones are the owner's to check (`docs/m10/physical-phone-checklist.md`); the wider range of real devices is M11's closed testing.
 
@@ -8,7 +8,18 @@ ProxyFlow declares Android 10 to 16 (minSdk 29, targetSdk 36). Every one of thos
 
 All are Google's `google_apis` x86_64 system images, booted fresh for each job with `-no-snapshot`, on GitHub's `ubuntu-24.04` runners, against the lab of `scripts/e2e_env.sh`. The uplink is chosen per image by `scripts/e2e_device.sh`: mobile data, except Wi-Fi in airplane mode on API 34 and 35, and on API 33 when tcpdump can be run inside the phone as root, through `su` — their mobile data drops during runs (M10-4, M10-88, M10-113, M10-120). The captures are the emulator's own of its mobile data (`-tcpdump`, which from API 30 on does not record Wi-Fi: M10-89), and tcpdump inside the phone on every uplink interface: from API 34, where `adb root` survives, as root through adbd; on API 33 as root through `su`, adbd left as the shell user. The phone's captures are pulled by the shell user (M10-121).
 
-{LEVELS}
+| Android (API) | Uplink | Device tests: run, of them skipped | Failed | M5–M8 evidence, M10 performance and scenarios | Job |
+|---|---|---:|---:|---|---|
+| 10 (29) | mobile data | 75, 6 | 0 | M10 performance: ✓; M10 scenarios: a restart with Always-on VPN: ✓; M10 scenarios: no notification permission: ✓; M5 VPN lifecycle: ✓; M5 end-to-end evidence: ✓; M6 end-to-end evidence: ✓; M7 evidence: ✓; M8 evidence: ✓ | success |
+| 11 (30) | mobile data | 75, 6 | 0 | M10 performance: ✓; M10 scenarios: a restart with Always-on VPN: ✓; M10 scenarios: no notification permission: ✓; M5 VPN lifecycle: ✓; M5 end-to-end evidence: ✓; M6 end-to-end evidence: ✓; M7 evidence: ✓; M8 evidence: ✓ | success |
+| 12 (31) | mobile data | 75, 6 | 0 | M10 performance: ✓; M10 scenarios: a restart with Always-on VPN: ✓; M10 scenarios: no notification permission: ✓; M5 VPN lifecycle: ✓; M5 end-to-end evidence: ✓; M6 end-to-end evidence: ✓; M7 evidence: ✓; M8 evidence: ✓ | success |
+| 12L (32) | mobile data | 75, 6 | 0 | M10 performance: ✓; M10 scenarios: a restart with Always-on VPN: ✓; M10 scenarios: no notification permission: ✓; M5 VPN lifecycle: ✓; M5 end-to-end evidence: ✓; M6 end-to-end evidence: ✓; M7 evidence: ✓; M8 evidence: ✓ | success |
+| 13 (33) | Wi-Fi | 75, 6 | 0 | M10 performance: ✓; M10 scenarios: a restart with Always-on VPN: ✓; M10 scenarios: no notification permission: ✓; M5 VPN lifecycle: ✓; M5 end-to-end evidence: ✓; M6 end-to-end evidence: ✓; M7 evidence: ✓; M8 evidence: ✓ | success |
+| 14 (34) | mobile data and Wi-Fi, both up | 75, 6 | 0 | M10 performance: ✓; M10 scenarios: a restart with Always-on VPN: ✓; M10 scenarios: no notification permission: ✓; M5 VPN lifecycle: ✓; M5 end-to-end evidence: ✓; M6 end-to-end evidence: ✓; M7 evidence: ✓; M8 evidence: ✓ | success |
+| 15 (35) | Wi-Fi | 75, 6 | 0 | M10 performance: ✓; M10 scenarios: a restart with Always-on VPN: ✓; M10 scenarios: no notification permission: ✓; M5 VPN lifecycle: ✓; M5 end-to-end evidence: ✓; M6 end-to-end evidence: ✓; M7 evidence: ✓; M8 evidence: ✓ | success |
+| 16 (36) | mobile data | 75, 6 | 0 | M10 performance: ✓; M10 scenarios: a restart with Always-on VPN: ✓; M10 scenarios: no notification permission: ✓; M5 VPN lifecycle: ✓; M5 end-to-end evidence: ✓; M6 end-to-end evidence: ✓; M7 evidence: ✓; M8 evidence: ✓ | success |
+
+The counts are the first attempt's; the second and third attempts ran the same suite on each level with the same result. The 6 "skipped" are the same on every level: the five steps of `KillSwitchEndToEndTest` and `NotificationPermissionEndToEndTest`, which the plain test run leaves to the scripts that drive them (M8's failure injection and scenario N) and which ran there, counted under the evidence. The job column is the attempt's conclusion.
 
 ## 2. What differs between the versions, and how it is covered
 
