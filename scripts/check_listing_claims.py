@@ -62,11 +62,15 @@ FORBIDDEN: list[tuple[str, re.Pattern[str]]] = [
         ),
     ),
 ]
-# A claim is allowed only when the same clause denies it, with the denial at most four words before the claim's first
-# word ("does not make you anonymous", "is not a system-wide VPN"): a "no" or "not" earlier in the sentence, about
-# something else ("No account needed, and it hides your IP"), allows nothing (review C-1).
-NEGATION = re.compile(r"(?i)\b(doesn't|does not|don't|do not|isn't|is not|never|not)(\s+\S+){0,4}\s*$")
-CLAUSE = re.compile(r"[:;—]|\s-\s|,\s+(and|but|or|so)\s+")
+# A claim is allowed only when its own clause denies it, the denial at most three words before the claim's first word
+# ("does not make you anonymous", "is not a system-wide VPN", "no guarantee"): a "not" earlier in the sentence, or in
+# another clause, about something else ("Never slow, protects your privacy"; "Not only fast: works with every app"),
+# allows nothing (reviews C-1, F-2, F-3). Clauses end at a comma, a colon, a semicolon, a dash, and "and", "but", "or".
+NEGATION = re.compile(
+    r"(?i)(\b(doesn't|does not|don't|do not|isn't|is not|never|not|cannot|can't|won't|will not|neither|nor)(\s+\S+){0,3}|\bno)\s*$"
+)
+NOT_A_DENIAL = re.compile(r"(?i)\bnot\s+(only|just|merely)\b")
+CLAUSE = re.compile(r"[,:;—]|\s-\s|\s(and|but|or)\s")
 # Play's metadata policy: no performance, ranking or promotional words in the title (and so in the captions, which are
 # pictures of the listing), and no emoji there.
 PROMOTIONAL = re.compile(r"(?i)(?<!\w)(best|top|free|number one|award|no\.\s?1)(?!\w)|(?<!\w)#\s?1\b")
@@ -95,6 +99,12 @@ def normalized(text: str) -> str:
         .translate(str.maketrans({c: "-" for c in "‐‑‒–−"}))
         .replace("’", "'")
     )
+
+
+def denied(before: str) -> bool:
+    """Whether the text before a claim, in the claim's own clause, denies it."""
+    clause = CLAUSE.split(before)[-1]
+    return bool(NEGATION.search(clause)) and not NOT_A_DENIAL.search(clause)
 
 
 def sentences(text: str) -> list[str]:
@@ -141,8 +151,7 @@ def check(markdown: str) -> list[str]:
         for sentence in sentences(text):
             for claim, pattern in FORBIDDEN:
                 for m in pattern.finditer(sentence):
-                    clause = CLAUSE.split(sentence[: m.start()])[-1]
-                    if not NEGATION.search(clause):
+                    if not denied(sentence[: m.start()]):
                         problems.append(f"{name}: \"{sentence[:120]}\" ({claim})")
                         break
         if name in LIMITS and len(text) > LIMITS[name]:
@@ -162,9 +171,9 @@ def check(markdown: str) -> list[str]:
 
 
 def left_to_owner(markdown: str) -> list[str]:
-    """What the document outside the blocks leaves to fill in (the owner's decisions): reported, not failed. A placeholder
-    inside backticks is the document talking about placeholders, not one."""
-    return [m.group(0) for m in PLACEHOLDER.finditer(re.sub(r"`[^`]*`", "", markdown))]
+    """What the document outside the blocks leaves to fill in (the owner's decisions): reported, not failed. The literal
+    `‹…›` is the document talking about placeholders, not one (review F-4: a backticked placeholder with content is one)."""
+    return [m.group(0) for m in PLACEHOLDER.finditer(markdown.replace("`‹…›`", ""))]
 
 
 def main(argv: list[str]) -> int:

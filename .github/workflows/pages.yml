@@ -5,8 +5,8 @@ name: pages
 # docs/m9/privacy-policy.md holds. The site is built on every push and pull request (the artifact can be checked), and
 # deployed only from main (a push, or a hand-started run on main), once the owner has turned Pages on for the
 # repository (Settings → Pages → Source: GitHub Actions) and set the repository variable PAGES_ENABLED to true; until
-# then the deploy job is skipped, not failed. The page names the support address from the repository variable
-# PROXYFLOW_SUPPORT_EMAIL (decision D10). The page is static: no script, nothing fetched from anywhere. Third-party
+# then the deploy job is skipped, not failed. The page names the support address and the developer from the repository
+# variables PROXYFLOW_SUPPORT_EMAIL and PROXYFLOW_DEVELOPER_NAME (decision D10). The page is static: no script, nothing fetched from anywhere. Third-party
 # actions are pinned to commit SHAs (tag in the comment).
 
 on:
@@ -34,6 +34,7 @@ jobs:
       - name: The privacy policy page and the front page, from the app's own strings
         env:
           PROXYFLOW_SUPPORT_EMAIL: ${{ vars.PROXYFLOW_SUPPORT_EMAIL }}
+          PROXYFLOW_DEVELOPER_NAME: ${{ vars.PROXYFLOW_DEVELOPER_NAME }}
         run: |
           python3 scripts/release/privacy_page.py --out site
           python3 -m unittest scripts.tests.test_privacy_page scripts.tests.test_privacy_policy

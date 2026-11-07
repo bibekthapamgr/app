@@ -42,8 +42,9 @@ command -v keytool >/dev/null || { echo "keytool not found: install a JDK, or ad
 mkdir -p "$dir"
 chmod 700 "$dir"
 
-read -r -s -p "Keystore password (12 characters or more; it is not shown): " store_pass; echo
-read -r -s -p "The same again: " store_pass2; echo
+# IFS= so that a password with a space at either end is taken as typed (review F-6).
+IFS= read -r -s -p "Keystore password (12 characters or more; it is not shown): " store_pass; echo
+IFS= read -r -s -p "The same again: " store_pass2; echo
 [ "$store_pass" = "$store_pass2" ] || { echo "the passwords differ" >&2; exit 1; }
 [ "${#store_pass}" -ge 12 ] || { echo "the password is shorter than 12 characters" >&2; exit 1; }
 # PKCS12 keeps one password for the store and the key; the key password is the store's.

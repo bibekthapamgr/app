@@ -49,13 +49,22 @@ class Check(unittest.TestCase):
             shots.append(
                 {
                     "file": name,
+                    "sha256": store_assets.sha256(os.path.join(self.out, "screenshots", name)),
                     "source": f"app/screenshots/{source}.png",
                     "source_sha256": store_assets.sha256(os.path.join(store_assets.ROOT, "app", "screenshots", f"{source}.png")),
                     "caption": f"Caption {i}",
                 }
             )
         with open(os.path.join(self.out, "assets.json"), "w", encoding="utf-8") as f:
-            json.dump({"screenshots": shots, "listing": store_assets.listing_hash()}, f)
+            json.dump(
+                {
+                    "screenshots": shots,
+                    "listing": store_assets.listing_hash(),
+                    "icon_sha256": store_assets.sha256(os.path.join(self.out, "icon-512.png")),
+                    "feature_graphic_sha256": store_assets.sha256(os.path.join(self.out, "feature-graphic-1024x500.png")),
+                },
+                f,
+            )
         # The listing's table is the repository's; the test's folder stands in for it.
         self.listing = store_assets.listing_shots
         store_assets.listing_shots = lambda: [store_assets.Shot(s["source"].split("/")[-1][:-4], s["caption"]) for s in shots]
@@ -111,6 +120,12 @@ class Check(unittest.TestCase):
         with open(os.path.join(self.out, "assets.json"), "w", encoding="utf-8") as f:
             json.dump(facts, f)
         self.assertIn("title or short description changed", self.run_check()[1])
+
+    def test_a_picture_edited_beside_its_record_fails(self) -> None:
+        png(os.path.join(self.out, "screenshots", "1-B4_home_connected_light.png"), 1080, 1920, colour=2, depth=8)
+        with open(os.path.join(self.out, "screenshots", "1-B4_home_connected_light.png"), "ab") as f:
+            f.write(b"\0")
+        self.assertIn("not the picture assets.json was written with", self.run_check()[1])
 
     def test_a_non_png_fails(self) -> None:
         with open(os.path.join(self.out, "icon-512.png"), "wb") as f:

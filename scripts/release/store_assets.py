@@ -291,8 +291,17 @@ def make(out: str) -> None:
         name = f"{index}-{shot.source}.png"
         screenshot(shot, index).save(os.path.join(out, "screenshots", name), optimize=True)
         facts["screenshots"].append(
-            {"file": name, "source": f"app/screenshots/{shot.source}.png", "source_sha256": sha256(source_path(shot)), "caption": shot.caption}
+            {
+                "file": name,
+                "sha256": sha256(os.path.join(out, "screenshots", name)),
+                "source": f"app/screenshots/{shot.source}.png",
+                "source_sha256": sha256(source_path(shot)),
+                "caption": shot.caption,
+            }
         )
+    # The outputs' own hashes too, so an edited assets.json beside a stale picture is caught (review F-12).
+    facts["icon_sha256"] = sha256(os.path.join(out, "icon-512.png"))
+    facts["feature_graphic_sha256"] = sha256(os.path.join(out, "feature-graphic-1024x500.png"))
     with open(os.path.join(out, "assets.json"), "w", encoding="utf-8") as f:
         json.dump(facts, f, indent=2)
         f.write("\n")
@@ -366,6 +375,12 @@ def check(out: str) -> int:
                     problems.append(f"{entry['file']}: its source {entry['source']} is gone")
                 elif sha256(source) != entry.get("source_sha256"):
                     problems.append(f"{entry['file']}: its source {entry['source']} changed since it was made: run `store_assets.py make`")
+                made = os.path.join(folder, entry["file"])
+                if os.path.isfile(made) and sha256(made) != entry.get("sha256"):
+                    problems.append(f"{entry['file']}: not the picture assets.json was written with: run `store_assets.py make`")
+            for name, key in (("icon-512.png", "icon_sha256"), ("feature-graphic-1024x500.png", "feature_graphic_sha256")):
+                if os.path.isfile(os.path.join(out, name)) and sha256(os.path.join(out, name)) != facts.get(key):
+                    problems.append(f"{name}: not the picture assets.json was written with: run `store_assets.py make`")
             if facts.get("listing") != listing_hash():
                 problems.append("the feature graphic's title or short description changed since it was made: run `store_assets.py make`")
     else:

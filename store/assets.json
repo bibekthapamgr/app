@@ -5,51 +5,61 @@
   "screenshots": [
     {
       "file": "1-B4_home_connected_light.png",
+      "sha256": "8fa91d0707b3419fc2e6d5d826240eb1c347cf5261bb1c709e31c6a1b8880f99",
       "source": "app/screenshots/B4_home_connected_light.png",
       "source_sha256": "10cdc00249c99880a2c8100575a12575615ea5cc445b7dfb72db64275bed5135",
       "caption": "Your apps' TCP connections, through your own proxy"
     },
     {
       "file": "2-D1_add_proxy_light.png",
+      "sha256": "ff2c7f511d7233c5e2868b704ccf4cba63cfac17726ca9cc0603daf6a0c1e31f",
       "source": "app/screenshots/D1_add_proxy_light.png",
       "source_sha256": "89834785e31133cf811aebc097784771bce798f4d2b2159d06cf57ee3f2542d5",
       "caption": "HTTP CONNECT or SOCKS5, with a username and password if needed"
     },
     {
       "file": "3-A2_onboarding_how_it_works_light.png",
+      "sha256": "5d47409e2ec0bd50ffbeb6db445983c9faa6ba554207db0fbfb1dcd5458e565b",
       "source": "app/screenshots/A2_onboarding_how_it_works_light.png",
       "source_sha256": "678f436753b632175926e1ab95ea89a0ca2b0cb05e6ee6b7c7b7f8d2f0d8e94c",
       "caption": "What goes through, what is blocked \u2014 said before you connect"
     },
     {
       "file": "4-B2_home_disconnected_light.png",
+      "sha256": "ce180eba0813346ce50e9adbc43dc8fb679e22aa0483a3ec73244bdb2bbfe0b5",
       "source": "app/screenshots/B2_home_disconnected_light.png",
       "source_sha256": "9385b13f9cb904fe04d16483541630b1838298162622087c1761d0ec2f0a1534",
       "caption": "Status at a glance, connect in one tap"
     },
     {
       "file": "5-C2_profiles_list_light.png",
+      "sha256": "46a5451e70e4fc8e44b91b299fbd22131ca778d1e9ac99778a672879467b762e",
       "source": "app/screenshots/C2_profiles_list_light.png",
       "source_sha256": "cfd7bfa7a882c004c003e1d38e868cc59cc7dd23ec15fd744cb67c168796f4d9",
       "caption": "A profile for each proxy you use"
     },
     {
       "file": "6-F2_logs_light.png",
+      "sha256": "2a09c6b4ffa1af1ccac28c7b4ad369e4e27594b6fa081170d91b8db428e6b33d",
       "source": "app/screenshots/F2_logs_light.png",
       "source_sha256": "06d13b1497b49ddac56658d116e6de0731e2ca875d69726c898e8ea7e0c78476",
       "caption": "A diagnostic log kept on this phone only"
     },
     {
       "file": "7-B4_home_connected_dark.png",
+      "sha256": "6b4883a1d39e48d8ab9a4dc52b8bcd10dd3353581c7e168684966bc690a39b97",
       "source": "app/screenshots/B4_home_connected_dark.png",
       "source_sha256": "e0a49b1ddafe71f8dd10707654d8f0866ae14f4190400f29d771ab41fa856989",
       "caption": "Dark theme"
     },
     {
       "file": "8-G2_privacy_policy_light.png",
+      "sha256": "98cccbde3ad43e86ef788bc82ed7442fed4bc7f062d5e66eae2d60efc7ea1ab1",
       "source": "app/screenshots/G2_privacy_policy_light.png",
       "source_sha256": "755c178ff1a1aba94535b9b359672fdfd20fd8bd8f73111a5a7bc271bcf89598",
       "caption": "The privacy policy, in the app"
     }
-  ]
+  ],
+  "icon_sha256": "392ff486cff3e7fae79474db380da094b0af2d4998876f9b5eede0d652e6cf52",
+  "feature_graphic_sha256": "2818c0db78226e45199e395cc510859a406f737208066b4ec8bf3afc45c6f6b7"
 }

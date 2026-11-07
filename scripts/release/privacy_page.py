@@ -3,12 +3,12 @@
 page, written from the app's own strings — the same source as the in-app policy and docs/m9/privacy-policy.md, so the
 three cannot differ (scripts/tests/test_privacy_page.py checks the page's text against the document's).
 
-    scripts/release/privacy_page.py --out site [--contact EMAIL]     writes site/privacy.html and site/index.html
+    scripts/release/privacy_page.py --out site [--contact EMAIL] [--developer NAME]     writes site/privacy.html, index.html
 
-The contact (decision D10: the support address the listing shows) is given at build time — pages.yml passes the
-repository variable PROXYFLOW_SUPPORT_EMAIL — and the page then names it as the way to reach the developer, as Play's
-User Data policy asks of a linked policy (a point of contact); without it the page says what the app says: the contact
-details on the Google Play page.
+The contact (decision D10: the support address the listing shows) and the developer's name as Play Console shows it
+are given at build time — pages.yml passes the repository variables PROXYFLOW_SUPPORT_EMAIL and PROXYFLOW_DEVELOPER_NAME
+— and the page then names both, as Play's User Data policy asks of a linked policy (the entity, a point of contact);
+without them the page says what the app says: the contact details on the Google Play page.
 
 Published by .github/workflows/pages.yml at https://<owner>.github.io/<repository>/privacy.html once the owner turns
 GitHub Pages on for the repository (Settings → Pages → Source: GitHub Actions). The page is one file: no script, no
@@ -50,13 +50,14 @@ def page(title: str, body: str, description: str) -> str:
     )
 
 
-def contact_html(contact: str | None) -> str:
+def contact_html(contact: str | None, developer: str | None = None) -> str:
+    who = html.escape(developer) if developer else "ProxyFlow's developer, as named on its Google Play page"
     if contact:
-        return f'<p>Contact: <a href="mailto:{html.escape(contact)}">{html.escape(contact)}</a> (ProxyFlow\'s developer, as named on its Google Play page).</p>\n'
-    return "<p>Contact: the contact details on ProxyFlow's Google Play page.</p>\n"
+        return f'<p>Contact: <a href="mailto:{html.escape(contact)}">{html.escape(contact)}</a> ({who}).</p>\n'
+    return f"<p>Contact: {who}, through the contact details on ProxyFlow's Google Play page.</p>\n"
 
 
-def privacy_html(contact: str | None = None) -> str:
+def privacy_html(contact: str | None = None, developer: str | None = None) -> str:
     text = privacy_policy.strings()
     parts = [
         f"<h1>ProxyFlow — {html.escape(text['privacy_title'])}</h1>\n",
@@ -66,19 +67,19 @@ def privacy_html(contact: str | None = None) -> str:
     for title, paragraphs in privacy_policy.sections():
         parts.append(f"<h2>{html.escape(text[title])}</h2>\n")
         parts.extend(f"<p>{html.escape(text[p])}</p>\n" for p in paragraphs)
-    parts.append(contact_html(contact))
+    parts.append(contact_html(contact, developer))
     parts.append('<footer><p>This page is the policy the app shows under About &amp; privacy → Privacy policy, published from the same text. <a href="./">ProxyFlow</a></p></footer>\n')
     return page("ProxyFlow — Privacy policy", "".join(parts), text["privacy_summary"])
 
 
-def index_html(contact: str | None = None) -> str:
+def index_html(contact: str | None = None, developer: str | None = None) -> str:
     body = (
         "<h1>ProxyFlow</h1>\n"
         "<p>ProxyFlow is a free Android app that sends your apps' TCP connections through an HTTP (CONNECT) or SOCKS5 proxy "
         "you already have. It has no account and no servers of its own, and does not sell or provide proxies. UDP and ping "
         "are blocked while connected, never sent around your proxy; your proxy provider can see which sites you open.</p>\n"
         '<p><a href="privacy.html">Privacy policy</a></p>\n'
-        + contact_html(contact).replace("Contact:", "Support:")
+        + contact_html(contact, developer).replace("Contact:", "Support:")
         + "<footer><p>Google Play and Android are trademarks of Google LLC.</p></footer>\n"
     )
     return page("ProxyFlow", body, "ProxyFlow: your apps' TCP connections, through a proxy you already have.")
@@ -88,15 +89,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", required=True)
     parser.add_argument("--contact", default=os.environ.get("PROXYFLOW_SUPPORT_EMAIL") or None)
+    parser.add_argument("--developer", default=os.environ.get("PROXYFLOW_DEVELOPER_NAME") or None, help="the developer name as Play Console shows it")
     args = parser.parse_args(argv)
     if args.contact and ("@" not in args.contact or any(c in args.contact for c in "<>\"' ")):
         print(f"not an e-mail address: {args.contact!r}", file=sys.stderr)
         return 2
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, "privacy.html"), "w", encoding="utf-8") as f:
-        f.write(privacy_html(args.contact))
+        f.write(privacy_html(args.contact, args.developer))
     with open(os.path.join(args.out, "index.html"), "w", encoding="utf-8") as f:
-        f.write(index_html(args.contact))
+        f.write(index_html(args.contact, args.developer))
     if not args.contact:
         print("::warning title=Privacy page::no contact address: set the repository variable PROXYFLOW_SUPPORT_EMAIL (decision D10) so the page names one")
     with open(os.path.join(args.out, ".nojekyll"), "w", encoding="utf-8") as f:

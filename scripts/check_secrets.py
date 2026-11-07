@@ -78,26 +78,29 @@ CONTENT_RULES = [
         r"^\s*(?:storePassword|keyPassword|store\.password|key\.password)\s*[=:]\s*\S",
         paths=r"\.properties$",
     ),
-    # M11 (A-2): a signing password as an unquoted value in any text file ("storePassword=hunter22" in notes.txt), the
-    # value neither a reference ($, {, <, () nor a comment; a build script's quoted form is the rule above.
+    # M11 (A-2, F-5): a signing password as an unquoted value in any text file ("storePassword=hunter22" in notes.txt,
+    # with or without a trailing comment), the value neither a reference ($, {, <, () nor a comment; a build script's
+    # quoted form is the rule above.
     _content(
         "signing password written as a literal value",
-        r"^\s*(?:storePassword|keyPassword|store\.password|key\.password)\s*[=:]\s*[^\s\"'$<{(#]{4,}\s*$",
+        r"^\s*(?:storePassword|keyPassword|store\.password|key\.password)\s*[=:]\s*[^\s\"'$<{(#]{4,}\s*(#.*)?$",
     ),
-    # M11 (A-2): a keystore or private key as base64 (a PKCS12 or DER file starts with 0x30 0x82, which is "MII" in
-    # base64): 200 or more base64 characters beginning so, in any text file. A PEM certificate's body is excluded by its
-    # own "-----BEGIN CERTIFICATE-----" line (a certificate is public), which the allow marker also covers.
-    _content("keystore or private key as base64", r"(?<![A-Za-z0-9+/])MII[A-Za-z0-9+/]{197,}"),
+    # M11 (A-2): a keystore or private key as base64 on one line (a PKCS12 or DER file starts with 0x30 0x82, "MII" in
+    # base64; a JKS with FE ED FE ED, "/u3+7Q"): 200 or more base64 characters beginning so, in any text file. Wrapped
+    # base64 (several lines) is joined and read by check_blobs; a PEM certificate's body (public) is left out there.
+    _content("keystore or private key as base64", r"(?<![A-Za-z0-9+/_-])(MII|/u3\+7Q)[A-Za-z0-9+/_-]{194,}"),
     _content("credential written as a quoted literal", _CREDENTIAL_NAME + r"\s*[:=]\s*[\"'][^\"'$<{(\s]{4,}[\"']"),
     _content(
         "credential written as a literal value",
         r"^\s*(?:export\s+)?" + _CREDENTIAL_NAME + r"\s*[:=]\s*[^\s\"'$<{(#]{4,}",
         paths=_KEY_VALUE_FILES,
     ),
-    # M11 (A-2): the same at the start of a line of any text file ("PROXYFLOW_KEYSTORE_PASSWORD=hunter22" in notes).
+    # M11 (A-2, F-5): the same at the start of a line of any text file ("PROXYFLOW_KEYSTORE_PASSWORD=hunter22" or
+    # "PROXYFLOW_KEYSTORE_PASSWORD: hunter22" in notes, a trailing comment allowed), in either case.
     _content(
         "credential written as a literal value",
-        r"^\s*(?:export\s+)?" + _CREDENTIAL_NAME + r"\s*=\s*[^\s\"'$<{(#]{4,}\s*$",
+        r"(?i)^\s*(?:export\s+)?[a-z][a-z0-9_]*_(?:password|passwd|secret|token|api_key|keystore_base64|private_key)"
+        r"\s*[:=]\s*(?!(?:true|false|null|none|yes|no|nil)\b)[^\s\"'$<{(#]{4,}\s*(#.*)?$",
     ),
 ]
 
@@ -116,18 +119,59 @@ def check_name(path: str) -> list[Finding]:
 # M11 (A-2): a keystore under any name, by its first bytes: a JKS file starts with FE ED FE ED; a PKCS12 (or any DER)
 # file with 30 82 (a SEQUENCE with a two-byte length) followed, for PKCS12, by a version INTEGER of 3 (02 01 03).
 def check_binary(path: str, data: bytes) -> list[Finding]:
+    """A keystore by its first bytes: JKS (FE ED FE ED); PKCS12 — a DER SEQUENCE with a two-, three- or four-byte
+    length (30 82, 30 83, 30 84: a store of 64 KiB or more, with a CA chain, has three) followed by the version INTEGER 3."""
     if data.startswith(b"\xfe\xed\xfe\xed"):
         return [Finding("signing keystore (JKS by content)", path)]
-    if data.startswith(b"\x30\x82") and len(data) > 8 and data[4:7] == b"\x02\x01\x03":
-        return [Finding("PKCS12 keystore by content", path)]
+    if len(data) > 10 and data[0] == 0x30 and data[1] in (0x82, 0x83, 0x84):
+        offset = 2 + (data[1] - 0x80)
+        if data[offset : offset + 3] == b"\x02\x01\x03":
+            return [Finding("PKCS12 keystore by content", path)]
     return []
+
+
+_BASE64_LINE = re.compile(rb"^[A-Za-z0-9+/=_-]{60,80}$")
+
+
+def check_blobs(path: str, data: bytes) -> list[Finding]:
+    """A keystore pasted as wrapped base64 (what `base64` prints without -w0: 76-column lines): three or more
+    consecutive base64 lines are joined, and the first bytes they decode to are checked like a binary file (M11, F-5).
+    The lines of a PEM certificate (between BEGIN/END CERTIFICATE) are a public certificate and are left out."""
+    import base64
+    import binascii
+
+    findings = []
+    run: list[bytes] = []
+    start = 0
+    in_certificate = False
+    lines = data.splitlines()
+    for number, line in enumerate(lines + [b""], start=1):
+        stripped = line.strip()
+        if stripped.startswith(b"-----BEGIN CERTIFICATE"):
+            in_certificate = True
+        elif stripped.startswith(b"-----END CERTIFICATE"):
+            in_certificate = False
+        if _BASE64_LINE.match(stripped) and not in_certificate and ALLOW_MARKER not in line:
+            if not run:
+                start = number
+            run.append(stripped)
+            continue
+        if len(run) >= 3:
+            joined = b"".join(run).replace(b"-", b"+").replace(b"_", b"/")
+            try:
+                head = base64.b64decode(joined[:64] + b"=" * (-len(joined[:64]) % 4), validate=False)
+            except (binascii.Error, ValueError):
+                head = b""
+            findings += [Finding(f.label + " (wrapped base64)", f"{path}:{start}") for f in check_binary(path, head + b"\0" * 16)]
+        run = []
+    return findings
 
 
 def check_content(path: str, data: bytes) -> list[Finding]:
     if b"\0" in data[:8000]:  # binary, as git decides it: only its first bytes are read
         return check_binary(path, data)
+    findings = check_blobs(path, data)
     rules = [rule for rule in CONTENT_RULES if rule.paths is None or rule.paths.search(path)]
-    findings = []
     for number, line in enumerate(data.splitlines(), start=1):
         if ALLOW_MARKER in line:
             continue
@@ -222,11 +266,22 @@ def self_test() -> int:
         (".env", "export DB_" + "PASSWORD=hunter22"),
         ("ci.yml", "  SIGNING_" + "SECRET: hunter22"),
         ("release.txt", "PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22"),
+        ("b.txt", "PROXYFLOW_KEYSTORE_" + "PASSWORD: hunter22hunter22"),
+        ("c.txt", "proxyflow_keystore_" + "password=hunter22hunter22"),
+        ("d.txt", "PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22 # my pw"),
         ("signing.cfg", store + "=hunter22"),
+        ("e.cfg", store + " = hunter22   # prod"),
         ("notes.yml", "PROXYFLOW_KEYSTORE_" + "BASE64: " + "MII" + "A" * 300),
         ("notes.md", "the keystore: " + "MII" + "Q" * 240 + "=="),
+        ("jks.txt", "/u3+7Q" + "A" * 240),
+        ("wrapped.txt", "\n".join(["MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["A" * 76] * 4)),
+        ("wrapped-jks.txt", "\n".join(["/u3+7QAAAAIAAAABAAAAAQAIcHJveHlmbG93AAABkQ" + "A" * 34] + ["A" * 76] * 3)),
     ]
-    binary_hits = [("release.bin", b"\xfe\xed\xfe\xed" + b"\0" * 100), ("upload.dat", b"\x30\x82\x12\x34\x02\x01\x03" + b"\0" * 100)]
+    binary_hits = [
+        ("release.bin", b"\xfe\xed\xfe\xed" + b"\0" * 100),
+        ("upload.dat", b"\x30\x82\x12\x34\x02\x01\x03" + b"\0" * 100),
+        ("big.dat", b"\x30\x83\x01\x12\x34\x02\x01\x03" + b"\0" * 100),
+    ]
     binary_passes = [("a.png", b"\x89PNG\r\n\x1a\n" + b"\0" * 100), ("cert.der", b"\x30\x82\x05\x00\x30\x82\x03" + b"\0" * 100)]
     content_passes = [
         ("keystore.properties.example", store + "="),
@@ -238,8 +293,14 @@ def self_test() -> int:
         ("Notes.kt", 'val x = "' + "AKIA" + "Q" * 17 + '"'),
         ("allowed.txt", "ghp_" + k + "  # check-secrets: " + "allow"),
         ("README.md", "storePassword=       # left empty"),
+        ("Screen.kt", "                hasSaved" + "Password = true,"),
+        ("Vm.kt", "            keepsSaved" + "Password = keeps,"),
+        ("flags.ini", "keystore_" + "password = false"),
         ("sha.txt", "a" * 64),
         ("cert.pem", "MIIB" + "a" * 60),
+        ("cert.pem", "-----BEGIN CERTIFICATE-----\n" + "\n".join(["MIIDszCCAp" + "a" * 54] + ["a" * 64] * 5) + "\n-----END CERTIFICATE-----"),
+        ("hashes.txt", "\n".join(["a" * 64] * 5)),
+        ("notes.md", "the fingerprint SHA256: " + ":".join(["AB"] * 32)),
     ]
     failures = []
     for label, names in caught.items():

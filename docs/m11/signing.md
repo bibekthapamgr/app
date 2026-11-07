@@ -117,8 +117,9 @@ not shared (review A-10; a trade-off for keeping the release workflow one file t
 
 `BUNDLETOOL_SHA256` is `bundletool-all-1.18.3.jar`'s SHA-256 as downloaded from
 `https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar` on 2026-11-07
-(32,520,401 bytes): `a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29`, the same the workflow's
-`bundletool` notice printed in run 42359705613. A new bundletool version changes both lines together.
+(32,520,401 bytes): `a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29` — computed by review A from its own
+download, and the same the workflow's `bundletool` notice printed in run 42361983214 (pinned). A new bundletool version
+changes both lines together.
 
 ## 5. The owner's steps (once)
 

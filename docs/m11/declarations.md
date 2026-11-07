@@ -54,7 +54,9 @@ the committed document differs (`scripts/tests/test_privacy_policy.py`); `script
 (`scripts/tests/test_privacy_page.py`). `.github/workflows/pages.yml` builds the site on every push and deploys it from
 `main` once the owner has turned GitHub Pages on (Settings → Pages → Build and deployment → Source: GitHub Actions) and
 set the repository variable `PAGES_ENABLED` to `true` (Settings → Secrets and variables → Actions → Variables): until
-then the deploy job is skipped. The page has no script and fetches nothing. Decision D9 (where the policy is published;
+then the deploy job is skipped. The page names the support address (decision D10) from the repository variable
+`PROXYFLOW_SUPPORT_EMAIL`, as a `mailto:` link beside the developer's name as Play shows it; until the variable is set,
+the `pages` run warns and the page says what the app says — the contact details on the Google Play page. The page has no script and fetches nothing. Decision D9 (where the policy is published;
 the support contact): GitHub Pages at `https://bibekthapamgr.github.io/app/privacy.html`, unless the owner names
 another address, in which case the listing and this document change with it. A policy page that says "version X" is
 regenerated with every release (the version line comes from `app/build.gradle.kts`), so the page always describes the
@@ -133,6 +135,6 @@ no location, contacts, files, camera, microphone, identifiers or advertising ID 
 | New apps and updates target Android 16 (API 36) or higher from 31 August 2026 (extension to 1 November 2026, now past) | targetSdk 36, compileSdk 36 | `gradle/libs.versions.toml`; the release workflow's "Release version" notice reads it from the APK |
 | App Bundle, signed, with Play App Signing | `release.yml`, upload key only; Google-generated app signing key | `docs/m11/signing.md` |
 | Personal developer accounts created after 13 November 2023: a closed test with at least 12 testers opted in continuously for 14 days, then "Apply for production" (review usually 7 days or less) | The owner's account's creation date decides (decision D10, question 1 of `docs/m11/release-checklist.md`); the closed-testing plan is `docs/m11/release-checklist.md` §4 | — |
-| 64-bit native code | The engine AAR ships arm64-v8a and x86_64 (64-bit) and armeabi-v7a (32-bit phones); no x86 | `engine/build-aar.sh`; the bundle's `bundle-validate.txt` |
+| 64-bit native code | The release ships native code for arm64-v8a and x86_64 (64-bit), armeabi-v7a and x86 (32-bit): the engine's `libgojni.so` for the first three (`engine/build-aar.sh`), and a library of a dependency for all four, named in the release run's "Release bundle" notice and `release-facts.txt` (`native-libraries=`; run 42361983214 saw `native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'`). Play's 64-bit rule is met; a phone gets only its own ABI's split | `release-facts.txt`; the bundle's `bundle-validate.txt` |
 | No restricted permissions without a use case | None requested (no SMS, call log, location, accessibility, all-files) | `scripts/check_release_manifest.py` |
 | Deceptive behaviour, metadata, families: none of the triggers | The listing says what the app is and is not; the claims checker | `scripts/check_listing_claims.py` |

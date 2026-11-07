@@ -77,6 +77,41 @@ class Claims(unittest.TestCase):
     def test_a_denial_in_another_sentence_does_not_cover_the_claim(self) -> None:
         self.assertTrue(listing.check(doc(full=FULL + " Not a VPN. Hides your IP address.")))
 
+    def test_a_denial_of_something_else_covers_nothing(self) -> None:
+        for text in (
+            "No account needed, and it hides your IP address.",
+            "Not only fast: it works with every app.",
+            "There is no limit: all your traffic goes through the proxy.",
+            "Never slow, protects your privacy.",
+            "Whether or not you pay, your traffic is protected.",
+            "It is not a VPN service - browse anonymously.",
+            "Not only does it hide your IP, it is fast.",
+            "Not just a proxy, it hides your IP address.",
+            "Not slow, protects your privacy.",
+            "It is not slow and it hides your IP address.",
+            "Not a VPN, hides your IP address.",
+            "Does not need an account and hides your IP.",
+            "Isn't it great that it protects you?",
+            "It does not sell proxies and makes you anonymous.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(listing.check(doc(full=FULL + " " + text)), text)
+
+    def test_ordinary_denials_are_allowed(self) -> None:
+        for text in (
+            "ProxyFlow cannot make you anonymous.",
+            "ProxyFlow can't hide your IP address.",
+            "It won't hide your IP address.",
+            "It neither hides your IP address nor makes you anonymous.",
+            "No guarantee of anything.",
+            "There is no protection against a provider that logs.",
+            "ProxyFlow is no system-wide VPN.",
+            "It does not hide your IP address from your proxy.",
+            "ProxyFlow is not a system-wide VPN.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(listing.check(doc(full=FULL + " " + text)), [], text)
+
     def test_plays_lengths_and_title_words(self) -> None:
         self.assertTrue(any("over Play's 30" in p for p in listing.check(doc(title="P" * 31))))
         self.assertTrue(any("over Play's 80" in p for p in listing.check(doc(short="s" * 81))))
@@ -84,7 +119,15 @@ class Claims(unittest.TestCase):
         self.assertTrue(any("over Play's 500" in p for p in listing.check(doc(notes="n" * 501))))
         self.assertTrue(any("promotional" in p for p in listing.check(doc(title="ProxyFlow Free"))))
         self.assertTrue(any("promotional" in p for p in listing.check(doc(captions=("The best proxy app", "Two")))))
+        self.assertTrue(any("promotional" in p for p in listing.check(doc(title="ProxyFlow - #1 Proxy"))))
+        self.assertTrue(any("promotional" in p for p in listing.check(doc(captions=("#1 proxy app", "Two")))))
+        self.assertTrue(any("promotional" in p for p in listing.check(doc(title="ProxyFlow No. 1"))))
         self.assertTrue(any("emoji" in p for p in listing.check(doc(title="ProxyFlow 🚀"))))
+        self.assertTrue(any("emoji" in p for p in listing.check(doc(title="ProxyFlow ⭐"))))
+        self.assertTrue(any("emoji" in p for p in listing.check(doc(title="ProxyFlow 🇯🇵"))))
+        self.assertTrue(any("emoji" in p for p in listing.check(doc(captions=("Fast ‼", "Two")))))
+        self.assertTrue(any("emoji" in p for p in listing.check(doc(captions=("ProxyFlow™", "Two")))))
+        self.assertEqual([p for p in listing.check(doc(title="ProxyFlow – proxy client")) if "emoji" in p], [])
         self.assertTrue(any("capitals" in p for p in listing.check(doc(title="PROXYFLOW"))))
         self.assertEqual(listing.check(doc(full=FULL + " It is free.")), [])
 
@@ -92,6 +135,8 @@ class Claims(unittest.TestCase):
         self.assertTrue(any("left to fill in" in p for p in listing.check(doc(short="Contact ‹e-mail›"))))
         self.assertTrue(any("no ```listing-notes" in p for p in listing.check(doc().replace("```listing-notes", "```text"))))
         self.assertEqual(listing.left_to_owner("| e-mail | ‹the owner's› |"), ["‹the owner's›"])
+        self.assertEqual(listing.left_to_owner("| e-mail | `‹the owner's›` |"), ["‹the owner's›"])
+        self.assertEqual(listing.left_to_owner("anything left to fill in (`‹…›`)"), [])
 
     def test_the_limitations_must_be_stated(self) -> None:
         for missing, text in (
