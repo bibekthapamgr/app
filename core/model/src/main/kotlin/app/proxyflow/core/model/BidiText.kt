@@ -11,4 +11,4 @@ package app.proxyflow.core.model
 fun isolatedText(text: String): String = "\u2068" + text.filterNot(::isDirectionalFormatting) + "\u2069"
 
 /** U+202A–U+202E (LRE, RLE, PDF, LRO, RLO) and U+2066–U+2069 (LRI, RLI, FSI, PDI). */
-internal fun isDirectionalFormatting(c: Char): Boolean = c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069'
+private fun isDirectionalFormatting(c: Char): Boolean = c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069'
