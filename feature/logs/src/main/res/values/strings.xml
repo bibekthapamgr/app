@@ -59,6 +59,7 @@
     <string name="logs_event_reconnect_proxy">Reconnecting: connections to the proxy kept failing</string>
     <string name="logs_event_reconnect_network_back">Reconnecting: the phone has a network again</string>
     <string name="logs_event_reconnect_network_changed">Reconnecting: the phone moved to another network</string>
+    <string name="logs_event_reconnect_sign_in_gone">Reconnecting: the network no longer asks for a sign-in</string>
     <string name="logs_event_reconnect_unanswered">Reconnecting: the proxy left connection requests unanswered</string>
     <string name="logs_event_reconnect_always_on">Trying again: connecting for Always-on VPN failed</string>
     <string name="logs_event_always_on_requested">Android started ProxyFlow for Always-on VPN</string>
@@ -85,6 +86,9 @@
     </plurals>
     <string name="logs_event_offline">No network — traffic held</string>
     <string name="logs_event_network_changed">Network changed to %1$s</string>
+    <!-- M10: Android found a sign-in page (a captive portal) on the phone's network (%1$s: Wi-Fi, mobile data…), or no longer does. -->
+    <string name="logs_event_sign_in_page">Sign-in page on %1$s: it may carry nothing until you sign in</string>
+    <string name="logs_event_sign_in_page_gone">No sign-in page on %1$s any more</string>
     <string name="logs_event_stopped">Disconnected</string>
     <string name="logs_event_stopped_profile_deleted">Disconnected: the profile was deleted</string>
     <string name="logs_event_revoked">Disconnected by Android</string>
@@ -145,6 +149,7 @@
     <string name="logs_hint_credentials">Enter the password again in the profile.</string>
     <string name="logs_hint_always_on_no_profile">Android started ProxyFlow as your Always-on VPN, but no proxy was chosen. Connect once from Home with the proxy Always-on VPN should use.</string>
     <string name="logs_hint_interrupted">Android removed the VPN with ProxyFlow\'s process: apps used your normal network until ProxyFlow connected again, unless Android\'s system kill switch was on. Set it up in Settings, System kill switch.</string>
+    <string name="logs_hint_sign_in_page">Sign in from Android\'s notification. If its page doesn\'t open while ProxyFlow is on, stop ProxyFlow first.</string>
     <string name="logs_hint_revoked">Another VPN app was turned on, or ProxyFlow\'s VPN permission was removed. Reconnect from Home.</string>
     <string name="logs_hint_internal">Connect again from Home. If it happens again, export this log for support.</string>
     <string name="logs_hint_permission">Connect again from Home and allow Android\'s VPN request. If another VPN app is set to Always-on, turn that off first.</string>

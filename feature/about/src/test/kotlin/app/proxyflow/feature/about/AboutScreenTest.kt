@@ -76,7 +76,7 @@ class AboutScreenTest {
             "connectivitycheck.gstatic.com on port 443",
             "ProxyFlow itself sends nothing to its developer",
             "Google may show them to ProxyFlow's developer",
-            "Profile names are hidden on the lock screen",
+            "works only once the phone is unlocked. They name no profile, so the lock screen shows none",
             "This policy describes ProxyFlow version 0.9.0 (9).",
         )) {
             compose.onNode(hasScrollAction()).performScrollToNode(hasText(text, substring = true))

@@ -223,8 +223,10 @@ type Snapshot struct {
 	ICMPEchoRepliesBlock  uint64           `json:"icmp_echo_replies_blocked"`  // replies the stack produced anyway, discarded
 	ICMPFragmentsDrop     uint64           `json:"icmp_fragments_dropped"`     // other fragments of ICMP packets, either direction
 	Goroutines            int              `json:"goroutines"`                 // whole process
-	RSSKiB                int64            `json:"rss_kib"`
-	HeapInuseKiB          uint64           `json:"heap_inuse_kib"`
+	RSSKiB                int64            `json:"rss_kib"`                    // whole process (the app's too)
+	HeapInuseKiB          uint64           `json:"heap_inuse_kib"`             // the Go heap in use
+	StackInuseKiB         uint64           `json:"stack_inuse_kib"`            // goroutine stacks
+	GoHeldKiB             uint64           `json:"go_held_kib"`                // what the Go runtime holds from the OS: the engine's share of RSSKiB, at most
 }
 
 // Status is the small, cheap part of the engine state, for frequent polling.
@@ -347,6 +349,8 @@ func (e *Engine) Stats() Snapshot {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	snap.HeapInuseKiB = ms.HeapInuse / 1024
+	snap.StackInuseKiB = ms.StackInuse / 1024
+	snap.GoHeldKiB = (ms.Sys - ms.HeapReleased) / 1024
 	return snap
 }
 

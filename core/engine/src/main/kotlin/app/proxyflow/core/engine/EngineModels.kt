@@ -119,7 +119,14 @@ data class EngineStats(
     val dns: Map<String, Long> = emptyMap(),
     @SerialName("fake_dns_mappings") val fakeDnsMappings: Int = 0,
     val goroutines: Int = 0,
+    /** The whole process's resident memory: the app's as well as the engine's (the engine runs in the app's process). */
     @SerialName("rss_kib") val rssKib: Long = 0,
+    /** The Go heap in use: the engine's own allocations, its buffers and the network stack's among them. */
+    @SerialName("heap_inuse_kib") val heapInuseKib: Long = 0,
+    /** The goroutines' stacks. */
+    @SerialName("stack_inuse_kib") val stackInuseKib: Long = 0,
+    /** What the Go runtime holds from Android (heap, stacks and its own): the engine's share of [rssKib], at most. */
+    @SerialName("go_held_kib") val goHeldKib: Long = 0,
 ) {
     val state: EngineState get() = EngineState.of(stateName)
 }

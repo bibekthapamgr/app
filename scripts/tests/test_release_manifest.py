@@ -334,5 +334,105 @@ class PackagedResourcesTest(unittest.TestCase):
         self.assertTrue(any("xml-v31" in p and "read strictly" in p for p in problems), problems)
 
 
+def uleb(value: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        out.append(byte | (0x80 if value else 0))
+        if not value:
+            return bytes(out)
+
+
+def dex(classes: list[str], methods: list[tuple[str, str]] = (), fields: list[tuple[str, str]] = (), extra: list[str] = ()) -> bytes:
+    """A minimal dex file: the header's string, type, field, method and class tables — the classes [classes] defines, and
+    [methods] and [fields] as (class, name) ids — and nothing else (prototypes and class data are left out)."""
+    types = sorted({c for c in classes} | {c for c, _ in methods} | {c for c, _ in fields})
+    strings = sorted(set(types) | {n for _, n in methods} | {n for _, n in fields} | set(extra))
+    index = {text: i for i, text in enumerate(strings)}
+    type_index = {t: i for i, t in enumerate(types)}
+    header = bytearray(0x70)
+    header[:8] = b"dex\n035\0"
+    tables = bytearray()
+    at = 0x70
+
+    def table(count_at: int, rows: list[bytes]) -> None:
+        nonlocal at
+        header[count_at : count_at + 4] = len(rows).to_bytes(4, "little")
+        header[count_at + 4 : count_at + 8] = at.to_bytes(4, "little")
+        for row in rows:
+            tables.extend(row)
+        at += sum(len(row) for row in rows)
+
+    string_ids_at = at
+    table(56, [b"\0\0\0\0"] * len(strings))  # filled below, once the data's place is known
+    table(64, [index[t].to_bytes(4, "little") for t in types])
+    table(80, [type_index[c].to_bytes(2, "little") + b"\0\0" + index[n].to_bytes(4, "little") for c, n in fields])
+    table(88, [type_index[c].to_bytes(2, "little") + b"\0\0" + index[n].to_bytes(4, "little") for c, n in methods])
+    table(96, [type_index[c].to_bytes(4, "little") + bytes(28) for c in classes])
+    data = bytearray()
+    for i, text in enumerate(strings):
+        offset = at + len(data)
+        tables[string_ids_at - 0x70 + 4 * i : string_ids_at - 0x70 + 4 * i + 4] = offset.to_bytes(4, "little")
+        data += uleb(len(text)) + text.encode("utf-8") + b"\0"
+    return bytes(header + tables + data)
+
+
+def engine_dex(leave_out: str = "") -> bytes:
+    """What the engine's JNI layer needs, as R8 keeps it, but for [leave_out] (a class, "Class.method" or "Class.field")."""
+    classes = [c for c in check_release_manifest.ENGINE_CLASSES if c != leave_out]
+    methods = [(c, m) for c, names in check_release_manifest.ENGINE_METHODS.items() for m in names if f"{c}.{m}" != leave_out]
+    fields = [(c, f) for c, names in check_release_manifest.ENGINE_FIELDS.items() for f in names if f"{c}.{f}" != leave_out]
+    return dex(classes, methods, fields)
+
+
+class EngineNamesTest(unittest.TestCase):
+    """M10: the release APK's dex files must still define what the engine's JNI layer finds by name, after R8."""
+
+    def apk(self, dexes: dict[str, bytes]) -> str:
+        import zipfile
+
+        path = os.path.join(self.enterContext(tempfile.TemporaryDirectory()), "app-release.apk")
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, data in dexes.items():
+                archive.writestr(name, data)
+            archive.writestr("AndroidManifest.xml", b"binary")
+        return path
+
+    def test_everything_kept_passes_across_dex_files(self):
+        other = dex(["La/b;"], [("La/b;", "a")], extra=["x" * 200])  # a class R8 renamed; a two-byte ULEB128 length
+        problems, facts = check_release_manifest.check_engine_names(self.apk({"classes.dex": other, "classes2.dex": engine_dex()}))
+        self.assertEqual([], problems)
+        self.assertIn("(2)", facts[0])
+        classes, methods, fields = check_release_manifest.dex_tables(engine_dex())
+        self.assertIn("Lgo/Seq$Ref;", classes)
+        self.assertIn(("Lgo/Seq;", "getRef"), methods)
+        self.assertEqual({("Lgo/Seq$Ref;", "obj")}, fields)
+
+    def test_a_renamed_class_method_or_field_fails(self):
+        for leave_out in [
+            "Lgo/Seq;",
+            "Lgo/Seq;.incGoObjectRef",
+            "Lapp/proxyflow/engine/go/pfengine/Platform;.verifyChain",
+            "Lgo/Seq$Ref;.obj",
+            "Lapp/proxyflow/engine/go/pfengine/Pfengine$proxyPlatform;",
+            "Lapp/proxyflow/engine/go/pfengine/Pfengine$proxyPlatform;.<init>",
+        ]:
+            problems, _ = check_release_manifest.check_engine_names(self.apk({"classes.dex": engine_dex(leave_out)}))
+            self.assertEqual(1, len(problems), leave_out)
+            name = leave_out if leave_out.endswith(";") else leave_out.split(";.")[1]  # a class, or a member's name
+            self.assertIn(name, problems[0])
+
+    def test_a_name_only_in_the_string_table_is_not_enough(self):
+        # "protect" is in every dex that calls VpnService.protect: a name used anywhere is not the method defined on the class.
+        crippled = dex([c for c in check_release_manifest.ENGINE_CLASSES], [], [], extra=["protect", "getRef", "obj", "start"])
+        problems, _ = check_release_manifest.check_engine_names(self.apk({"classes.dex": crippled}))
+        self.assertIn("Lgo/Seq;.getRef()", problems[0])
+
+    def test_no_dex_fails(self):
+        problems, _ = check_release_manifest.check_engine_names(self.apk({}))
+        self.assertIn("no dex file", problems[0])
+
+
 if __name__ == "__main__":
     unittest.main()

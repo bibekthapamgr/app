@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.designsystem.theme.isolated
 import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProtocol
@@ -63,7 +64,7 @@ class ProfilesScreenTest {
         }
         compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
         compose.onNodeWithText("Delete").performClick()
-        compose.onNodeWithText("Delete \"Backup SOCKS\"?").assertIsDisplayed()
+        compose.onNodeWithText("Delete \"${isolated("Backup SOCKS")}\"?").assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()
         assertEquals(emptyList<String>(), deleted)
 
@@ -131,7 +132,7 @@ class ProfilesScreenTest {
         }
         compose.onNodeWithContentDescription("More actions for Office HTTP").performClick()
         compose.onNodeWithText("Delete").performClick()
-        compose.onNodeWithText("Disconnect and delete \"Office HTTP\"?").assertIsDisplayed()
+        compose.onNodeWithText("Disconnect and delete \"${isolated("Office HTTP")}\"?").assertIsDisplayed()
         compose.onNodeWithText(
             "ProxyFlow is using this proxy. Deleting it ends the connection first: apps then use your normal network unless " +
                 "Android's system kill switch is on.",
@@ -187,10 +188,10 @@ class ProfilesScreenTest {
         }
         compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
         compose.onNodeWithText("Use this proxy").performClick()
-        compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertIsDisplayed()
+        compose.onNodeWithText("Switch to \"${isolated("Backup SOCKS")}\"?").assertIsDisplayed()
         compose.onNodeWithText(
-            "ProxyFlow is using Office HTTP. Switching ends any open connections through it, and apps can't go online until " +
-                "ProxyFlow is connected through Backup SOCKS.",
+            "ProxyFlow is using ${isolated("Office HTTP")}. Switching ends any open connections through it, and apps can't go " +
+                "online until ProxyFlow is connected through ${isolated("Backup SOCKS")}.",
             substring = true,
         ).assertIsDisplayed()
         compose.onNodeWithText("If that fails, apps stay offline until ProxyFlow reconnects, you try again or you stop.", substring = true)
@@ -207,19 +208,19 @@ class ProfilesScreenTest {
         compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
         compose.onNodeWithText("Use this proxy").performClick()
         state = state.copy(connectedProfileId = null, connectionHoldsTraffic = false)
-        compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertDoesNotExist()
+        compose.onNodeWithText("Switch to \"${isolated("Backup SOCKS")}\"?").assertDoesNotExist()
         assertEquals(listOf("p2"), used)
 
         // A first connect holds nothing yet: the switch only checks the other proxy instead, and the question says so.
         state = connected.copy(connectionHoldsTraffic = false)
         compose.onNodeWithContentDescription("More actions for Backup SOCKS").performClick()
         compose.onNodeWithText("Use this proxy").performClick()
-        compose.onNodeWithText("ProxyFlow is still checking Office HTTP. Switching checks Backup SOCKS instead", substring = true)
-            .assertIsDisplayed()
+        val checking = "ProxyFlow is still checking ${isolated("Office HTTP")}. Switching checks ${isolated("Backup SOCKS")} instead"
+        compose.onNodeWithText(checking, substring = true).assertIsDisplayed()
         // The first connect finishes while the question is open: it says what switching does now.
         state = connected
-        compose.onNodeWithText("ProxyFlow is using Office HTTP. Switching ends any open connections through it", substring = true)
-            .assertIsDisplayed()
+        val using = "ProxyFlow is using ${isolated("Office HTTP")}. Switching ends any open connections through it"
+        compose.onNodeWithText(using, substring = true).assertIsDisplayed()
         compose.onNodeWithText("ProxyFlow is still checking", substring = true).assertDoesNotExist()
         compose.onNodeWithText("Switch").performClick()
         assertEquals(listOf("p2", "p2"), used)
@@ -231,7 +232,7 @@ class ProfilesScreenTest {
         compose.onNodeWithText("Use this proxy").performClick()
         assertEquals(listOf("p2", "p2", "p2"), used)
         state = connected
-        compose.onNodeWithText("Switch to \"Backup SOCKS\"?").assertDoesNotExist()
+        compose.onNodeWithText("Switch to \"${isolated("Backup SOCKS")}\"?").assertDoesNotExist()
     }
 
     @Test

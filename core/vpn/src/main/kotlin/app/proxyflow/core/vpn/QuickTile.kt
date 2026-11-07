@@ -3,6 +3,7 @@ package app.proxyflow.core.vpn
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ProxyProfile
+import app.proxyflow.core.model.isolatedText
 
 /**
  * What the Quick Settings tile (board B11, M9) shows and does, apart from Android's tile API so it can be tested on the
@@ -41,6 +42,25 @@ internal object QuickTile {
                 Content(Look.Off, Line.Off, null)
             }
         }
+    }
+
+    /** What the tile shows as its second line, and what TalkBack reads with its name ([description]) and as its state. */
+    data class Shown(val subtitle: String, val description: String, val stateDescription: String)
+
+    /**
+     * What the tile shows and says for [content]: the line — the profile's name, or ProxyFlow's [words] for it — set in
+     * a first-strong isolate ([isolatedText]), so it reads in its own direction whatever the system UI's (M10-106).
+     * The View tiles of Android 12 to 16 lay the subtitle out in the phone's language's direction, which on a
+     * right-to-left phone would put a name's trailing full stop or leading digit at the wrong end ("2 Office", "Tokyo.")
+     * and turn ProxyFlow's "Connecting…" round; Android 10 and 11, and Android 16's Compose tiles, go by the first letter,
+     * which would turn round a name without one ("2606:4700::1111", an unnamed profile's server: M10-101). The state
+     * description is the same isolated line, so Android 16's Compose tile, which leaves out a subtitle its state
+     * description already holds, reads it once (M10-115); [describe] gets the line as it is.
+     */
+    fun shown(content: Content, words: (Line) -> String, describe: (String) -> String): Shown {
+        val line = if (content.line == Line.Profile) content.profileName.orEmpty() else words(content.line)
+        val isolatedLine = isolatedText(line)
+        return Shown(subtitle = isolatedLine, description = describe(line), stateDescription = isolatedLine)
     }
 
     /**

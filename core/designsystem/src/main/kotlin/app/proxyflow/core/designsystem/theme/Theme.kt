@@ -6,8 +6,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 
 /** ProxyFlow colour roles Material 3 has no slot for (design/tokens). */
 @Immutable
@@ -28,15 +30,18 @@ internal val LocalExtendedColors = staticCompositionLocalOf { LightExtendedColor
 
 /**
  * The app theme. Dynamic colour (Material You) is deliberately off: status
- * colours carry meaning and must stay predictable (docs/m1/05 §2).
+ * colours carry meaning and must stay predictable (docs/m1/05 §2). The type
+ * scale is laid out in the screen's direction ([proxyFlowTypography]).
  */
 @Composable
 fun ProxyFlowTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val extended = if (darkTheme) DarkExtendedColors else LightExtendedColors
+    val layoutDirection = LocalLayoutDirection.current
+    val typography = remember(layoutDirection) { proxyFlowTypography(layoutDirection) }
     CompositionLocalProvider(LocalExtendedColors provides extended) {
         MaterialTheme(
             colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
-            typography = ProxyFlowTypography,
+            typography = typography,
             shapes = ProxyFlowShapes,
             content = content,
         )

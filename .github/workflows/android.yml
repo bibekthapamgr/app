@@ -144,7 +144,12 @@ jobs:
           name: pfengine-aar
           path: engine/build
 
+      # aapt2 refuses an apostrophe without its backslash only at resource merging, minutes in, naming no string (M10-6).
+      - name: String resources Android's resource compiler takes (apostrophes, quotes, escapes)
+        run: python3 scripts/check_strings.py
+
       - name: Design tokens and generated colours agree
+        if: ${{ !cancelled() }}
         run: |
           python3 design/tools/check_contrast.py
           python3 design/tools/generate_compose_colors.py
@@ -197,6 +202,29 @@ jobs:
       - name: Release build (R8, unsigned unless signing secrets are configured)
         if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
         run: ./gradlew :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle-5-release.log"
+
+      # M10's release candidate: the App Bundle Google Play takes, from the same release build (signed in M11).
+      - name: Release App Bundle
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: ./gradlew :app:bundleRelease 2>&1 | tee "$RUNNER_TEMP/gradle-5b-bundle.log"
+
+      # M10: the release APK signed with a key made for this run alone, so the owner's phone checks can install what
+      # ships (Android installs no unsigned APK; docs/m10/physical-phone-checklist.md). Never for Google Play, which
+      # takes the App Bundle signed in M11; kept apart, so the checks below see the release APK alone.
+      - name: Release APK signed for testing (a key of this run alone)
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
+        run: |
+          apk="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | sort | head -1)"
+          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          pass="$(openssl rand -hex 16)"
+          keytool -genkeypair -keystore "$RUNNER_TEMP/test-signing.p12" -storetype PKCS12 -storepass "$pass" -alias test \
+            -keyalg RSA -keysize 3072 -validity 30 -dname "CN=ProxyFlow test build, O=not for distribution" >/dev/null 2>&1
+          mkdir -p app/build/outputs/test-signed
+          "$tools/zipalign" -f -p 4 "$apk" "$RUNNER_TEMP/release-aligned.apk"
+          "$tools/apksigner" sign --ks "$RUNNER_TEMP/test-signing.p12" --ks-pass "pass:$pass" \
+            --out app/build/outputs/test-signed/app-release-test-signed.apk "$RUNNER_TEMP/release-aligned.apk"
+          "$tools/apksigner" verify app/build/outputs/test-signed/app-release-test-signed.apk
+          rm -f "$RUNNER_TEMP/test-signing.p12"
 
       # M8: also what the release APK ships for the manifest's @xml files, read back with aapt2 and checked by content
       # in every configuration it ships.
@@ -269,6 +297,8 @@ jobs:
             app/screenshots/
             app/build/outputs/roborazzi/
             app/build/outputs/apk/
+            app/build/outputs/bundle/
+            app/build/outputs/test-signed/
             core/data/schemas/
           if-no-files-found: warn
 
@@ -308,8 +338,8 @@ jobs:
           git commit --allow-empty -m "Screenshots recorded in CI for $(git rev-parse --short HEAD)"
           git push --force origin "HEAD:refs/heads/ci-screenshots/$HEAD_REF"
 
-  # Real Android runtimes: the oldest supported (minSdk 29), the first with
-  # foreground-service types (34), and current ones (35, 36).
+  # Real Android runtimes: every version the app supports, from minSdk 29 (Android 10) to targetSdk 36
+  # (Android 16) — 29, 34, 35 and 36 since M5, 30–33 since M10's compatibility matrix.
   # - ADR-0006: credentials sealed with Android Keystore keys, the real SQLite, and
   #   every file in the app's data directory checked for plaintext (core/data).
   # - The engine (core/engine): the real libgojni.so carrying TCP through mock SOCKS5
@@ -334,15 +364,26 @@ jobs:
   #   without VPN" (set through the test APK's device owner), and a crash with a planted
   #   sign-in; scripts/m8_evidence.py checks the lab's witness (reached only around
   #   ProxyFlow), the captures and Android's crash report against the steps.
+  # - M10 performance baseline (PerformanceEndToEndTest): time to Connected, connection set-up,
+  #   a dead proxy's connections refused, throughput and its CPU beside the same transfer
+  #   straight through the proxy from the same shell client, memory with 200 connections open
+  #   (idle, and with data in flight), CPU while idle with the screen off; scripts/m10_performance.py
+  #   sets each against the V1 quality bars (docs/m1/01-scope.md §7) and saves m10-performance.json
+  #   with the evidence. A network with a sign-in page (ReconnectEndToEndTest).
+  # - M10 scenarios (scripts/m10_scenarios.sh): Android 13+ without the notification permission,
+  #   connected all the same (N, before the captures stop); then a restart with ProxyFlow as
+  #   Always-on VPN with "Block connections without VPN" (R): Android starts it, it connects by
+  #   itself, and the lab's witness never answers meanwhile; then, on that connection, with no
+  #   instrumentation running, Doze, App Standby's most restricted bucket and Battery Saver (P).
   device:
     needs: engine
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 155
     strategy:
       fail-fast: false
       matrix:
-        api-level: [29, 34, 35, 36]
+        api-level: [29, 30, 31, 32, 33, 34, 35, 36]
     defaults:
       run:
         shell: bash
@@ -350,6 +391,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # The emulator wanted 7.4 GB free to create API 31's data partition, and one runner had 6.6 GB left by then (run
+      # 41875419181: "Not enough space to create userdata partition", so no test ran; M10-96); its capture takes more as
+      # the tests run. Toolchains no job here uses are removed first, the free space logged before and after.
+      - name: Room on the runner's disk for the emulator and its capture
+        run: |
+          echo "free before: $(df -Ph / | awk 'NR==2 {print $4 " of " $2}')"
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift /usr/local/share/powershell \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          echo "free after: $(df -Ph / | awk 'NR==2 {print $4 " of " $2}')"
 
       # Whenever the engine job built it, even if another engine check failed.
       - name: The engine AAR from the engine job
@@ -371,12 +422,42 @@ jobs:
       - id: gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
+      # A string the resource compiler refuses fails the build below minutes in; this, in a second (M10-6).
+      - name: String resources Android's resource compiler takes
+        run: python3 scripts/check_strings.py
+
       # GitHub's Linux runners have KVM, but only root may use it by default.
       - name: Let the emulator use KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+
+      # sdkmanager's downloads sometimes arrive broken ("Error on ZipFile unknown archive": an API 36 system image in run
+      # 41850357364, the emulator in 41869234205, API 35's image in 41883778410), and the emulator step's own install
+      # then fails with no test run (M10-105). Installed here first, each up to three times; that install then finds them.
+      - name: The emulator and the system image, installed (each up to three times)
+        id: sdk
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          for package in emulator "system-images;android-${{ matrix.api-level }};google_apis;x86_64"; do
+            for try in 1 2 3; do
+              if out="$("$sdkmanager" --install "$package" --channel=0 2>&1)"; then
+                echo "$package: installed (try $try)"
+                break
+              fi
+              # Under -e and pipefail, a grep with no match would end the step here: hence || true (M10-122).
+              failed="$(grep -i 'error' <<<"$out" | tail -1 | cut -c1-200)" || true
+              echo "$package: try $try failed; sdkmanager's last lines:"
+              tail -5 <<<"$out" | cut -c1-200
+              if [ "$try" = 3 ]; then
+                echo "::error title=Android SDK (API ${{ matrix.api-level }})::$package did not install in three tries; the last error line: ${failed:-none, its last line: $(tail -1 <<<"$out" | cut -c1-200)}"
+                exit 1
+              fi
+              sleep 15
+            done
+          done
 
       - name: Build the instrumented tests
         run: |
@@ -394,10 +475,12 @@ jobs:
       # uplink resolver is the lab's (10.99.0.54), which logs every name the phone looks up.
       - name: Keystore, storage, engine and VPN tests on an emulator (API ${{ matrix.api-level }}), its uplink captured
         id: emulator
-        if: ${{ !cancelled() && steps.gradle.outcome == 'success' }}
-        # Inside the job's limit, so the evidence, the digest and the upload below still run if the emulator hangs:
-        # boot (up to 15 min), the device tests (up to 55), M8's failure injection (up to 18) and the pulls after it.
-        timeout-minutes: 98
+        if: ${{ !cancelled() && steps.gradle.outcome == 'success' && steps.sdk.outcome == 'success' }}
+        # Inside the job's limit, so the evidence, the digest and the upload below still run if the emulator hangs: the
+        # emulator's setup and boot (up to 20 min), then scripts/e2e_device.sh's own budget of 108 — the uplink, the
+        # device tests (up to 55), M8's failure injection, M10's parts and the pulls between them, each bounded by what is
+        # left of it — and 2 for the action to stop the emulator.
+        timeout-minutes: 130
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}
@@ -409,12 +492,12 @@ jobs:
           disable-animations: true
           script: bash scripts/e2e_device.sh ${{ matrix.api-level }}
 
-      - name: End-to-end evidence (the lab's logs, packet captures, logcat; emitted as annotations)
+      - name: End-to-end evidence and the performance baseline (the lab's logs, packet captures, logcat; emitted as annotations)
         if: ${{ !cancelled() && steps.proxies.outcome == 'success' && steps.emulator.outcome != 'skipped' }}
         run: |
           sudo chmod -R a+rX /tmp/pf
           status=0
-          for check in m5_evidence m6_evidence m7_evidence m8_evidence; do
+          for check in m5_evidence m6_evidence m7_evidence m8_evidence m10_performance; do
             python3 "scripts/$check.py" --api ${{ matrix.api-level }} --pf /tmp/pf \
               --out "$RUNNER_TEMP/m5-api${{ matrix.api-level }}" --host-pcap "$RUNNER_TEMP/emulator-uplink.pcap" || status=1
           done

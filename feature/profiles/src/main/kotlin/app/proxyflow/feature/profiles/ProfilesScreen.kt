@@ -46,6 +46,8 @@ import app.proxyflow.core.designsystem.component.PfTopAppBar
 import app.proxyflow.core.designsystem.icon.PfIcons
 import app.proxyflow.core.designsystem.theme.MonoSmall
 import app.proxyflow.core.designsystem.theme.Spacing
+import app.proxyflow.core.designsystem.theme.inItsOwnDirection
+import app.proxyflow.core.designsystem.theme.isolated
 import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import kotlinx.coroutines.delay
@@ -183,7 +185,7 @@ fun ProfilesScreen(
         PfConfirmDialog(
             title = stringResource(
                 if (inUse) R.string.profiles_disconnect_delete_title else R.string.profiles_delete_title,
-                profile.displayName,
+                isolated(profile.displayName),
             ),
             text = if (inUse) {
                 stringResource(R.string.profiles_disconnect_delete_body) + "\n\n" + stringResource(R.string.profiles_delete_body)
@@ -206,11 +208,11 @@ fun ProfilesScreen(
     }
     if (switchingFrom != null && switchingTo != null) {
         PfConfirmDialog(
-            title = stringResource(R.string.profiles_switch_title, switchingTo.displayName),
+            title = stringResource(R.string.profiles_switch_title, isolated(switchingTo.displayName)),
             text = stringResource(
                 if (state.connectionHoldsTraffic) R.string.profiles_switch_body else R.string.profiles_switch_checking_body,
-                switchingFrom.displayName,
-                switchingTo.displayName,
+                isolated(switchingFrom.displayName),
+                isolated(switchingTo.displayName),
             ),
             confirmLabel = stringResource(R.string.profiles_switch_confirm),
             dismissLabel = stringResource(R.string.profiles_cancel),
@@ -245,7 +247,7 @@ private fun ProfileItem(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     Text(
                         profile.displayName,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium.inItsOwnDirection(),
                         modifier = Modifier.align(Alignment.CenterVertically),
                     )
                     if (active) {

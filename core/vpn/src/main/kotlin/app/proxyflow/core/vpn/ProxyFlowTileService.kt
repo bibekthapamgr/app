@@ -82,27 +82,29 @@ class ProxyFlowTileService : TileService() {
     private fun show(state: ConnectionState, profile: ProxyProfile?, locked: Boolean) {
         val tile = qsTile ?: return
         val content = QuickTile.content(state, profile, locked)
-        val line = when (content.line) {
-            QuickTile.Line.Profile -> content.profileName.orEmpty()
-            QuickTile.Line.Connected -> getString(R.string.tile_connected)
-            QuickTile.Line.Connecting -> getString(R.string.tile_connecting)
-            QuickTile.Line.Reconnecting -> getString(R.string.tile_reconnecting)
-            QuickTile.Line.Offline -> getString(R.string.tile_offline)
-            QuickTile.Line.Blocked -> getString(R.string.tile_blocked)
-            QuickTile.Line.Off -> getString(R.string.tile_off)
-            QuickTile.Line.AddProxy -> getString(R.string.tile_add_proxy)
-        }
+        val shown = QuickTile.shown(content, words = { getString(wordsOf(it)) }, describe = { getString(R.string.tile_description, it) })
         tile.state = when (content.look) {
             QuickTile.Look.On -> Tile.STATE_ACTIVE
             // Never unavailable: Android delivers no tap to an unavailable tile, and "Add a proxy first" opens Home.
             QuickTile.Look.Off -> Tile.STATE_INACTIVE
         }
         tile.label = getString(R.string.tile_label)
-        tile.subtitle = line
+        tile.subtitle = shown.subtitle
         // TalkBack reads the tile's name and what it is doing, not only on or off.
-        tile.contentDescription = getString(R.string.tile_description, line)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) tile.stateDescription = line
+        tile.contentDescription = shown.description
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) tile.stateDescription = shown.stateDescription
         tile.updateTile()
+    }
+
+    private fun wordsOf(line: QuickTile.Line): Int = when (line) {
+        // A profile's name is the content's own, not a resource (QuickTile.shown).
+        QuickTile.Line.Profile, QuickTile.Line.Connected -> R.string.tile_connected
+        QuickTile.Line.Connecting -> R.string.tile_connecting
+        QuickTile.Line.Reconnecting -> R.string.tile_reconnecting
+        QuickTile.Line.Offline -> R.string.tile_offline
+        QuickTile.Line.Blocked -> R.string.tile_blocked
+        QuickTile.Line.Off -> R.string.tile_off
+        QuickTile.Line.AddProxy -> R.string.tile_add_proxy
     }
 
     private fun openApp() {

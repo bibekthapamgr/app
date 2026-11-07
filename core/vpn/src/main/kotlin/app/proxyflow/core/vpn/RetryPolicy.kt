@@ -1,5 +1,6 @@
 package app.proxyflow.core.vpn
 
+import app.proxyflow.core.model.ConnectionError
 import kotlin.math.roundToLong
 
 /**
@@ -31,16 +32,8 @@ data class RetryPolicy(
     }
 
     companion object {
-        /**
-         * Codes an attempt may fail with and still be worth another: the proxy, or the way to it, may come
-         * back. A TLS handshake or protocol failure is often a connection reset in the middle of one.
-         */
-        val RECOVERABLE = setOf(
-            "PROXY_UNREACHABLE", "PROXY_DNS_FAILED", "HANDSHAKE_TIMEOUT", "TLS_HANDSHAKE", "PROTOCOL_ERROR",
-            // The pre-flight check's tunnel failed although the proxy answered: it may have lost its own way out.
-            "TARGET_UNREACHABLE", "TARGET_REFUSED", "PROXY_GENERAL_FAILURE",
-            "INTERNAL",
-        )
+        /** Codes an attempt may fail with and still be worth another (the catalogue's: [ConnectionError.MAY_PASS]). */
+        val RECOVERABLE = ConnectionError.MAY_PASS
 
         /**
          * Answers no retry changes, so one of them stops a connected session at once (docs/m1/04 §4:

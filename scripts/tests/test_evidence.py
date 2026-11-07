@@ -532,7 +532,23 @@ class EvidenceTest(unittest.TestCase):
         to_proxy = f"T {at('02:00:10').timestamp():.3f}\ntcp    3: 0F02000A:9C40 0202000A:0438 01 00000000:00000000 00:00000000 00000000 10200 0 4713\n"
         status, printed = self.run_viewed(uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.PROXY_SYN], connecting=to_proxy)
         self.assertEqual(0, status, printed)
-        self.assertIn("ProxyFlow's own sockets (uid [10200, 20200]): 1 seen, every one to its proxy or the gate's control port", printed)
+        self.assertIn(
+            "ProxyFlow's own sockets (uid [10200, 20200]): 1 seen, every one to its proxy, the gate's control port or the phone "
+            "network's resolver",
+            printed,
+        )
+
+    def test_proxyflows_own_lookup_through_the_networks_resolver_is_fine_and_any_other_dns_is_not(self):
+        # Android's resolver asks the proxy's name on ProxyFlow's behalf, in a socket it gives ProxyFlow's uid (M10, API 35).
+        lookup = f"T {at('02:00:10').timestamp():.3f}\nudp    5: 0F02000A:A1B2 0302000A:0035 01 00000000:00000000 00:00000000 00000000 10200 0 4714\n"
+        status, printed = self.run_viewed(uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.PROXY_SYN], connecting=lookup)
+        self.assertEqual(0, status, printed)
+        self.assertIn("1 seen, 1 of them its lookups through the phone network's resolver, every one to its proxy", printed)
+
+        elsewhere = f"T {at('02:00:10').timestamp():.3f}\nudp    5: 0F02000A:A1B2 08080808:0035 01 00000000:00000000 00:00000000 00000000 10200 0 4714\n"
+        status, printed = self.run_viewed(uplink_dns=[self.PROXY_LOOKUP], capture_extra=[self.PROXY_SYN], connecting=elsewhere)
+        self.assertEqual(1, status)
+        self.assertIn("ProxyFlow's own sockets reached other places than its proxy: {'UDP 8.8.8.8:53': 1}", printed)
 
     def test_an_unsampled_owner_is_put_down_to_such_apps_when_android_left_out_proxyflow_alone(self):
         status, printed = self.run_viewed(
