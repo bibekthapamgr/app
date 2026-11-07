@@ -83,5 +83,61 @@ class ScreenReading(unittest.TestCase):
         self.assertFalse(any(c[0] == "exec-out" for c in calls))
 
 
+class Typing(unittest.TestCase):
+    """type_into reads the field back and types again when the field lost a character (M12-75)."""
+
+    def setUp(self) -> None:
+        self.field_text = ""
+        self.typed: list[str] = []
+        self.said: list[str] = []
+        self.drop_first = True
+
+        def fake_adb(*args: str, timeout: int = 60) -> str:
+            if args[0] == "shell" and args[1].startswith("input text "):
+                value = args[1][len("input text ") :].strip("'")
+                if self.drop_first:
+                    self.drop_first = False
+                    value = value[1:]
+                self.field_text += value
+                self.typed.append(value)
+            elif args[0] == "shell" and args[1].startswith("input keyevent KEYCODE_DEL"):
+                self.field_text = self.field_text[: -args[1].count("KEYCODE_DEL")] if self.field_text else ""
+            return ""
+
+        self.real = ui.adb, ui.time.sleep, ui.tree, ui.say
+        ui.adb = fake_adb  # type: ignore[assignment]
+        ui.time.sleep = lambda _s: None  # type: ignore[assignment]
+        ui.tree = lambda: ET.fromstring(SCREEN.replace('text="Port"', f'text="{self.field_text or "Port"}"'))  # type: ignore[assignment]
+        ui.say = self.said.append  # type: ignore[assignment]
+
+    def tearDown(self) -> None:
+        ui.adb, ui.time.sleep, ui.tree, ui.say = self.real  # type: ignore[assignment]
+
+    def test_a_lost_first_character_is_typed_again(self) -> None:
+        ui.type_into("Port", 540, 680, "1080")
+        self.assertEqual(self.field_text, "1080")
+        self.assertEqual(self.typed, ["080", "1080"])
+        self.assertIn("typing again", self.said[0])
+        self.assertIn("try 2", self.said[1])
+
+    def test_a_field_that_took_the_value_is_typed_once(self) -> None:
+        self.drop_first = False
+        ui.type_into("Port", 540, 680, "1080")
+        self.assertEqual(self.typed, ["1080"])
+        self.assertEqual(len(self.said), 1)
+
+    def test_a_masked_password_counts_as_taken(self) -> None:
+        self.drop_first = False
+        ui.tree = lambda: ET.fromstring(SCREEN.replace('text="Port"', 'text="••••••••"'))  # type: ignore[assignment]
+        ui.type_into("Port", 540, 680, "hunter22")
+        self.assertEqual(self.typed, ["hunter22"])
+
+    def test_a_field_that_never_takes_the_value_fails_the_step(self) -> None:
+        ui.tree = lambda: ET.fromstring(SCREEN)  # type: ignore[assignment]
+        with self.assertRaises(SystemExit):
+            ui.type_into("Port", 540, 680, "1080")
+        self.assertEqual(len(self.typed), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

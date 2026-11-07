@@ -125,6 +125,52 @@ def field(label_text: str) -> ET.Element:
     return labels[0]
 
 
+def shown_at(x: int, y: int) -> str | None:
+    """What the text field at that point shows now (a password field shows one mask character per typed one), or None
+    when no text field is there to read — the field is looked up by place, not by label, because a filled field no
+    longer shows its label as its text."""
+    root = tree()
+    if root is None:
+        return None
+    for node in nodes(root):
+        if node.get("class") != "android.widget.EditText":
+            continue
+        left, top, right, bottom = (int(v) for v in node.get("bounds", "[0,0][0,0]").replace("][", ",").strip("[]").split(","))
+        if left <= x <= right and top <= y <= bottom:
+            return node.get("text") or ""
+    return None
+
+
+def holds(shown: str | None, value: str) -> bool:
+    if shown is None or shown == value:
+        return True  # nothing to read back counts as taken: the step after it (Save, Connect) is what catches a wrong value
+    # A password field masks its content: the same number of characters, none of them the plain value's.
+    return len(shown) == len(value) and set(shown) <= {"•", "*", "●"}
+
+
+def type_into(label_text: str, x: int, y: int, value: str) -> None:
+    """Types the value and reads the field back: `input text` into a field that has just taken focus can lose its first
+    character (the release smoke on API 36 once saved 0.0.2.2 for 10.0.2.2 — M12-75), so a field that does not show the
+    value is emptied (end of text, then one delete per character) and typed again, three times at most.
+    input text takes no spaces as such; the smoke types addresses, ports and credentials (hex), which have none.
+    The value is on adb's and the device's command line for the moment of typing (the lab's per-run password: G-4)."""
+    for attempt in range(1, 4):
+        if attempt > 1:
+            adb("shell", f"input tap {x} {y}")
+            time.sleep(0.5)
+            adb("shell", "input keyevent KEYCODE_MOVE_END")
+            adb("shell", "input keyevent " + " ".join(["KEYCODE_DEL"] * (len(shown_at(x, y) or "") + 4)))
+            time.sleep(0.5)
+        adb("shell", f"input text '{value}'")
+        time.sleep(0.5)
+        shown = shown_at(x, y)
+        if holds(shown, value):
+            say(f"typed into {label_text!r} at {x},{y} ({len(value)} characters{'' if attempt == 1 else f', try {attempt}'})")
+            return
+        say(f"the field {label_text!r} shows {len(shown or '')} of the {len(value)} characters typed; typing again")
+    fail(f"the field {label_text!r} did not take its {len(value)} characters in three tries")
+
+
 def texts() -> list[str]:
     """What the screen shows, a text field's content left out (what was typed is not for the log)."""
     root = tree()
@@ -155,11 +201,7 @@ def main(argv: list[str]) -> None:
         x, y = centre(field(args[0]))
         adb("shell", f"input tap {x} {y}")
         time.sleep(0.8)
-        # input text takes no spaces as such; the smoke types addresses, ports and credentials (hex), which have none.
-        # The value is on adb's and the device's command line for the moment of typing (the lab's per-run password: G-4).
-        adb("shell", f"input text '{args[1]}'")
-        say(f"typed into {args[0]!r} at {x},{y} ({len(args[1])} characters)")
-        time.sleep(0.5)
+        type_into(args[0], x, y, args[1])
     elif command == "texts":
         print("\n".join(texts()))
     elif command == "screenshot":

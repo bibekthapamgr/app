@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The debug build only (never the release: scripts/check_release_manifest.py reads the release manifest and allows
+    no WAKE_LOCK). The idle test, PerformanceEndToEndTest.idleWhileConnected, holds a partial wake lock from the end of
+    its idle period until the screen is back on; it runs in the app's process, under the app's uid, so a permission in
+    the test APK's manifest does not reach it (API 29–36 in run 42402361166: SecurityException, "neither user nor
+    current process has android.permission.WAKE_LOCK"; M12-76).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+</manifest>
