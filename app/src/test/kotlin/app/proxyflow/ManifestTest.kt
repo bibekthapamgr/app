@@ -42,6 +42,10 @@ class ManifestTest {
                 "android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED",
                 "android.permission.INTERNET",
                 "android.permission.POST_NOTIFICATIONS",
+                // Debug builds only (app/src/debug/AndroidManifest.xml): the instrumented performance
+                // test holds a wake lock while the device idles connected (M12-76). The release merged
+                // manifest must not have it; scripts/check_release_manifest.py refuses it there.
+                "android.permission.WAKE_LOCK",
             ),
             requested,
         )
