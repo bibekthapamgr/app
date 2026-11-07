@@ -29,10 +29,16 @@ SCREEN = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
 """
 
 
+TREE = ui.tree
+
+
 class ScreenReading(unittest.TestCase):
     def setUp(self) -> None:
         self.root = ET.fromstring(SCREEN)
         ui.tree = lambda: self.root  # type: ignore[assignment]
+
+    def tearDown(self) -> None:
+        ui.tree = TREE
 
     def test_found_by_text_or_description(self) -> None:
         self.assertEqual(ui.centre(ui.find(self.root, "Add proxy")), (232, 240))
@@ -48,8 +54,33 @@ class ScreenReading(unittest.TestCase):
     def test_field_whose_own_text_is_the_label(self) -> None:
         self.assertEqual(ui.centre(ui.field("Port")), (540, 680))
 
-    def test_texts_lists_what_the_screen_shows(self) -> None:
-        self.assertEqual(ui.texts(), ["Add proxy", "Server", "Port", "Save"])
+    def test_texts_lists_what_the_screen_shows_but_not_what_was_typed(self) -> None:
+        # The Port field's own text (its label while empty, what was typed after) is a text field's and stays out.
+        self.assertEqual(ui.texts(), ["Add proxy", "Server", "Save"])
+        typed = ET.fromstring(SCREEN.replace('text="Port"', 'text="hunter22"'))
+        ui.tree = lambda: typed  # type: ignore[assignment]
+        self.assertNotIn("hunter22", ui.texts())
+
+    def test_a_failed_dump_is_never_the_previous_screen(self) -> None:
+        calls: list[tuple[str, ...]] = []
+
+        def fake_adb(*args: str, timeout: int = 60) -> str:
+            calls.append(args)
+            if args[1].startswith("uiautomator dump"):
+                return "ERROR: could not get idle state."
+            return SCREEN  # the old file, were it still there
+
+        real_adb, real_sleep = ui.adb, ui.time.sleep
+        ui.adb = fake_adb  # type: ignore[assignment]
+        ui.time.sleep = lambda _s: None  # type: ignore[assignment]
+        ui.tree = TREE
+        try:
+            self.assertIsNone(ui.tree())
+        finally:
+            ui.adb, ui.time.sleep = real_adb, real_sleep  # type: ignore[assignment]
+        self.assertEqual([c for c in calls if c[1].startswith("rm -f")][:1], [("shell", f"rm -f {ui.DUMP}")])
+        self.assertEqual(sum(1 for c in calls if c[1].startswith("uiautomator dump")), 3)
+        self.assertFalse(any(c[0] == "exec-out" for c in calls))
 
 
 if __name__ == "__main__":

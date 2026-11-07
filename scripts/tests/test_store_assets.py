@@ -46,9 +46,16 @@ class Check(unittest.TestCase):
         for i, source in enumerate(("B4_home_connected_light", "D1_add_proxy_light"), start=1):
             name = f"{i}-{source}.png"
             png(os.path.join(self.out, "screenshots", name), 1080, 1920, colour=2)
-            shots.append({"file": name, "source": f"app/screenshots/{source}.png", "caption": f"Caption {i}"})
+            shots.append(
+                {
+                    "file": name,
+                    "source": f"app/screenshots/{source}.png",
+                    "source_sha256": store_assets.sha256(os.path.join(store_assets.ROOT, "app", "screenshots", f"{source}.png")),
+                    "caption": f"Caption {i}",
+                }
+            )
         with open(os.path.join(self.out, "assets.json"), "w", encoding="utf-8") as f:
-            json.dump({"screenshots": shots}, f)
+            json.dump({"screenshots": shots, "listing": store_assets.listing_hash()}, f)
         # The listing's table is the repository's; the test's folder stands in for it.
         self.listing = store_assets.listing_shots
         store_assets.listing_shots = lambda: [store_assets.Shot(s["source"].split("/")[-1][:-4], s["caption"]) for s in shots]
@@ -91,6 +98,19 @@ class Check(unittest.TestCase):
     def test_a_changed_caption_in_the_listing_fails_until_remade(self) -> None:
         store_assets.listing_shots = lambda: [store_assets.Shot("B4_home_connected_light", "Caption 1"), store_assets.Shot("D1_add_proxy_light", "Changed")]
         self.assertIn("not docs/m11/store-listing.md §4's", self.run_check()[1])
+
+    def test_a_source_that_changed_or_a_changed_listing_line_fails(self) -> None:
+        with open(os.path.join(self.out, "assets.json"), encoding="utf-8") as f:
+            facts = json.load(f)
+        facts["screenshots"][0]["source_sha256"] = "0" * 64
+        with open(os.path.join(self.out, "assets.json"), "w", encoding="utf-8") as f:
+            json.dump(facts, f)
+        self.assertIn("changed since it was made", self.run_check()[1])
+        facts["screenshots"][0]["source_sha256"] = store_assets.sha256(os.path.join(store_assets.ROOT, facts["screenshots"][0]["source"]))
+        facts["listing"] = "stale"
+        with open(os.path.join(self.out, "assets.json"), "w", encoding="utf-8") as f:
+            json.dump(facts, f)
+        self.assertIn("title or short description changed", self.run_check()[1])
 
     def test_a_non_png_fails(self) -> None:
         with open(os.path.join(self.out, "icon-512.png"), "wb") as f:

@@ -62,11 +62,19 @@ FORBIDDEN: list[tuple[str, re.Pattern[str]]] = [
         ),
     ),
 ]
-NEGATION = re.compile(r"(?i)\b(doesn't|does not|don't|do not|isn't|is not|never|not|no)\b")
+# A claim is allowed only when the same clause denies it, with the denial at most four words before the claim's first
+# word ("does not make you anonymous", "is not a system-wide VPN"): a "no" or "not" earlier in the sentence, about
+# something else ("No account needed, and it hides your IP"), allows nothing (review C-1).
+NEGATION = re.compile(r"(?i)\b(doesn't|does not|don't|do not|isn't|is not|never|not)(\s+\S+){0,4}\s*$")
+CLAUSE = re.compile(r"[:;—]|\s-\s|,\s+(and|but|or|so)\s+")
 # Play's metadata policy: no performance, ranking or promotional words in the title (and so in the captions, which are
 # pictures of the listing), and no emoji there.
-PROMOTIONAL = re.compile(r"(?i)\b(best|top|free|#\s?1|number one|award)\b")
-EMOJI = re.compile(r"[\U0001F300-\U0001FAFF☀-➿]")
+PROMOTIONAL = re.compile(r"(?i)(?<!\w)(best|top|free|number one|award|no\.\s?1)(?!\w)|(?<!\w)#\s?1\b")
+# Emoji and the symbols Play's policy means by them: the emoticon, pictograph, transport, flag and supplemental blocks,
+# the dingbats and miscellaneous symbols, the few symbols outside them that render as emoji, and the variation selector.
+EMOJI = re.compile(
+    r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u203C\u2049\u2122\u2139\u2194-\u21AA\u24C2\u25AA-\u25FE\u3030\u303D\u3297\u3299\uFE0F]"
+)
 PLACEHOLDER = re.compile(r"‹[^›]*›")
 LIMITS = {"listing-title": 30, "listing-short": 80, "listing-full": 4000, "listing-notes": 500}
 REQUIRED_IN_FULL = [
@@ -132,9 +140,11 @@ def check(markdown: str) -> list[str]:
     for name, text in texts.items():
         for sentence in sentences(text):
             for claim, pattern in FORBIDDEN:
-                m = pattern.search(sentence)
-                if m and not NEGATION.search(sentence[: m.start()]):
-                    problems.append(f"{name}: \"{sentence[:120]}\" ({claim})")
+                for m in pattern.finditer(sentence):
+                    clause = CLAUSE.split(sentence[: m.start()])[-1]
+                    if not NEGATION.search(clause):
+                        problems.append(f"{name}: \"{sentence[:120]}\" ({claim})")
+                        break
         if name in LIMITS and len(text) > LIMITS[name]:
             problems.append(f"{name}: {len(text)} characters, over Play's {LIMITS[name]}")
         if (name == "listing-title" or name.startswith("caption")) and PROMOTIONAL.search(text):
@@ -152,8 +162,9 @@ def check(markdown: str) -> list[str]:
 
 
 def left_to_owner(markdown: str) -> list[str]:
-    """What the document outside the blocks leaves to fill in (the owner's decisions): reported, not failed."""
-    return [m.group(0) for m in PLACEHOLDER.finditer(markdown)]
+    """What the document outside the blocks leaves to fill in (the owner's decisions): reported, not failed. A placeholder
+    inside backticks is the document talking about placeholders, not one."""
+    return [m.group(0) for m in PLACEHOLDER.finditer(re.sub(r"`[^`]*`", "", markdown))]
 
 
 def main(argv: list[str]) -> int:

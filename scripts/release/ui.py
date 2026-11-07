@@ -28,13 +28,21 @@ def adb(*args: str, timeout: int = 60) -> str:
 
 
 def tree() -> ET.Element | None:
-    """The screen's accessibility tree, or None when uiautomator could not give one (an animation, a dialog opening)."""
-    adb("shell", f"uiautomator dump {DUMP}")
-    xml = adb("exec-out", f"cat {DUMP}")
-    try:
-        return ET.fromstring(xml)
-    except ET.ParseError:
-        return None
+    """The screen's accessibility tree, or None when uiautomator could not give one in three tries (it waits for a quiet
+    second, and a screen that redraws every second — Home's connection clock — can deny it that; review B-3). The old
+    dump is removed first, so a failed dump never reads as the previous screen."""
+    for _ in range(3):
+        adb("shell", f"rm -f {DUMP}")
+        out = adb("shell", f"uiautomator dump {DUMP}")
+        if "dumped to" not in out:
+            time.sleep(0.5)
+            continue
+        xml = adb("exec-out", f"cat {DUMP}")
+        try:
+            return ET.fromstring(xml)
+        except ET.ParseError:
+            time.sleep(0.5)
+    return None
 
 
 def nodes(root: ET.Element) -> list[ET.Element]:
@@ -59,18 +67,32 @@ def centre(node: ET.Element) -> tuple[int, int]:
     return (left + right) // 2, (top + bottom) // 2
 
 
-def wait_for(text: str, seconds: float, contains: bool = False) -> ET.Element | None:
+def bring_into_view() -> None:
+    """A node below the fold is not in the tree (Compose drops clipped nodes): close the keyboard (Escape, which does not
+    act as Back) and scroll up a little (review B-4)."""
+    adb("shell", "input keyevent 111")
+    time.sleep(0.4)
+    adb("shell", "input swipe 540 1400 540 700 300")
+    time.sleep(0.6)
+
+
+def wait_for(text: str, seconds: float, contains: bool = False, scroll: bool = False) -> ET.Element | None:
     deadline = time.monotonic() + seconds
+    tries = 0
     while True:
         root = tree()
         node = find(root, text, contains) if root is not None else None
         if node is not None or time.monotonic() >= deadline:
             return node
-        time.sleep(1)
+        tries += 1
+        if scroll and tries % 3 == 0:
+            bring_into_view()
+        else:
+            time.sleep(1)
 
 
 def tap(text: str, contains: bool = False, seconds: float = 20) -> None:
-    node = wait_for(text, seconds, contains)
+    node = wait_for(text, seconds, contains, scroll=True)
     if node is None:
         fail(f"nothing on the screen shows {text!r}")
     x, y = centre(node)
@@ -98,8 +120,11 @@ def field(label_text: str) -> ET.Element:
 
 
 def texts() -> list[str]:
+    """What the screen shows, a text field's content left out (what was typed is not for the log)."""
     root = tree()
-    return [label(n) for n in nodes(root) if label(n)] if root is not None else []
+    if root is None:
+        return []
+    return [label(n) for n in nodes(root) if label(n) and n.get("class") != "android.widget.EditText"]
 
 
 def fail(why: str) -> None:
@@ -117,7 +142,7 @@ def main(argv: list[str]) -> None:
         if wait_for(args[0], float(args[1]) if len(args) > 1 else 20) is None:
             fail(f"{args[0]!r} did not show")
     elif command == "type":
-        if wait_for(args[0], 20) is None:
+        if wait_for(args[0], 20, scroll=True) is None:
             fail(f"no field labelled {args[0]!r}")
         x, y = centre(field(args[0]))
         adb("shell", f"input tap {x} {y}")

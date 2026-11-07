@@ -31,7 +31,7 @@ rules change, so §2 is re-read on the day of submission and the date updated.
 | App icon | 512×512, 32-bit PNG with alpha, ≤ 1024 KB | `store/icon-512.png` | **CI** `store_assets.py check` |
 | Feature graphic | 1024×500, JPEG or 24-bit PNG, no alpha | `store/feature-graphic-1024x500.png` | **CI** |
 | Phone screenshots | 2–8; PNG/JPEG; sides 320–3840; longer ≤ 2× shorter; 9:16 for recommendation placements | 8 at 1080×1920 | **CI** |
-| Title ≤ 30, short description ≤ 80, full ≤ 4,000, release notes ≤ 500 characters; no "free/best/#1"; no emoji in the title | `docs/m11/store-listing.md` | **CI** `check_listing_claims.py` |
+| Title ≤ 30, short description ≤ 80, full ≤ 4,000, release notes ≤ 500 characters; no "free", "best", "#1" or emoji in the title or the screenshots' captions | `docs/m11/store-listing.md` | **CI** `check_listing_claims.py` |
 | Privacy policy URL live and matching the app | `pages.yml` from the app's strings | **both** CI builds the page; the owner turns Pages on and opens the URL |
 | Data safety, app content, VpnService and foreground-service declarations | `docs/m11/declarations.md` | **owner** enters; §3 ticks |
 | Personal-account closed testing (if §1.1 is yes) | 12 testers, 14 days, then apply | §4 | **owner** |
@@ -41,7 +41,7 @@ rules change, so §2 is re-read on the day of submission and the date updated.
 | | Line | By | Date | Proof |
 |---|---|---|---|---|
 | ☐ | The release commit is on `main` (PR #10 merged after PR #9 and #8), its `android` run green in three attempts | | | run id |
-| ☐ | Its `release` run (hand-started, input `fingerprint` = the upload certificate's) green: `bundle` and both `smoke` jobs | | | run id, `release-facts.txt`: `mode=upload-key` |
+| ☐ | Its `release` run (hand-started on `main`, input `fingerprint` = the upload certificate's) green: `bundle` and both `smoke` jobs | | | run id, `release-facts.txt`: `mode=upload-key`, `event=workflow_dispatch`, `ref=refs/heads/main`, the fingerprint |
 | ☐ | The bundle's certificate fingerprint equals the upload certificate's in Play Console → Setup → App signing | | | both values written here: ‹…› |
 | ☐ | `secrets` run green on the commit (no key, password or token in the repository or its history) | | | run id |
 | ☐ | `pages` run green; the privacy policy URL opens and says "describes ProxyFlow version 1.0.0 (11)" | | | URL opened on a phone |
@@ -83,7 +83,7 @@ rules change, so §2 is re-read on the day of submission and the date updated.
 | ☐ | The upload key made with `scripts/release/make_upload_key.sh` outside any checkout; the directory is `700`, the keystore `600` | | |
 | ☐ | Two offline backups of `proxyflow-upload.p12`, in two places; the password and the fingerprint in the password manager | | |
 | ☐ | Play App Signing: Google-generated app signing key; the upload certificate registered; its SHA-256 in Play Console equals the key's | | |
-| ☐ | The four GitHub secrets set; a hand-started `release` run says `mode=upload-key` and the fingerprint matches | | |
+| ☐ | The three GitHub secrets set (and the variable `PROXYFLOW_KEY_ALIAS` if the alias is not `proxyflow-upload`); a hand-started `release` run says `mode=upload-key` and the fingerprint matches | | |
 | ☐ | The keystore and the password are nowhere in the repository, its history, CI logs, chats or e-mail (`secrets` run green; a search of the owner's mailbox and chat for the file name) | | |
 
 ## 7. Sign-off

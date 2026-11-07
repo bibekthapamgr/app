@@ -12,7 +12,7 @@ status bar, which Play would refuse as they are: their sides' ratio is 2.23, pas
 each on a plain background under a caption — in the order the listing shows them (docs/m11/store-listing.md §4), with the captions
 checked by scripts/check_listing_claims.py like the rest of the listing's text.
 
-Play's specifications as read on 2026-11-06 (docs/m11/release-checklist.md §2 has the sources): app icon 512×512,
+Play's specifications as read on 2026-11-07 (docs/m11/release-checklist.md §2 has the sources): app icon 512×512,
 32-bit PNG with alpha, up to 1024 KB; feature graphic 1024×500, JPEG or 24-bit PNG without alpha; phone screenshots
 two to eight, PNG or JPEG, each side 320 to 3840 px, the longer side at most twice the shorter, 16:9 or 9:16 for
 Play's recommendation placements.
@@ -21,6 +21,7 @@ Play's recommendation placements.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -142,11 +143,13 @@ def supersampled(size: tuple[int, int], paint, factor: int = 4, mode: str = "RGB
 
 
 def icon() -> Image.Image:
-    """The 108 dp adaptive-icon canvas at 512 px: the whole square is the background, the mark at 2.5 × 24 units."""
+    """The adaptive icon as a launcher shows it: the inner 72 dp of the 108 dp canvas (what every launcher mask keeps)
+    at 512 px, so the mark is the same size on Play as on the phone (review C-9); Play rounds the corners itself."""
     def paint(draw, f):
         draw.rectangle((0, 0, 512 * f, 512 * f), fill=TEAL + (255,))
-        unit = 512 * f / 108 * 2.5
-        origin = (24 * 512 * f / 108, 24 * 512 * f / 108)
+        px_per_dp = 512 * f / 72
+        unit = px_per_dp * 2.5
+        origin = ((24 - 18) * px_per_dp, (24 - 18) * px_per_dp)
         draw_mark(draw, origin, unit, NAVY + (255,))
 
     return supersampled((512, 512), paint)
@@ -232,6 +235,21 @@ def screenshot(shot: Shot, index: int) -> Image.Image:
     return canvas
 
 
+def sha256(path: str) -> str:
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def source_path(shot: Shot) -> str:
+    return os.path.join(ROOT, "app", "screenshots", f"{shot.source}.png")
+
+
+def listing_hash() -> str:
+    """The title and short description the feature graphic was made from."""
+    title, short = listing_lines()
+    return hashlib.sha256(f"{title}\n{short}".encode()).hexdigest()
+
+
 def listing_shots() -> list[Shot]:
     """The screenshots and captions from docs/m11/store-listing.md §4: a table of `| N | source | caption |` rows."""
     path = os.path.join(ROOT, "docs", "m11", "store-listing.md")
@@ -268,11 +286,13 @@ def make(out: str) -> None:
     icon().save(os.path.join(out, "icon-512.png"), optimize=True)
     title, short = listing_lines()
     feature_graphic(title, short).save(os.path.join(out, "feature-graphic-1024x500.png"), optimize=True)
-    facts = {"icon": "icon-512.png", "feature_graphic": "feature-graphic-1024x500.png", "screenshots": []}
+    facts = {"icon": "icon-512.png", "feature_graphic": "feature-graphic-1024x500.png", "listing": listing_hash(), "screenshots": []}
     for index, shot in enumerate(listing_shots(), start=1):
         name = f"{index}-{shot.source}.png"
         screenshot(shot, index).save(os.path.join(out, "screenshots", name), optimize=True)
-        facts["screenshots"].append({"file": name, "source": f"app/screenshots/{shot.source}.png", "caption": shot.caption})
+        facts["screenshots"].append(
+            {"file": name, "source": f"app/screenshots/{shot.source}.png", "source_sha256": sha256(source_path(shot)), "caption": shot.caption}
+        )
     with open(os.path.join(out, "assets.json"), "w", encoding="utf-8") as f:
         json.dump(facts, f, indent=2)
         f.write("\n")
@@ -338,6 +358,16 @@ def check(out: str) -> int:
             listed = [(f"{i}-{s.source}.png", s.caption) for i, s in enumerate(listing_shots(), start=1)]
             if [(s["file"], s["caption"]) for s in facts["screenshots"]] != listed:
                 problems.append("assets.json's screenshots or captions are not docs/m11/store-listing.md §4's: run `store_assets.py make`")
+            # A source screenshot that changed since the store one was made (a Roborazzi screenshot re-recorded), or a
+            # changed title or short description: the store asset is stale (review C-8).
+            for entry in facts["screenshots"]:
+                source = os.path.join(ROOT, entry["source"])
+                if not os.path.isfile(source):
+                    problems.append(f"{entry['file']}: its source {entry['source']} is gone")
+                elif sha256(source) != entry.get("source_sha256"):
+                    problems.append(f"{entry['file']}: its source {entry['source']} changed since it was made: run `store_assets.py make`")
+            if facts.get("listing") != listing_hash():
+                problems.append("the feature graphic's title or short description changed since it was made: run `store_assets.py make`")
     else:
         problems.append("assets.json: missing")
     for problem in problems:

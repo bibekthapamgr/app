@@ -10,9 +10,11 @@
 # this script: keep them in a password manager. Nothing here is sent anywhere.
 #
 # Afterwards: back the keystore up (two copies, offline: an encrypted USB stick and a second one elsewhere), keep the
-# passwords in the password manager with the keystore's fingerprint, and put the four values into the repository's
+# passwords in the password manager with the keystore's fingerprint, and put the three values into the repository's
 # GitHub secrets for the release workflow (.github/workflows/release.yml): PROXYFLOW_KEYSTORE_BASE64 (the keystore's
-# bytes, base64), PROXYFLOW_KEYSTORE_PASSWORD, PROXYFLOW_KEY_ALIAS, PROXYFLOW_KEY_PASSWORD. The upload certificate
+# bytes, base64), PROXYFLOW_KEYSTORE_PASSWORD, PROXYFLOW_KEY_PASSWORD; the alias is "proxyflow-upload" unless the
+# repository variable PROXYFLOW_KEY_ALIAS says otherwise (a variable, not a secret: a secret's value is masked in every
+# log line, which would hide the alias in the workflow's own error messages). The upload certificate
 # (upload-certificate.pem) is what Play Console asks for when an app is set up with an existing upload key or the key
 # is reset; it holds no secret.
 #
@@ -23,8 +25,12 @@ dir="${PROXYFLOW_KEY_DIR:-$HOME/ProxyFlow-release}"
 alias="${PROXYFLOW_KEY_ALIAS:-proxyflow-upload}"
 keystore="$dir/proxyflow-upload.p12"
 
-if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "refusing: $dir is inside a git checkout; keep the key outside the repository (set PROXYFLOW_KEY_DIR)" >&2
+# Inside a checkout? Judged on the nearest directory that exists, since $dir usually does not yet (review A-1: a check
+# on $dir itself passed any new directory, even one under a checkout).
+probe="$dir"
+while [ ! -d "$probe" ]; do probe="$(dirname "$probe")"; done
+if git -C "$probe" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "refusing: $dir is inside a git checkout ($(git -C "$probe" rev-parse --show-toplevel)); keep the key outside any repository (set PROXYFLOW_KEY_DIR)" >&2
     exit 1
 fi
 if [ -e "$keystore" ]; then
@@ -43,14 +49,18 @@ read -r -s -p "The same again: " store_pass2; echo
 # PKCS12 keeps one password for the store and the key; the key password is the store's.
 key_pass="$store_pass"
 
-# The certificate names the app, not the owner: Play shows nothing of it, and it holds no personal detail.
-keytool -genkeypair -v \
-    -keystore "$keystore" -storetype PKCS12 -storepass "$store_pass" -keypass "$key_pass" \
+# The certificate names the app, not the owner: Play shows nothing of it, and it holds no personal detail. The password
+# reaches keytool through the environment (-storepass:env), never on its command line, which other users of the computer
+# could read from the process table (review A-6); keytool's own messages are shown, as it never echoes the password.
+export PF_STORE_PASS="$store_pass" PF_KEY_PASS="$key_pass"
+keytool -genkeypair \
+    -keystore "$keystore" -storetype PKCS12 -storepass:env PF_STORE_PASS -keypass:env PF_KEY_PASS \
     -alias "$alias" -keyalg RSA -keysize 4096 -sigalg SHA256withRSA -validity 18250 \
-    -dname "CN=ProxyFlow upload key, O=ProxyFlow, C=JP" >/dev/null 2>&1
+    -dname "CN=ProxyFlow upload key, O=ProxyFlow, C=JP" >/dev/null
 chmod 600 "$keystore"
 
-keytool -exportcert -rfc -keystore "$keystore" -storepass "$store_pass" -alias "$alias" -file "$dir/upload-certificate.pem" >/dev/null 2>&1
+keytool -exportcert -rfc -keystore "$keystore" -storepass:env PF_STORE_PASS -alias "$alias" -file "$dir/upload-certificate.pem" >/dev/null
+unset PF_STORE_PASS PF_KEY_PASS store_pass store_pass2 key_pass
 fingerprint="$(openssl x509 -in "$dir/upload-certificate.pem" -noout -fingerprint -sha256 | sed 's/^.*=//')"
 
 cat <<EOT
@@ -63,11 +73,13 @@ Made:
 Next:
   1. Back the keystore up: two copies, offline (an encrypted USB stick, and one kept elsewhere). Write the
      fingerprint above beside the password in your password manager.
-  2. GitHub → the repository → Settings → Secrets and variables → Actions → New repository secret, four times:
+  2. GitHub → the repository → Settings → Secrets and variables → Actions → New repository secret, three times:
        PROXYFLOW_KEYSTORE_BASE64    the output of:  base64 -w0 "$keystore"   (macOS: base64 -i "$keystore")
        PROXYFLOW_KEYSTORE_PASSWORD  the password you typed
-       PROXYFLOW_KEY_ALIAS          $alias
        PROXYFLOW_KEY_PASSWORD       the same password (PKCS12 keeps one)
-  3. The release workflow (Actions → release → Run workflow) then signs the App Bundle with it and checks the
-     certificate's fingerprint against the one above, which you give it as the input "fingerprint".
+     The alias is "$alias"; if it is not "proxyflow-upload", also add the repository *variable* (not secret)
+     PROXYFLOW_KEY_ALIAS with it.
+  3. The release workflow (Actions → release → Run workflow, on main) then signs the App Bundle with it and checks the
+     certificate's fingerprint against the one above, which you must give it as the input "fingerprint": that run's
+     bundle is the one to upload (its release-facts.txt says mode=upload-key and event=workflow_dispatch).
 EOT

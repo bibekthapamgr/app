@@ -47,7 +47,7 @@ def _content(label: str, regex: str, paths: str | None = None) -> ContentRule:
 
 NAME_RULES = [
     _name("signing keystore", r"\.(jks|keystore|bks)(\.[^/]*)?$"),
-    _name("private key or certificate bundle", r"\.(p12|pfx|key|p8)$"),
+    _name("private key or certificate bundle", r"\.(p12|pfx|key|p8)(\.[^/]*)?$"),
     _name("SSH private key", r"^id_(rsa|dsa|ecdsa|ed25519)$"),
     _name(
         "machine-local or secret configuration",
@@ -57,7 +57,7 @@ NAME_RULES = [
 ]
 
 # Environment-variable style names that hold credentials, e.g. a *_PASSWORD or *_TOKEN variable.
-_CREDENTIAL_NAME = r"(?<![A-Za-z0-9_])[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)"
+_CREDENTIAL_NAME = r"(?<![A-Za-z0-9_])[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|KEYSTORE_BASE64|PRIVATE_KEY)"
 # Files where values are usually unquoted: .env, properties, shell and YAML.
 _KEY_VALUE_FILES = r"(^|/)\.env(\.[^/]+)?$|\.(properties|sh|bash|ya?ml)$"
 
@@ -78,11 +78,26 @@ CONTENT_RULES = [
         r"^\s*(?:storePassword|keyPassword|store\.password|key\.password)\s*[=:]\s*\S",
         paths=r"\.properties$",
     ),
+    # M11 (A-2): a signing password as an unquoted value in any text file ("storePassword=hunter22" in notes.txt), the
+    # value neither a reference ($, {, <, () nor a comment; a build script's quoted form is the rule above.
+    _content(
+        "signing password written as a literal value",
+        r"^\s*(?:storePassword|keyPassword|store\.password|key\.password)\s*[=:]\s*[^\s\"'$<{(#]{4,}\s*$",
+    ),
+    # M11 (A-2): a keystore or private key as base64 (a PKCS12 or DER file starts with 0x30 0x82, which is "MII" in
+    # base64): 200 or more base64 characters beginning so, in any text file. A PEM certificate's body is excluded by its
+    # own "-----BEGIN CERTIFICATE-----" line (a certificate is public), which the allow marker also covers.
+    _content("keystore or private key as base64", r"(?<![A-Za-z0-9+/])MII[A-Za-z0-9+/]{197,}"),
     _content("credential written as a quoted literal", _CREDENTIAL_NAME + r"\s*[:=]\s*[\"'][^\"'$<{(\s]{4,}[\"']"),
     _content(
         "credential written as a literal value",
         r"^\s*(?:export\s+)?" + _CREDENTIAL_NAME + r"\s*[:=]\s*[^\s\"'$<{(#]{4,}",
         paths=_KEY_VALUE_FILES,
+    ),
+    # M11 (A-2): the same at the start of a line of any text file ("PROXYFLOW_KEYSTORE_PASSWORD=hunter22" in notes).
+    _content(
+        "credential written as a literal value",
+        r"^\s*(?:export\s+)?" + _CREDENTIAL_NAME + r"\s*=\s*[^\s\"'$<{(#]{4,}\s*$",
     ),
 ]
 
@@ -98,9 +113,19 @@ def check_name(path: str) -> list[Finding]:
     return [Finding(rule.label, path) for rule in NAME_RULES if rule.pattern.search(name)]
 
 
+# M11 (A-2): a keystore under any name, by its first bytes: a JKS file starts with FE ED FE ED; a PKCS12 (or any DER)
+# file with 30 82 (a SEQUENCE with a two-byte length) followed, for PKCS12, by a version INTEGER of 3 (02 01 03).
+def check_binary(path: str, data: bytes) -> list[Finding]:
+    if data.startswith(b"\xfe\xed\xfe\xed"):
+        return [Finding("signing keystore (JKS by content)", path)]
+    if data.startswith(b"\x30\x82") and len(data) > 8 and data[4:7] == b"\x02\x01\x03":
+        return [Finding("PKCS12 keystore by content", path)]
+    return []
+
+
 def check_content(path: str, data: bytes) -> list[Finding]:
-    if b"\0" in data[:8000]:  # binary, as git decides it
-        return []
+    if b"\0" in data[:8000]:  # binary, as git decides it: only its first bytes are read
+        return check_binary(path, data)
     rules = [rule for rule in CONTENT_RULES if rule.paths is None or rule.paths.search(path)]
     findings = []
     for number, line in enumerate(data.splitlines(), start=1):
@@ -175,7 +200,7 @@ def self_test() -> int:
     store, key = "store" + "Password", "key" + "Password"
     caught = {
         "signing keystore": ["release.JKS", "upload.keystore", "upload.jks.bak"],
-        "private key or certificate bundle": ["key.p12", "server.key"],
+        "private key or certificate bundle": ["key.p12", "server.key", "upload.p12.bak"],
         "SSH private key": ["id_ed25519"],
         "machine-local or secret configuration": ["keystore.properties", "local.properties", "google-services.json"],
         "environment file": [".env", ".env.production"],
@@ -196,7 +221,13 @@ def self_test() -> int:
         ("Config.kt", "const val API_" + 'TOKEN = "abcd1234"'),
         (".env", "export DB_" + "PASSWORD=hunter22"),
         ("ci.yml", "  SIGNING_" + "SECRET: hunter22"),
+        ("release.txt", "PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22"),
+        ("signing.cfg", store + "=hunter22"),
+        ("notes.yml", "PROXYFLOW_KEYSTORE_" + "BASE64: " + "MII" + "A" * 300),
+        ("notes.md", "the keystore: " + "MII" + "Q" * 240 + "=="),
     ]
+    binary_hits = [("release.bin", b"\xfe\xed\xfe\xed" + b"\0" * 100), ("upload.dat", b"\x30\x82\x12\x34\x02\x01\x03" + b"\0" * 100)]
+    binary_passes = [("a.png", b"\x89PNG\r\n\x1a\n" + b"\0" * 100), ("cert.der", b"\x30\x82\x05\x00\x30\x82\x03" + b"\0" * 100)]
     content_passes = [
         ("keystore.properties.example", store + "="),
         ("build.gradle.kts", store + ' = signing.getValue("' + store + '")'),
@@ -206,6 +237,9 @@ def self_test() -> int:
         ("main.go", 'cfg.Password = os.Getenv("PF_PROXY_' + 'PASSWORD")'),
         ("Notes.kt", 'val x = "' + "AKIA" + "Q" * 17 + '"'),
         ("allowed.txt", "ghp_" + k + "  # check-secrets: " + "allow"),
+        ("README.md", "storePassword=       # left empty"),
+        ("sha.txt", "a" * 64),
+        ("cert.pem", "MIIB" + "a" * 60),
     ]
     failures = []
     for label, names in caught.items():
@@ -221,6 +255,12 @@ def self_test() -> int:
     for path, text in content_passes:
         if check_content(path, text.encode()):
             failures.append(f"content rules flagged a near miss in {path}: {[f.label for f in check_content(path, text.encode())]}")
+    for path, data in binary_hits:
+        if not check_content(path, data):
+            failures.append(f"the keystore-by-content rule missed {path}")
+    for path, data in binary_passes:
+        if check_content(path, data):
+            failures.append(f"the keystore-by-content rule flagged {path}")
     for failure in failures:
         print(f"check-secrets self-test: {failure}", file=sys.stderr)
     if failures:

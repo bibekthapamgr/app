@@ -1,45 +1,54 @@
 {
   "icon": "icon-512.png",
   "feature_graphic": "feature-graphic-1024x500.png",
+  "listing": "c3891b31f6f1caa080047fbf7d1c3ce2b01dbdc094db5a21792730d458ebb930",
   "screenshots": [
     {
       "file": "1-B4_home_connected_light.png",
       "source": "app/screenshots/B4_home_connected_light.png",
+      "source_sha256": "10cdc00249c99880a2c8100575a12575615ea5cc445b7dfb72db64275bed5135",
       "caption": "Your apps' TCP connections, through your own proxy"
     },
     {
       "file": "2-D1_add_proxy_light.png",
       "source": "app/screenshots/D1_add_proxy_light.png",
+      "source_sha256": "89834785e31133cf811aebc097784771bce798f4d2b2159d06cf57ee3f2542d5",
       "caption": "HTTP CONNECT or SOCKS5, with a username and password if needed"
     },
     {
       "file": "3-A2_onboarding_how_it_works_light.png",
       "source": "app/screenshots/A2_onboarding_how_it_works_light.png",
+      "source_sha256": "678f436753b632175926e1ab95ea89a0ca2b0cb05e6ee6b7c7b7f8d2f0d8e94c",
       "caption": "What goes through, what is blocked \u2014 said before you connect"
     },
     {
       "file": "4-B2_home_disconnected_light.png",
       "source": "app/screenshots/B2_home_disconnected_light.png",
+      "source_sha256": "9385b13f9cb904fe04d16483541630b1838298162622087c1761d0ec2f0a1534",
       "caption": "Status at a glance, connect in one tap"
     },
     {
       "file": "5-C2_profiles_list_light.png",
       "source": "app/screenshots/C2_profiles_list_light.png",
+      "source_sha256": "cfd7bfa7a882c004c003e1d38e868cc59cc7dd23ec15fd744cb67c168796f4d9",
       "caption": "A profile for each proxy you use"
     },
     {
       "file": "6-F2_logs_light.png",
       "source": "app/screenshots/F2_logs_light.png",
+      "source_sha256": "06d13b1497b49ddac56658d116e6de0731e2ca875d69726c898e8ea7e0c78476",
       "caption": "A diagnostic log kept on this phone only"
     },
     {
       "file": "7-B4_home_connected_dark.png",
       "source": "app/screenshots/B4_home_connected_dark.png",
+      "source_sha256": "e0a49b1ddafe71f8dd10707654d8f0866ae14f4190400f29d771ab41fa856989",
       "caption": "Dark theme"
     },
     {
       "file": "8-G2_privacy_policy_light.png",
       "source": "app/screenshots/G2_privacy_policy_light.png",
+      "source_sha256": "755c178ff1a1aba94535b9b359672fdfd20fd8bd8f73111a5a7bc271bcf89598",
       "caption": "The privacy policy, in the app"
     }
   ]

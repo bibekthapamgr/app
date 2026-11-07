@@ -37,8 +37,16 @@ class PrivacyPage(unittest.TestCase):
         order = [texts.index(w) for w in wanted]
         self.assertEqual(order, sorted(order), "the page's order is not the document's")
 
-    def test_the_page_fetches_nothing_and_runs_nothing(self) -> None:
+    def test_the_contact_is_named_when_given(self) -> None:
+        for page in (privacy_page.privacy_html("support@example.test"), privacy_page.index_html("support@example.test")):
+            self.assertIn('href="mailto:support@example.test"', page)
         for page in (privacy_page.privacy_html(), privacy_page.index_html()):
+            self.assertIn("contact details on ProxyFlow's Google Play page", page)
+            self.assertNotIn("mailto:", page)
+        self.assertEqual(privacy_page.main(["--out", "/tmp/pf-site-test", "--contact", "not an address"]), 2)
+
+    def test_the_page_fetches_nothing_and_runs_nothing(self) -> None:
+        for page in (privacy_page.privacy_html("support@example.test"), privacy_page.index_html()):
             self.assertNotIn("<script", page)
             self.assertNotIn("http://", page)
             self.assertNotRegex(page, r'(src|href)="https?://')
