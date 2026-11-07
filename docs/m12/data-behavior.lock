@@ -1,0 +1,18 @@
+{
+  "reviewed_on": "2026-11-08",
+  "reviewed_by": "M11's reviews C, F, G and H (the declarations and the policy against the app), recorded at M12",
+  "version": "1.0.0 (11)",
+  "note": "The first lock: the behaviour as M11's privacy policy 1.0.0 (11), Data safety and VpnService declarations describe it; nothing collected; the connectivity check to connectivitycheck.gstatic.com through the proxy; profiles, settings and the log on the phone",
+  "items": {
+    "manifest:app": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "manifest:core/vpn": "998d2b06a73b1d828e08b2aa74977909bed512c2d55b0ee226d7b995c1804c13",
+    "network:preflight-target": "e3b697aeae6382c7c034b0a794ae6d01d2e8a9bf356d9be6bbc5961b623a881a",
+    "stored:room-schemas": "3d3678138301ba23606c95626997e2310cff14c365d387f5a4bc8bfa73c3afd1",
+    "stored:datastore-keys": "279552483c3e308a352a449c599e5cbb86e8e1c9fe4c344beafbedf8877074d6",
+    "stored:log-retention": "161100b532f321c1233456e69e49c1807c4f8c36cae27c7150255b744d2fc539",
+    "says:privacy-strings": "6bcba65047b30ce2ef40cd4c4972bcdec8a04fd09d8a31600917fda9f44e641b",
+    "says:privacy-policy-doc": "9e2a8d61547ab5a92937cb5db3c5119fdf85dc0d7c7fc7dfe028418854267da2",
+    "says:play-declarations": "c10bea1eaaf52658970193293e65559287042ee35b0745373abc5ef7abb5acdd",
+    "libraries:dependency-review": "40d3667c915a3d5b4b0fcf0e61b7a9dcba66009d46d90204976b063d004ff3c5"
+  }
+}

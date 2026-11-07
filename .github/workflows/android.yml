@@ -74,6 +74,16 @@ jobs:
           python3 scripts/check_listing_claims.py
           python3 scripts/release/store_assets.py check
 
+      # M12: what the app keeps or sends is as the privacy policy and the Play declarations were last reviewed for
+      # (docs/m12/policy-review.md), and the version being built has its changelog section and history row
+      # (docs/m12/release-history.md); a target API requirement past its date fails here too.
+      - name: The data behaviour as reviewed, the release readiness, Google Play's target API
+        if: ${{ !cancelled() }}
+        run: |
+          python3 scripts/check_data_behavior.py
+          python3 scripts/release/check_release_ready.py
+          python3 scripts/check_target_api.py
+
       - name: Design tokens and generated colours agree
         if: ${{ !cancelled() }}
         run: |

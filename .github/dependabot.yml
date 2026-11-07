@@ -1,0 +1,49 @@
+# M12: dependency updates proposed on a schedule, as pull requests the full CI (android.yml, release.yml, secrets.yml)
+# runs on — a bump that breaks a routing, protocol or security test never merges (docs/m12/maintenance-runbook.md §3).
+# Grouped so that one PR a month carries the small bumps; majors come alone. The Android Gradle plugin, Kotlin and the
+# Go toolchain are deliberate upgrades (docs/m12/maintenance-runbook.md §3.2), not dependabot's.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: monthly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    groups:
+      androidx-minor-and-patch:
+        patterns: ["androidx.*", "com.google.*", "org.jetbrains.kotlinx:*"]
+        update-types: ["minor", "patch"]
+      test-tools:
+        patterns: ["io.github.takahirom.roborazzi*", "org.robolectric:*", "junit:*", "androidx.test*"]
+    ignore:
+      - dependency-name: "com.android.tools.build:gradle"
+      - dependency-name: "com.android.application"
+      - dependency-name: "com.android.library"
+      - dependency-name: "org.jetbrains.kotlin*"
+    labels: ["dependencies", "gradle"]
+  - package-ecosystem: gomod
+    directory: /engine
+    schedule:
+      interval: monthly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Tokyo
+    groups:
+      go-modules:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "engine"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Tokyo
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: ["dependencies", "ci"]

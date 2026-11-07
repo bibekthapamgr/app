@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem (private)
+    url: https://github.com/bibekthapamgr/app/security/advisories/new
+    about: A leak around the proxy, a credential exposure or any security weakness — reported privately, never as an issue.
+  - name: How ProxyFlow routes traffic, and what it does not carry
+    url: https://github.com/bibekthapamgr/app/blob/main/docs/m6/routing-and-limitations.md
+    about: UDP, ping, IPv6, local devices and Android's own traffic are explained there before filing a bug.
