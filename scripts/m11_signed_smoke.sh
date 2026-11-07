@@ -87,7 +87,10 @@ splits="$(timeout 30 adb shell pm path "$APPLICATION_ID" | tr -d '\r' | grep -c 
 timeout 120 adb pull "$base_apk" "$OUT/installed-base.apk" >/dev/null || { fail "could not pull $base_apk"; exit 1; }
 tools="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
 "$tools/apksigner" verify --print-certs "$OUT/installed-base.apk" > "$OUT/installed-certs.txt"
-installed_fp="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$OUT/installed-certs.txt" | head -1 | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')"
+# apksigner names signers "Signer #1 …" or "V2 Signer: …" by build-tools version: the certificates it prints are read.
+digests="$(grep -oE 'certificate SHA-256 digest: [0-9a-f]{64}' "$OUT/installed-certs.txt" | grep -oE '[0-9a-f]{64}' | sort -u || true)"
+[ "$(printf '%s' "$digests" | grep -c . || true)" = 1 ] || fail "the installed app has $(printf '%s' "$digests" | grep -c . || true) signing certificates, not one"
+installed_fp="$(printf '%s' "$digests" | head -1 | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')"
 if [ "$installed_fp" != "$EXPECTED_FINGERPRINT" ]; then
     fail "the installed app's certificate is $installed_fp, not the key's $EXPECTED_FINGERPRINT"
 else
