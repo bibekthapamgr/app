@@ -89,7 +89,14 @@ CONTENT_RULES = [
     # base64; a JKS with FE ED FE ED, "/u3+7Q"): 200 or more base64 characters beginning so, in any text file. Wrapped
     # base64 (several lines) is joined and read by check_blobs; a PEM certificate's body (public) is left out there.
     _content("keystore or private key as base64", r"(?<![A-Za-z0-9+/_-])(MII|/u3\+7Q)[A-Za-z0-9+/_-]{194,}"),
-    _content("credential written as a quoted literal", _CREDENTIAL_NAME + r"\s*[:=]\s*[\"'][^\"'$<{(\s]{4,}[\"']"),
+    _content("credential written as a quoted literal", _CREDENTIAL_NAME + r"\"?\s*[:=]\s*[\"'][^\"'$<{(]{4,}[\"']"),
+    # M11 (G-3): JSON's "storePassword": "…"; a password flag on a command line (keytool -storepass, bundletool
+    # --ks-pass=pass:, the forms the release workflow never uses); the workflow's own PF_STORE_PASS=…; a NAME=value that
+    # starts a command line (the variable, "=", the password, then the command).
+    _content("signing password written in JSON", r"\"(?:storePassword|keyPassword|store\.password|key\.password)\"\s*:\s*\"[^\"$]{4,}\""),
+    _content("password on a command line", r"(?:-storepass|-keypass|-srcstorepass|-deststorepass)\s+(?!:env\b|:file\b)[^\s\"'$<{(:]{4,}|--(?:ks|key)-pass=pass:[^\s\"'$]{4,}"),
+    _content("credential written as a literal value", r"(?i)^\s*(?:export\s+)?(?:[a-z][a-z0-9_]*_)?(?:store|key|ks)_pass\s*=\s*(?!(?:true|false|null|none|yes|no|nil)\b)[^\s\"'$<{(#]{4,}"),
+    _content("credential written as a literal value", r"(?i)(?<![a-z0-9_])[a-z][a-z0-9_]*_(?:password|passwd|secret|token|api_key|keystore_base64|private_key)=(?!(?:true|false|null|none|yes|no|nil)\b)[^\s\"'$<{(#`]{4,}\s+\S"),
     _content(
         "credential written as a literal value",
         r"^\s*(?:export\s+)?" + _CREDENTIAL_NAME + r"\s*[:=]\s*[^\s\"'$<{(#]{4,}",
@@ -130,7 +137,8 @@ def check_binary(path: str, data: bytes) -> list[Finding]:
     return []
 
 
-_BASE64_LINE = re.compile(rb"^[A-Za-z0-9+/=_-]{60,80}$")
+# A base64 line, with a Markdown quote's or a comment's marker before it allowed (one marker, then spaces).
+_BASE64_LINE = re.compile(rb"^(?:(?:[>#*]|//)[ \t]*)?([A-Za-z0-9+/=_-]{40,80})$")
 
 
 def check_blobs(path: str, data: bytes) -> list[Finding]:
@@ -147,22 +155,28 @@ def check_blobs(path: str, data: bytes) -> list[Finding]:
     lines = data.splitlines()
     for number, line in enumerate(lines + [b""], start=1):
         stripped = line.strip()
-        if stripped.startswith(b"-----BEGIN CERTIFICATE"):
+        if stripped.lstrip(b"># /*").startswith(b"-----BEGIN CERTIFICATE"):
             in_certificate = True
-        elif stripped.startswith(b"-----END CERTIFICATE"):
+        elif stripped.lstrip(b"># /*").startswith(b"-----END CERTIFICATE"):
             in_certificate = False
-        if _BASE64_LINE.match(stripped) and not in_certificate and ALLOW_MARKER not in line:
+        m = _BASE64_LINE.match(stripped)
+        if m and not in_certificate and ALLOW_MARKER not in line:
             if not run:
                 start = number
-            run.append(stripped)
+            run.append(m.group(1))
             continue
         if len(run) >= 3:
-            joined = b"".join(run).replace(b"-", b"+").replace(b"_", b"/")
-            try:
-                head = base64.b64decode(joined[:64] + b"=" * (-len(joined[:64]) % 4), validate=False)
-            except (binascii.Error, ValueError):
-                head = b""
-            findings += [Finding(f.label + " (wrapped base64)", f"{path}:{start}") for f in check_binary(path, head + b"\0" * 16)]
+            # The first bytes of the blob, and of each line of it (a hash or another blob may stand first: G-3).
+            for offset, piece in enumerate(run):
+                chunk = piece[:64].replace(b"-", b"+").replace(b"_", b"/")
+                try:
+                    head = base64.b64decode(chunk + b"=" * (-len(chunk) % 4), validate=False)
+                except (binascii.Error, ValueError):
+                    continue
+                found = check_binary(path, head + b"\0" * 16)
+                if found:
+                    findings += [Finding(f.label + " (wrapped base64)", f"{path}:{start + offset}") for f in found]
+                    break
         run = []
     return findings
 
@@ -276,6 +290,17 @@ def self_test() -> int:
         ("jks.txt", "/u3+7Q" + "A" * 240),
         ("wrapped.txt", "\n".join(["MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["A" * 76] * 4)),
         ("wrapped-jks.txt", "\n".join(["/u3+7QAAAAIAAAABAAAAAQAIcHJveHlmbG93AAABkQ" + "A" * 34] + ["A" * 76] * 3)),
+        ("quoted.md", "\n".join(["> MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["> " + "A" * 76] * 4)),
+        ("commented.kt", "\n".join(["// MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["// " + "A" * 76] * 4)),
+        ("w50.txt", "\n".join(["MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCC"] + ["A" * 50] * 4)),
+        ("sha-then.txt", "\n".join(["a" * 64, "MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["A" * 76] * 3)),
+        ("a.json", '  "PROXYFLOW_KEYSTORE_' + 'PASSWORD": "hunter22hunter22",'),
+        ("secrets.json", '  "' + store + '": "hunter22hunter22"'),
+        ("b.txt", "PROXYFLOW_KEYSTORE_" + 'PASSWORD="correct horse battery staple"'),
+        ("c.md", "Run it as `PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22 ./gradlew bundleRelease`"),
+        ("d.txt", "PF_STORE_" + "PASS=hunter22hunter22"),
+        ("e.txt", "keytool -genkeypair -store" + "pass hunter22hunter22 -alias up"),
+        ("e2.txt", "bundletool build-apks --ks-" + "pass=pass:hunter22hunter22"),
     ]
     binary_hits = [
         ("release.bin", b"\xfe\xed\xfe\xed" + b"\0" * 100),
@@ -294,6 +319,10 @@ def self_test() -> int:
         ("allowed.txt", "ghp_" + k + "  # check-secrets: " + "allow"),
         ("README.md", "storePassword=       # left empty"),
         ("Screen.kt", "                hasSaved" + "Password = true,"),
+        ("release.yml", "keytool -list -keystore x -store" + "pass:env PF_STORE_PASS -alias up"),
+        ("release.yml", "--ks-" + "pass=\"file:$RUNNER_TEMP/ks-pass.txt\""),
+        ("script.sh", "export PF_STORE_" + 'PASS="$store_pass"'),
+        ("doc.md", "the variable PROXYFLOW_KEYSTORE_" + "PASSWORD holds the password you typed"),
         ("Vm.kt", "            keepsSaved" + "Password = keeps,"),
         ("flags.ini", "keystore_" + "password = false"),
         ("sha.txt", "a" * 64),

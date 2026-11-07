@@ -11,7 +11,10 @@
 #     the line); the witness (reached only around the proxy) heard nothing; the uplink resolver was never asked for the
 #     destination's name.
 # A step that fails stops the flow with an error annotation, a screenshot and the screen's texts; the recording is
-# pulled and the device cleaned whatever happened.
+# pulled and the device cleaned whatever happened. The lab's SOCKS5 password (random per run, made by
+# scripts/e2e_env.sh, never in a log) is typed into the form with `adb shell input text`, so it is on a command line on
+# the runner and on the emulator for that moment — the one place in the lab where a password is (the device tests read
+# theirs from a file); the release's own keys and passwords are not involved here.
 # Usage: scripts/m11_signed_smoke.sh <release.apks> <api> <out dir>
 #   with EXPECTED_FINGERPRINT (SHA-256 of the certificate, colon-separated), EXPECTED_VERSION_NAME, EXPECTED_VERSION_CODE,
 #   APPLICATION_ID, BUNDLETOOL (the jar), CLIENT_APK (the instrumented tests' APK, for the shell client only),
@@ -50,7 +53,17 @@ cleanup() {
     if [ "$RECORDING" = 1 ]; then
         timeout 30 adb shell pkill -INT screenrecord >/dev/null 2>&1 || true
         sleep 3
-        timeout 120 adb pull /sdcard/pf-smoke.mp4 "$OUT/smoke.mp4" >/dev/null 2>&1 || note "no screen recording came back"
+        if timeout 120 adb pull /sdcard/pf-smoke.mp4 "$OUT/smoke.mp4" >/dev/null 2>&1 && [ -s "$OUT/smoke.mp4" ]; then
+            size="$(stat -c %s "$OUT/smoke.mp4")"
+            duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/smoke.mp4" 2>/dev/null | cut -d. -f1 || true)"
+            if [ "$size" -lt 100000 ]; then
+                echo "::warning title=Signed bundle smoke (API $API)::the screen recording is only $size bytes"
+            else
+                note "the screen recording: $size bytes${duration:+, $duration s} (smoke.mp4; the owner trims the Play videos to 90 s)"
+            fi
+        else
+            echo "::warning title=Signed bundle smoke (API $API)::no screen recording came back"
+        fi
     fi
     timeout 60 adb uninstall "$APPLICATION_ID" >/dev/null 2>&1 || true
     timeout 30 adb shell rm -f "$CLIENT" /sdcard/pf-smoke.mp4 /sdcard/pf-ui.xml >/dev/null 2>&1 || true
@@ -84,12 +97,15 @@ version_name="$(sed -n 's/^ *versionName=//p' "$OUT/package.txt" | head -1)"
 version_code="$(sed -n 's/^ *versionCode=\([0-9]*\).*/\1/p' "$OUT/package.txt" | head -1)"
 [ "$version_name" = "$EXPECTED_VERSION_NAME" ] || fail "versionName is '$version_name', not '$EXPECTED_VERSION_NAME'"
 [ "$version_code" = "$EXPECTED_VERSION_CODE" ] || fail "versionCode is '$version_code', not '$EXPECTED_VERSION_CODE'"
-if grep -q 'DEBUGGABLE' "$OUT/package.txt"; then fail "the installed app is debuggable"; fi
+grep -q 'flags=\[' "$OUT/package.txt" || fail "dumpsys package printed no flags line to read debuggable from"
+if grep -q 'DEBUGGABLE' "$OUT/package.txt"; then fail "the installed app is debuggable (dumpsys)"; fi
 base_apk="$(timeout 30 adb shell pm path "$APPLICATION_ID" | tr -d '\r' | sed -n 's/^package://p' | grep 'base.apk' | head -1)"
 splits="$(timeout 30 adb shell pm path "$APPLICATION_ID" | tr -d '\r' | grep -c '^package:' || true)"
 timeout 120 adb pull "$base_apk" "$OUT/installed-base.apk" >/dev/null || { fail "could not pull $base_apk"; exit 1; }
 tools="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
 "$tools/apksigner" verify --print-certs "$OUT/installed-base.apk" > "$OUT/installed-certs.txt"
+# Positively, from the installed APK itself: aapt2 prints "application-debuggable" for a debuggable manifest.
+if "$tools/aapt2" dump badging "$OUT/installed-base.apk" 2>/dev/null | grep -q '^application-debuggable'; then fail "the installed app is debuggable (aapt2)"; fi
 # apksigner names signers "Signer #1 …" or "V2 Signer: …" by build-tools version: the certificates it prints are read.
 digests="$(grep -oE 'certificate SHA-256 digest: [0-9a-f]{64}' "$OUT/installed-certs.txt" | grep -oE '[0-9a-f]{64}' | sort -u || true)"
 [ "$(printf '%s' "$digests" | grep -c . || true)" = 1 ] || fail "the installed app has $(printf '%s' "$digests" | grep -c . || true) signing certificates, not one"
@@ -129,8 +145,13 @@ $UI wait "Connect" 20
 step "connect"
 $UI tap "Connect"
 # ProxyFlow's own explainer of the VPN permission (board B9: "Allow a VPN connection", Continue), then Android's own
-# consent dialog ("Connection request", OK): both always show on a fresh device.
+# consent dialog ("Connection request", OK): both always show on a fresh device, and both are kept as screenshots —
+# the prominent-disclosure flow the declarations cite.
+$UI wait "Allow a VPN connection" 20
+$UI screenshot "$OUT/2b-vpn-explainer.png"
 $UI tap "Continue"
+$UI wait "OK" 20
+$UI screenshot "$OUT/2c-android-consent.png"
 $UI tap "OK"
 if $UI wait "Connected" 90; then
     note "Connected through the lab's SOCKS5 proxy, from the app's own screens"
@@ -175,7 +196,7 @@ else
 fi
 heard="$(since witness.log | grep -c . || true)"
 [ "$heard" = 0 ] || fail "the witness's log has $heard new line(s)"
-if since dns-uplink.log | grep -Eq "query\[[A-Z]+\] ${destination//./\\.} "; then
+if since dns-uplink.log | grep -Eq "query\[[^]]+\] ${destination//./\\.} "; then
     fail "the phone's uplink resolver was asked for $destination: a name looked up around the proxy"
 fi
 if [ "$STATUS" = 0 ]; then note "the lab's logs: 1 connection = 1 tunnel; the witness heard nothing; no lookup of $destination on the uplink"; fi

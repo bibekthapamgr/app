@@ -61,6 +61,14 @@ FORBIDDEN: list[tuple[str, re.Pattern[str]]] = [
             r"|\bworks?\s+(with|for)\s+(\w+\s+)?(games|gaming|calls|voip|quic|udp)|\bgreat\s+for\s+(gaming|games|calls)"
         ),
     ),
+    # The listing's own extra rules (review G-1): the passive and periphrastic forms of the same claims, as VPN marketing
+    # writes them, which the app's strings never needed.
+    ("hidden identity", re.compile(r"(?i)\b(ip( address)?|identity|location|activity)\s+(is|are|stays?|remains?|kept)\s+(hidden|masked|concealed|private|invisible)|\bkeeps?\s+(your\s+)?(real\s+)?(ip|identity|location)\s+(address\s+)?(hidden|masked|private)")),
+    ("nobody sees you", re.compile(r"(?i)\b(nobody|no one|no-one|no site|no website|websites? never|sites? never)\s+(can\s+)?(see|sees|know|knows|track|tracks)\b")),
+    # "encrypts the connection between your phone and the proxy" is TLS to the proxy, said as the app says it (ADR-0011).
+    ("encrypts your connection", re.compile(r"(?i)\bencrypt(s|ed|ing)?\s+(your|the)\s+(connection|data|internet|browsing)\b(?!\s+(between|to|with)\b)")),
+    ("another location", re.compile(r"(?i)\b(appear|browse|be)\s+(to be\s+)?(as if\s+)?(in|from)\s+(another|any|a different)\s+(country|location|region)|\bunblock")),
+    ("secure browsing", re.compile(r"(?i)\b(secure|private|safe)\s+(and\s+(secure|private|safe)\s+)?browsing\b")),
 ]
 # A claim is allowed only when its own clause denies it, the denial at most three words before the claim's first word
 # ("does not make you anonymous", "is not a system-wide VPN", "no guarantee"): a "not" earlier in the sentence, or in
@@ -69,11 +77,12 @@ FORBIDDEN: list[tuple[str, re.Pattern[str]]] = [
 NEGATION = re.compile(
     r"(?i)(\b(doesn't|does not|don't|do not|isn't|is not|never|not|cannot|can't|won't|will not|neither|nor)(\s+\S+){0,3}|\bno)\s*$"
 )
-NOT_A_DENIAL = re.compile(r"(?i)\bnot\s+(only|just|merely)\b")
-CLAUSE = re.compile(r"[,:;—]|\s-\s|\s(and|but|or)\s")
+# "Not only …", and a question's "isn't it …", deny nothing.
+NOT_A_DENIAL = re.compile(r"(?i)\bnot\s+(only|just|merely|one)\b|\b(isn't|doesn't|don't|won't|can't|aren't|wouldn't)\s+(it|you|we|they|this|that)\s+(great|good|nice|amazing|wonderful|better|time|want|love|like)\b")
+CLAUSE = re.compile(r"[,:;—]|\s-\s|\s(and|but|or|because|since|so|yet|while|though|although|if|unless|that|which|when)\s")
 # Play's metadata policy: no performance, ranking or promotional words in the title (and so in the captions, which are
 # pictures of the listing), and no emoji there.
-PROMOTIONAL = re.compile(r"(?i)(?<!\w)(best|top|free|number one|award|no\.\s?1)(?!\w)|(?<!\w)#\s?1\b")
+PROMOTIONAL = re.compile(r"(?i)(?<!\w)(best|top|free|number[ -]one|award|no\.\s?1|n[\u00b0\u00ba]\s?1|1st|\u2460)(?!\w)|(?<!\w)#\s?1\b")
 # Emoji and the symbols Play's policy means by them: the emoticon, pictograph, transport, flag and supplemental blocks,
 # the dingbats and miscellaneous symbols, the few symbols outside them that render as emoji, and the variation selector.
 EMOJI = re.compile(
@@ -95,9 +104,10 @@ REQUIRED_IN_FULL = [
 
 def normalized(text: str) -> str:
     return (
-        re.sub(r"[   -   　]", " ", text)
-        .translate(str.maketrans({c: "-" for c in "‐‑‒–−"}))
-        .replace("’", "'")
+        re.sub(r"[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]", " ", text)
+        .replace("\uff03", "#")
+        .translate(str.maketrans({c: "-" for c in "\u2010\u2011\u2012\u2013\u2212"}))
+        .replace("\u2019", "'")
     )
 
 
@@ -189,10 +199,12 @@ def main(argv: list[str]) -> int:
     for item in left_to_owner(markdown):
         print(f"::warning title=Store listing::left to the owner: {item}")
     found = blocks(markdown)
+    owner = len(left_to_owner(markdown))
     print(
         f"OK: title {len(found['listing-title'])}/30, short {len(found['listing-short'])}/80, "
         f"full {len(found['listing-full'])}/4000, notes {len(found['listing-notes'])}/500 characters, "
-        f"{len(captions(markdown))} captions; no forbidden claim, nothing left to fill in, every limitation stated"
+        f"{len(captions(markdown))} captions; no forbidden claim, every limitation stated; "
+        + (f"{owner} item(s) left to the owner outside the blocks" if owner else "nothing left to fill in")
     )
     return 0
 

@@ -56,7 +56,7 @@ and by hand (Actions → release → Run workflow, on `main`, with the fingerpri
 
 1. **engine** — the Go packet engine's checks and AAR, shared with `android.yml` through `engine.yml`.
 2. **bundle** — the key, the signed bundle, its verification, the APK sets:
-   - *The key.* Only a run the owner starts by hand (`workflow_dispatch`) is handed the three secrets
+   - *The key.* Only a run the owner starts by hand (`workflow_dispatch`) **on `main`** is handed the three secrets
      (`PROXYFLOW_KEYSTORE_BASE64` — `base64 -w0 proxyflow-upload.p12` —, `PROXYFLOW_KEYSTORE_PASSWORD`,
      `PROXYFLOW_KEY_PASSWORD`; the alias is the repository *variable* `PROXYFLOW_KEY_ALIAS`, or `proxyflow-upload` — a
      variable, since a secret's value is masked in every log line, which would hide the alias from the workflow's own
@@ -64,8 +64,9 @@ and by hand (Actions → release → Run workflow, on `main`, with the fingerpri
      **upload-key**. Such a run must be given the input `fingerprint`, and it must equal the key's certificate's SHA-256
      (read with `keytool`; the input is taken with or without spaces, a `SHA256:` label or lower case) — a bundle signed
      with any key but the one Play knows fails here, not at upload; a run with the secrets but no fingerprint fails too.
-     A push's or pull request's run gets no secret, whatever the branch or who pushed it — a branch's build scripts run
-     with the signing environment, and must never see the upload key before review (review A-3) — and signs with a key
+     A push's or pull request's run, and a hand-started run of any other branch, get no secret, whatever the branch or
+     who pushed it — a branch's build scripts run with the signing environment, and must never see the upload key
+     before review (reviews A-3, F-7) — and sign with a key
      made for the run alone (RSA 3072, 30 days, `CN=ProxyFlow run key, O=not for distribution`), its random password
      masked: mode **run-key**, which proves the path on every push and is never uploaded. In both modes the keystore must
      open with the password and hold the alias. The four values go to `signing.env` (mode 600) in `$RUNNER_TEMP`, loaded
@@ -106,9 +107,11 @@ and by hand (Actions → release → Run workflow, on `main`, with the fingerpri
    connected; then the lab's logs since the lab came up: the destination saw exactly one connection and Dante opened
    exactly one tunnel to it (the line: connections equal tunnels), the witness's log has no new line, the phone's uplink
    resolver was never asked for the destination's name. A step that fails stops the flow with an error, a screenshot
-   and the screen's texts; the recording (`screenrecord`, up to 180 s — the owner trims the Play videos to 90 s) is
-   pulled and the device cleaned whatever happened; four screenshots; artifact `signed-smoke-api-NN`. The emulator has a
-   phone's screen (`pixel_5`).
+   and the screen's texts; the recording (`screenrecord`, up to 180 s — its size and, where `ffprobe` is on the runner,
+   its length in a notice; the owner trims the Play videos to 90 s) is pulled and the device cleaned whatever happened;
+   six screenshots (Home empty, the form, the app's VPN explainer, Android's consent dialog, Connected, Not connected);
+   every tap, typed field and wait is a line of the log; artifact `signed-smoke-api-NN`. The emulator has a phone's
+   screen (`pixel_5`).
 
 The engine job runs for `android.yml` and for `release.yml` on the same push: the two AARs are built the same way,
 not shared (review A-10; a trade-off for keeping the release workflow one file the owner can start by hand).

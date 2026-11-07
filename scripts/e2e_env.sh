@@ -44,7 +44,9 @@
 # "Block connections without VPN" can stop them.
 #
 # The passwords are random for each run and masked in the log; the tests read them from a file
-# pushed to the emulator (scripts/e2e_device.sh), never from a command line. After the checks at
+# pushed to the emulator (scripts/e2e_device.sh), never from a command line — except M11's
+# signed-bundle smoke (scripts/m11_signed_smoke.sh), which types the SOCKS5 password into the
+# release app's form with `adb shell input text`, as a person would. After the checks at
 # the end, log-baseline.properties records how long each log was, so the evidence counts only
 # what the device tests caused.
 #

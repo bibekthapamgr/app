@@ -93,6 +93,21 @@ class Claims(unittest.TestCase):
             "Does not need an account and hides your IP.",
             "Isn't it great that it protects you?",
             "It does not sell proxies and makes you anonymous.",
+            "It is not slow because it hides your IP address.",
+            "Not slow yet it protects your privacy.",
+            "Never slow so it protects you.",
+            "Not expensive since it hides your IP.",
+            "Not one app hides your IP like ProxyFlow does.",
+            "Isn't it great it protects you?",
+            "Your IP address is hidden from every site you visit.",
+            "Keeps your IP address hidden.",
+            "Nobody can see your IP address.",
+            "Websites never see your real IP address.",
+            "Encrypts your connection.",
+            "Encrypts your data end to end.",
+            "Appear to be in another country.",
+            "Unblock any website.",
+            "Secure and private browsing.",
         ):
             with self.subTest(text=text):
                 self.assertTrue(listing.check(doc(full=FULL + " " + text)), text)
@@ -122,6 +137,9 @@ class Claims(unittest.TestCase):
         self.assertTrue(any("promotional" in p for p in listing.check(doc(title="ProxyFlow - #1 Proxy"))))
         self.assertTrue(any("promotional" in p for p in listing.check(doc(captions=("#1 proxy app", "Two")))))
         self.assertTrue(any("promotional" in p for p in listing.check(doc(title="ProxyFlow No. 1"))))
+        for title in ("ProxyFlow N°1", "ProxyFlow 1st", "ProxyFlow ＃1", "ProxyFlow ①", "The number-one proxy"):
+            with self.subTest(title=title):
+                self.assertTrue(any("promotional" in p for p in listing.check(doc(title=title))), title)
         self.assertTrue(any("emoji" in p for p in listing.check(doc(title="ProxyFlow 🚀"))))
         self.assertTrue(any("emoji" in p for p in listing.check(doc(title="ProxyFlow ⭐"))))
         self.assertTrue(any("emoji" in p for p in listing.check(doc(title="ProxyFlow 🇯🇵"))))

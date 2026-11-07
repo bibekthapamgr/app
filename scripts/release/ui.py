@@ -91,12 +91,18 @@ def wait_for(text: str, seconds: float, contains: bool = False, scroll: bool = F
             time.sleep(1)
 
 
+def say(what: str) -> None:
+    """One line per step on stderr, so the log shows what was tapped, where and when (review G-5)."""
+    print(f"ui: {what}", file=sys.stderr, flush=True)
+
+
 def tap(text: str, contains: bool = False, seconds: float = 20) -> None:
     node = wait_for(text, seconds, contains, scroll=True)
     if node is None:
         fail(f"nothing on the screen shows {text!r}")
     x, y = centre(node)
     adb("shell", f"input tap {x} {y}")
+    say(f"tapped {text!r} at {x},{y}")
     time.sleep(0.8)
 
 
@@ -139,8 +145,10 @@ def main(argv: list[str]) -> None:
     elif command == "tap-contains":
         tap(args[0], contains=True)
     elif command == "wait":
+        began = time.monotonic()
         if wait_for(args[0], float(args[1]) if len(args) > 1 else 20) is None:
             fail(f"{args[0]!r} did not show")
+        say(f"{args[0]!r} showed after {time.monotonic() - began:.1f} s")
     elif command == "type":
         if wait_for(args[0], 20, scroll=True) is None:
             fail(f"no field labelled {args[0]!r}")
@@ -148,7 +156,9 @@ def main(argv: list[str]) -> None:
         adb("shell", f"input tap {x} {y}")
         time.sleep(0.8)
         # input text takes no spaces as such; the smoke types addresses, ports and credentials (hex), which have none.
+        # The value is on adb's and the device's command line for the moment of typing (the lab's per-run password: G-4).
         adb("shell", f"input text '{args[1]}'")
+        say(f"typed into {args[0]!r} at {x},{y} ({len(args[1])} characters)")
         time.sleep(0.5)
     elif command == "texts":
         print("\n".join(texts()))
