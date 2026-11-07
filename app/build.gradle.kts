@@ -34,9 +34,10 @@ android {
         applicationId = providers.gradleProperty("proxyflow.applicationId").get()
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        // M10: the release candidate (ADR-0015 §8); M11 sets the release's.
-        versionCode = 10
-        versionName = "0.10.0"
+        // M11: the first release (closed testing, then production); versionCode goes up by one per upload to Play
+        // (docs/m11/release-checklist.md), versionName as docs/m11/release-notes.md says.
+        versionCode = 11
+        versionName = "1.0.0"
         // The VPN's end-to-end tests (src/androidTest): the real service, engine and proxies on emulators. The runner
         // lets a test trust the lab's CA for TLS proxies (ADR-0011); the app as installed never does.
         testInstrumentationRunner = "app.proxyflow.e2e.E2eTestRunner"
