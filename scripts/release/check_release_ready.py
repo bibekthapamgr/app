@@ -86,6 +86,8 @@ def check(production: bool, release_run: bool = False) -> list[str]:
             problems.append(f"CHANGELOG.md: the section of {label} is neither dated (— YYYY-MM-DD) nor marked 'release candidate'")
         if not re.search(r"^- ", body, re.M):
             problems.append(f"CHANGELOG.md: the section of {label} has no entry")
+        if "(what this release changes)" in body:
+            problems.append(f"CHANGELOG.md: the section of {label} still has bump_version.py's placeholder entry; write what the release changes")
     unreleased = re.search(r"^## \[Unreleased\]\n(.*?)(?=^## \[|\Z)", read("CHANGELOG.md"), re.M | re.S)
     if release_run and unreleased and re.search(r"^- ", unreleased.group(1), re.M):
         problems.append("CHANGELOG.md: [Unreleased] still has entries; move them to the release's section")

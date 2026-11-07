@@ -30,8 +30,11 @@ annotations give the current ones.
 ## 3. Before a release (the owner's list; `maintenance-runbook.md` §4 has the order)
 
 1. `android` and `release` runs green on the release commit; each re-run twice more (`gh run rerun <id>`), nothing
-   pushed to the branch meanwhile (a push cancels the attempt). A branch other than `main` gets its `android` run
-   from its pull request (or `workflow_dispatch`); the `release` run with the upload key exists only on `main`.
+   pushed to the branch meanwhile (a push cancels the attempt — on a pull request, a docs-only push too, since the
+   path filter reads the whole pull request's diff). The verified commit is the merge commit on `main`: a pull
+   request's `android` run is of GitHub's test merge (`refs/pull/N/merge`), a first proof only, and
+   `workflow_dispatch` on a branch runs on the branch head; the `release` run with the upload key exists only on
+   `main` (`maintenance-runbook.md` §4 steps 3–4).
 2. The signed-bundle smoke's screenshots and recording looked at once (the artifact), for the one thing a count
    cannot tell: that the screens look right.
 3. For a change in routing, the VPN, the engine or reconnecting: `docs/m10/physical-phone-checklist.md` on the

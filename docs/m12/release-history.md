@@ -23,13 +23,15 @@ a pending `release` run too.
   attempts of the same commit for a release (the project's rule since M5).
 - **Crash rate**: Play Console → Quality → Android vitals → Crashes and ANRs, the *crash rate* (the share of daily
   sessions with a crash) over the 28 days after the production date, and the *user-perceived crash rate* beside it;
-  the bar is 0.2 % (the 99.8 % crash-free bar of `docs/m10/compatibility-matrix.md` §4 in vitals' terms) and
-  Google's bad-behaviour threshold for the user-perceived rate. Written in by the owner; "no figure" when vitals
+  the bar is 0.2 % (the 99.8 % crash-free bar of `docs/m10/compatibility-matrix.md` §4 in vitals' terms; vitals
+  count daily active users who had a crash) and Google's bad-behaviour threshold for the user-perceived rate. Written in by the owner; "no figure" when vitals
   showed none (too few daily users).
 - **Rollout**: the staged-rollout steps the release went through and their dates (`docs/m12/rollback.md`): e.g.
   "5 % 2026-12-01 → 20 % 12-03 → 50 % 12-05 → 100 % 12-08", or "halted at 20 % 12-04 (M12-x), superseded by 1.0.1 (12)".
 
 ## Tags
 
-Each production release is tagged `v<versionName>` on the verified commit (`git tag -a v1.0.0 75ce907 -m "1.0.0 (11)"`,
-pushed with `git push origin v1.0.0`), so the changelog's links resolve and a hotfix branch has a base.
+Each production release is tagged `v<versionName>` on **the verified commit** — the row's commit, the one on `main`
+whose `android` run is green three times; the `release` run builds `main`'s head, which may be that commit plus
+docs-only commits (`qa-process.md` §1) — `git tag -a v1.0.0 <the row's commit> -m "1.0.0 (11)"`, pushed with
+`git push origin v1.0.0`, so the changelog's links resolve and a hotfix branch has a base.

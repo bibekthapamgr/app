@@ -68,6 +68,8 @@ class ReleaseReady(unittest.TestCase):
                 self.assertTrue(any("no section '## [1.0.1 (12)]'" in p for p in crr.check(False)))
             with fake_tree(**{"CHANGELOG.md": CHANGELOG.replace("## [1.0.1 (12)] — 2026-12-20\n\n### Fixed\n- A thing.\n", "## [1.0.1 (12)] — 2026-12-20\n\n### Fixed\n")}):
                 self.assertTrue(any("has no entry" in p for p in crr.check(False)))
+            with fake_tree(**{"CHANGELOG.md": CHANGELOG.replace("- A thing.", "- (what this release changes)")}):
+                self.assertTrue(any("placeholder" in p for p in crr.check(False)))
             with fake_tree(**{"docs/m12/release-history.md": HISTORY.replace("| 1.0.1 (12) | abc1234 | 42400000001 | 42400000002 | 2026-12-20 | pending | — | — |\n", "")}):
                 self.assertTrue(any("no row for 1.0.1 (12)" in p for p in crr.check(False)))
             with fake_tree(**{"app/build.gradle.kts": GRADLE.replace("12", "11").replace("1.0.1", "1.0.0")}):

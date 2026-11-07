@@ -33,7 +33,7 @@ why a Room migration of the profiles database is never destructive and a setting
 | 4 | **100 %** | — | — | A later finding: a new release |
 
 **The gate**, in Android vitals' own terms (Play Console → Quality → Android vitals → Crashes and ANRs, filtered to
-the new version): the **crash rate** (the share of daily sessions with a crash) **≤ 0.2 %** and the **user-perceived
+the new version): the **crash rate** (the share of daily active users who had a crash) **≤ 0.2 %** and the **user-perceived
 crash rate** below Google's bad-behaviour threshold (1.09 % when read; the Console shows the current one); no new
 crash cluster with a ProxyFlow frame; no ANR cluster with a ProxyFlow frame; no report (mail, issue, review) of a
 routing or credential problem; and the owner's own check (below) done. Vitals lag about a day and show a rate only
@@ -63,40 +63,52 @@ it until a new release reaches them, which is why a rollback of a critical relea
 
 ## 4. The rollback release, step by step
 
-The rollback is made **on a branch from `main`**, not from the old tag: `main` already holds the bad release, and the
-branch must end up as the commit `main` is released from (the upload key is granted to `main` only,
-`docs/m11/signing.md` §3), with its three green runs on *that* commit (`qa-process.md` §1: a green run of another
-commit is not this commit's proof).
+The rollback is made **on a branch from `main`**, not from the old tag: `main` already holds the bad release, and
+the released commit must be on `main` (the upload key is granted to `main` only, `docs/m11/signing.md` §3) with its
+three green runs on *that* commit (`qa-process.md` §1: a green run of another commit is not this commit's proof).
+The example: 1.0.1 (12) went wrong; the rollback is 1.0.2 (13) with 1.0.0 (11)'s code.
 
 1. `git checkout -b rollback/<name> main`.
-2. `git revert` the bad release's commits (`git revert -m 1 <merge commit>` when it was merged as a merge commit; the
-   version-bump commit too), so the tree is the old tag's sources: `git diff v1.0.0 -- app core engine feature` is
-   empty but for what step 3 adds.
-3. `scripts/release/bump_version.py 1.0.2` (the next forward name; code 13 in the example). In the new changelog
-   section's first line: "Re-releases the code of 1.0.0 (11); 1.0.1 (12) ‹what went wrong, the defect's id›". The
-   history row the script added says "rollback of 1.0.1 (12)" in *Notes*.
+2. **Revert the code, keep the bookkeeping.** `git revert -n` the bad release's commits (`git revert -n -m 1 <merge
+   commit>` when it was merged as a merge commit), then put the release bookkeeping back as `main` has it before
+   committing: `git checkout main -- app/build.gradle.kts CHANGELOG.md docs/m12/release-history.md
+   docs/m9/privacy-policy.md docs/m12/data-behavior.lock`. The tree is now the old tag's sources at the bad release's
+   version: `git diff v1.0.0 --stat -- app core engine feature` shows only `app/build.gradle.kts` (and, after step
+   4, the migration). 1.0.1 (12)'s changelog section and history row **stay**, since Play has that code for good; the
+   row's *Rollout* column gets "halted at N % on ‹date› (M12-x), superseded by 1.0.2 (13)".
+3. `scripts/release/bump_version.py 1.0.2` — the next forward name, and a code above both the gradle file's and
+   every row of the history (13 here). In the new changelog section's first line: "Re-releases the code of 1.0.0
+   (11); 1.0.1 (12) ‹what went wrong, the defect's id›". The history row the script added says "rollback of 1.0.1
+   (12)" in *Notes*.
 4. **If the bad release bumped a Room schema** of the profiles database (`core/data/schemas/…ProxyFlowDatabase/` has
-   a version above the tag's): the **downgrade migration and its test** (§5) are added on this branch — the revert
-   removed the new schema's exported JSON, so it is restored from the bad release's tag (`git checkout v1.0.1 --
-   core/data/schemas/app.proxyflow.core.data.db.ProxyFlowDatabase/4.json`, kept as the test's input) — and the branch
-   is no longer "the tag plus the version": the migration is reviewed like any code. Without it the release is not
+   a version above the tag's): the **downgrade migration and its test** (§5) are added on this branch, and the
+   branch is no longer "the tag plus the version": the migration is reviewed like any code. The test's input — the
+   newer schema's exported JSON — is kept **outside** `core/data/schemas/` (which the data-behaviour lock hashes
+   whole): `git show v1.0.1:core/data/schemas/app.proxyflow.core.data.db.ProxyFlowDatabase/4.json >
+   core/data/src/test/assets/rollback/app.proxyflow.core.data.db.ProxyFlowDatabase/4.json`, read by a second
+   `MigrationTestHelper(instrumentation, "rollback/app.proxyflow.core.data.db.ProxyFlowDatabase")` in the test
+   (`src/test/assets` is on the Robolectric test's asset path already). Without the migration the release is not
    uploaded. The log database needs nothing (§5).
 5. The data-behaviour lock: a rollback restores a reviewed behaviour, so `check_data_behavior.py` passes as it is
-   (the policy's version line is left out of the lock). It fails only when the bad release had changed the behaviour
-   *and* the lock was updated for it: then the revert brings the old behaviour back and the lock is updated once more,
-   `--note "rollback to 1.0.0 (11)'s behaviour"`, and `docs/m9/privacy-policy.md` is checked to say the old thing.
-6. The regression suite three times on the branch's final commit: open the pull request to `main` (the `android` run
-   on the pull request), rerun it twice with `gh run rerun <id>` — pushing nothing in between — and
-   `check_release_ready.py --release-run` green. Merge the pull request as a fast-forward or a merge commit; the
-   hand-started `release` run on `main` with the `fingerprint` input builds the signed bundle (`docs/m11/signing.md`
-   §3). If the merge made a new commit, that commit is the one `release` builds: the pull request's runs were of its
-   parent, so the `android` run of the merge commit on `main` is waited for and rerun twice before the `release` run
-   (a merge of the branch's head without a merge commit avoids this).
-7. Upload to the internal track, the owner's own check (§2), promote to production: **100 % at once** for a critical
+   (the policy's version line is left out of the lock; the schema directory is unchanged by step 4). It fails only
+   when the bad release had changed the behaviour *and* the lock was updated for it (step 2 kept the bad release's
+   lock): then the revert brings the old behaviour back and the lock is updated once more, `--note "rollback to
+   1.0.0 (11)'s behaviour"`, and `docs/m9/privacy-policy.md` is checked to say the old thing.
+6. The pull request to `main` and its `android` run green (a first proof; the run is of GitHub's test merge of the
+   branch into `main`, not of the branch head). Merge it with **Create a merge commit** (GitHub's other buttons
+   rewrite the commits; a true fast-forward exists only as `git push origin rollback/<name>:main` from the command
+   line, which branch protection may refuse). The merge commit on `main` is **the verified commit**: its `android`
+   run (the push to `main`) is rerun twice with `gh run rerun <id>`, pushing nothing meanwhile — green three times.
+7. The history row's *commit* and *`android` run* columns filled with the merge commit and its run, in a docs-only
+   commit on `main` (`qa-process.md` §1 allows it: the tree it builds is the verified commit's); `check_release_ready.py
+   --release-run` green. The hand-started `release` run on `main` with the `fingerprint` input builds the signed
+   bundle (`docs/m11/signing.md` §3; the run builds `main`'s head, whose code tree is the verified commit's), green
+   three times; the row's *`release` run* column filled; `check_release_ready.py --production` green; the tag
+   `v1.0.2` on the verified commit.
+8. Upload to the internal track, the owner's own check (§2), promote to production: **100 % at once** for a critical
    incident; 20 % → 50 % → 100 % on the hotfix clock otherwise. The known-issue notice updated (`incident-response.md`
-   §3); the tag `v1.0.2` on the merged commit; the history row's columns filled; `check_release_ready.py --production`
-   green before the upload.
-8. The bad release's defect in its register, with the regression test that would have caught it, before the next
+   §3); the history row's columns filled as the rollout goes.
+9. The bad release's defect in its register, with the regression test that would have caught it, before the next
    forward release.
 
 A **forward fix** (1.0.1 → 1.0.2 with the bug fixed) follows `maintenance-runbook.md` §4 on a branch
@@ -124,14 +136,15 @@ the old bugs back.
   lost — it was unread by the old code anyway — and the changelog says which. Its test in `DatabaseMigrationTest`
   creates the database from the newer schema's exported JSON (restored from the bad release's tag, §4 step 4) with a
   profile and its credentials, runs the migration with `MigrationTestHelper.runMigrationsAndValidate`, then opens it
-  with `ProxyFlowDatabase.create` and reads the profile and the credentials back.
+  with `ProxyFlowDatabase.create` and reads the profile and the credentials back (the JSON lives under
+  `core/data/src/test/assets/rollback/`, outside the schema directory the lock hashes: §4 step 4).
   `fallbackToDestructiveMigrationOnDowngrade` is never used here: losing the profiles is worse than the bug being
   rolled back.
 - **Credentials** (Android Keystore keys per profile, ADR-0006): the sealed blob **is versioned**, in three places —
   the `credentials_format` column, `CredentialCipher.FORMAT_VERSION` bound into the GCM associated data
   (`proxyflow/credentials/v1/<profile id>`), and `CredentialCodec`'s leading version byte. A format bump is a major
   release with a re-sealing migration tested on an emulator (`core/data` androidTest) and a note in the changelog.
-  Rolling back across such a bump is safe for the profiles and *loud* for the credentials: `unseal` reports a blob of
+  Rolling back across such a bump is safe for the profiles and *loud* for the credentials: `CredentialCipher.open` reports a blob of
   an unknown format as `CredentialUnreadableException(permanent = true)`, the profile stays, the app asks the user to
   enter the sign-in again (the M3 behaviour for an unreadable credential). The rollback's changelog and the
   known-issue notice say so.
@@ -145,10 +158,11 @@ the old bugs back.
 
 ## 6. The test of this document
 
-Before the first production release, the owner does §4 once on the internal track with a throwaway version built
-from the tag — **`1.0.1 (12)`, made with `bump_version.py 1.0.1` on a branch, committed and merged to `main` like any
-release**, since the code 12 is consumed on Play for good once uploaded and the next real release must then be
-`1.0.2 (13)` (`bump_version.py` counts from `app/build.gradle.kts`); its history row says "internal only: rollback
+Before the first production release, the owner does §4 once on the internal track with a throwaway version — not a
+real rollback (there is nothing to revert yet: in this drill 1.0.1 (12) is the harmless throwaway, whereas §1 and §4
+use it as the example of a bad release) but the same steps with an empty revert: **`1.0.1 (12)`, made with
+`bump_version.py 1.0.1` on a branch, committed and merged to `main` like any release**, since the code 12 is consumed on Play for good once uploaded and the next real release must then be
+`1.0.2 (13)` (`bump_version.py` counts from `app/build.gradle.kts` and the history's rows); its history row says "internal only: rollback
 drill" in *Notes* and its changelog section "Rollback drill; no change". Uploaded to the internal track, installed over
 1.0.0 (11) on the owner's phone: the profiles and settings still there afterwards, Connect works, the Logs screen
 opens. The **halt** is rehearsed on the closed-testing track, which supports staged rollouts (the internal track does

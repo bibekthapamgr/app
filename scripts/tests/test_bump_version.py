@@ -69,6 +69,19 @@ class Bump(unittest.TestCase):
                 self.assertNotEqual(self.run_bump(name).returncode, 0)
         self.assertEqual(self.read("app/build.gradle.kts"), open(os.path.join(ROOT, "app/build.gradle.kts"), encoding="utf-8").read())
 
+    def test_the_code_is_above_every_code_the_history_knows(self) -> None:
+        # Re-review B RB-2: a rollback branch reverts app/build.gradle.kts to an older code; the history remembers the
+        # codes Google Play has already seen, and a placeholder bullet is written when [Unreleased] has only headings.
+        self.assertEqual(self.run_bump("1.0.1").returncode, 0)  # 1.0.1 (12)
+        shutil.copy(os.path.join(ROOT, "app/build.gradle.kts"), os.path.join(self.dir.name, "app/build.gradle.kts"))  # back to 1.0.0 (11)
+        with open(os.path.join(self.dir.name, "CHANGELOG.md"), "a", encoding="utf-8") as f:
+            f.write("")
+        result = self.run_bump("1.0.2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("versionCode = 13", self.read("app/build.gradle.kts"))
+        self.assertIn("| 1.0.2 (13) | pending |", self.read("docs/m12/release-history.md"))
+        self.assertIn("## [1.0.2 (13)] — release candidate\n\n### Changed\n- (what this release changes)", self.read("CHANGELOG.md"))
+
     def test_a_second_bump_to_the_same_name_is_refused(self) -> None:
         self.assertEqual(self.run_bump("1.0.1").returncode, 0)
         self.assertNotEqual(self.run_bump("1.0.1").returncode, 0)

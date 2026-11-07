@@ -55,7 +55,10 @@ def bump(name: str) -> tuple[str, int]:
     old_code = int(re.search(r"versionCode\s*=\s*(\d+)", gradle).group(1))
     if parse(name) <= parse(old_name):
         raise SystemExit(f"{name} is not newer than the current {old_name}")
-    code = old_code + 1
+    # Above the gradle file's code AND every code the history knows (Google Play refuses a code once uploaded, and a
+    # rollback branch reverts the gradle file to an older code: docs/m12/rollback.md §4).
+    history_codes = [int(c) for c in re.findall(r"^\| \d+\.\d+\.\d+(?:-[\w.]+)? \((\d+)\) \|", read("docs/m12/release-history.md"), re.M)]
+    code = max([old_code] + history_codes) + 1
     gradle = re.sub(r"versionCode\s*=\s*\d+", f"versionCode = {code}", gradle, count=1)
     gradle = re.sub(r'versionName\s*=\s*"[^"]+"', f'versionName = "{name}"', gradle, count=1)
     write("app/build.gradle.kts", gradle)

@@ -59,8 +59,9 @@ looks critical) and recorded in the release's defect register with the id the re
 Where: `docs/m12/known-issue.md` (the first line is the box's heading, each paragraph after it a line of the box;
 rendered on the front page of the Pages site by `scripts/release/privacy_page.py --notice`, which `pages.yml` runs
 on every push and deploys from `main`), the README's status line, the reply to every report of the problem; and the
-Play listing's "What's new" of the fixing release says what was fixed. The file is empty when no incident is open —
-`test_privacy_page` fails the build when it is not, so that a notice cannot be forgotten on the page.
+Play listing's "What's new" of the fixing release says what was fixed. The file is empty when no incident is open:
+`pages.yml` annotates every build with a warning while it is not, and the monthly maintenance issue asks, so that a
+notice cannot be forgotten on the page.
 
 ## 4. A vulnerability in a library (OSV, govulncheck, a Play notice)
 

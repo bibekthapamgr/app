@@ -25,15 +25,19 @@ KEEP_HOSTS = {"localhost", "proxyflow.test", "example.com", "example.org", "exam
 KEEP_SUFFIXES = ("android.com", "google.com", "gstatic.com", "googleapis.com", "github.com", "proxyflow.test")
 MARKERS = re.compile(r"^(?:<(?:redacted|user|password|host|ip|ipv6|email|token|url)>|\[(?:redacted|host|url|address)\])$")
 
-PASSWORD_WORDS = r"pass(?:word|wd|phrase|code)?|pwd|pw|secret|token|api[_ -]?key|passwort|kennwort|mot de passe|contraseña|senha|パスワード|密码|密碼|비밀번호|पासवर्ड|пароль"
+PASSWORD_WORDS = r"pass(?:word|wd|phrase|code)?|pwd|pw|secret|token|api[_ -]?key|auth|creds?|credentials|login details|ログイン情報|passwort|kennwort|mot de passe|contraseña|senha|パスワード|密码|密碼|비밀번호|पासवर्ड|пароль"
 USER_WORDS = r"user(?:name)?|login|benutzer(?:name)?|usuario|ユーザー(?:名)?|用户名|사용자"
-# A label may be wrapped in quotes, backticks or asterisks (JSON, Markdown, a table); the separator may be a colon of
-# either width, an equals sign, a dash, an arrow, a bar, "is", or Japanese "は".
-WRAP = r"[\"'`*_「」]*"
-SEP = r"\s*(?:[:：=→|-]+\s*|は\s*)"
-# "the password is hunter22" — "is" alone separates a password; not a username ("user is confused" is prose).
-SEP_PASSWORD = r"\s*(?:[:：=→|-]+\s*(?:is\s*[:=]?\s*)?|は\s*|is\s*[:=]?\s*)"
-VALUE = r"(\"[^\"\n]{1,200}\"|'[^'\n]{1,200}'|「[^」\n]{1,200}」|[^\s\"'|,;。。]{1,200})"
+# A label may be wrapped in quotes, backticks, asterisks or a tag (JSON, Markdown, a table, HTML), before and — for
+# the asterisks, underscores, backticks and tags — after the separator ("**Password:** x"); the separator may be a colon
+# of either width, an equals sign, an arrow, a bar, a dash between spaces (never the hyphen of "password-protected"),
+# "is", or Japanese "は"; it stays on one line (a table header is not a label for the next line's first word).
+WRAP = r"(?:[\"'`*_「」]|</?\w+>)*"
+AFTER_SEP = r"(?:[`*_]+|</?\w+>)*[ \t]*"
+SEP = rf"[ \t]*(?:[:：=→|]+[ \t]*|[ \t]+-[ \t]+|は[ \t]*){AFTER_SEP}"
+# "the password is hunter22" — "is" alone separates a password; not a username ("user is confused" is prose); and a
+# 「…」 value needs no separator at all (パスワード「x」).
+SEP_PASSWORD = rf"[ \t]*(?:[:：=→|]+[ \t]*(?:is[ \t]*[:=]?[ \t]*)?|[ \t]+-[ \t]+|は[ \t]*|is[ \t]*[:=]?[ \t]*|(?=「)|[ \t]+(?=\S+:\S)|[ \t]{{2,}}){AFTER_SEP}"
+VALUE = rf"(?![`*_]+(?:\s|$))(?!(?:{PASSWORD_WORDS}|{USER_WORDS})\b[ \t]*(?:[|:：=]|$))(\"[^\"\n]{{1,200}}\"|'[^'\n]{{1,200}}'|「[^」\n]{{1,200}}」|[^\s\"'|,;。。]{{1,200}})"
 
 
 def _value_sub(kind: str, prefix_groups: int):
@@ -52,12 +56,27 @@ def _ip_sub(m: re.Match[str], counts: Counter, rule: str) -> str:
     return "<ip>" + (m.group(1) or "")
 
 
+def _token_sub(m: re.Match[str], counts: Counter, rule: str) -> str:
+    token = m.group(0)
+    if len(token) in (40, 64) and all(c in "0123456789abcdefABCDEF" for c in token):
+        return token  # a commit hash or a SHA-256, as the app's own release facts and CI print them
+    counts[rule] += 1
+    return "<token>"
+
+
+def _curl_sub(m: re.Match[str], counts: Counter, rule: str) -> str:
+    counts[rule] += 1
+    return f"{m.group(1) or m.group(2)} <user>:<password>"
+
+
 RULES: list[tuple[str, re.Pattern[str], object]] = [
     # scheme://user:pass@ — the user may hold an @ (an e-mail as a username): everything up to the last @ before the host.
     ("url credentials", re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)([^\s/@]+(?:@[^\s/@]+)*?)(:[^\s/@]*)?@(?=[^\s/@]+)"), r"\1<user>:<password>@"),
     ("bare credentials", re.compile(r"(?<![\w/:@.<])([^\s:@/\"'<]{1,64}):([^\s@\"'/]{1,200})@(?=[A-Za-z0-9\[])"), "<user>:<password>@"),
-    ("curl credentials", re.compile(r"(?i)(?<![\w-])(-U|-u|--proxy-user|--user|--proxy-basic)\s+(\"[^\"]+\"|'[^']+'|\S+)"), r"\1 <user>:<password>"),
+    ("curl credentials", re.compile(r"(?i)(?<![\w-])(?:(-U|-u)[ \t]*|(--proxy-user|--user|--proxy-basic)(?:\s+|=))(\"[^\"]+\"|'[^']+'|\S*:\S*)"), _curl_sub),
     ("basic auth header", re.compile(r"(?i)\b(Proxy-Authorization|Authorization)\s*:\s*(Basic|Bearer|Digest|Negotiate|NTLM)\s+\S+"), r"\1: \2 <redacted>"),
+    # "Basic YmliZWs6…" as a debugging tool or logcat prints it, without the header's name ("Basic authentication" is prose).
+    ("basic auth header", re.compile(r"\b(Basic|Bearer)[ \t]+(?![Aa]uth)([A-Za-z0-9+/=._~-]{8,})(?![\w+/=])"), r"\1 <redacted>"),
     ("password field", re.compile(rf"(?i)({WRAP}(?:{PASSWORD_WORDS}){WRAP}{SEP_PASSWORD}){VALUE}"), _value_sub("<redacted>", 1)),
     ("username field", re.compile(rf"(?i)({WRAP}(?:{USER_WORDS}){WRAP}{SEP}){VALUE}"), _value_sub("<user>", 1)),
     # curl -v: "* Proxy auth using Basic with user 'bibek'"
@@ -65,26 +84,49 @@ RULES: list[tuple[str, re.Pattern[str], object]] = [
     ("e-mail address", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "<email>"),
     # An IPv6 address has "::" or seven colons; a time (10:16:30) and a MAC (00:1A:2B:3C:4D:5E, five) do not.
     ("IPv6 address", re.compile(r"(?<![\w:.])(?:(?=[0-9A-Fa-f:]*::)|(?=(?:[0-9A-Fa-f]{0,4}:){7}))(?:[0-9A-Fa-f]{0,4}:){2,7}(?:[0-9A-Fa-f]{0,4}|(?:\d{1,3}\.){3}\d{1,3})(?:%\w+)?(?![\w:])"), "<ipv6>"),
-    ("IPv4 address", re.compile(r"(?<![\w.])(?<!version )(?<!UI )(?<!Android )(?<!iOS )(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\w.])(:\d{1,5})?"), _ip_sub),
-    ("long token", re.compile(r"(?<![A-Za-z0-9/+=])(?=[A-Za-z0-9/+=_-]*[0-9])(?=[A-Za-z0-9/+=_-]*[A-Za-z])[A-Za-z0-9/+=_-]{32,}(?![A-Za-z0-9/+=])"), "<token>"),
+    # A first octet above 223 is multicast or reserved, never a proxy: "MIUI 14.0.0.1" and "build 240.0.0.1" survive;
+    # a trailing full stop does not save an address (only a dot followed by a digit continues it).
+    ("IPv4 address", re.compile(r"(?<![\w.])(?<!version )(?<!UI )(?<!Android )(?<!iOS )(?<!MIUI )(?<!HyperOS )(?<!build )(?:(?:1?\d?\d|2[01]\d|22[0-3])\.)(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){2}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?!\w|\.\d)(:\d{1,5})?"), _ip_sub),
+    # A long mixed run is a token; a path (a run that starts with "/") is not.
+    ("long token", re.compile(r"(?<![A-Za-z0-9/+=])(?!/)(?=[A-Za-z0-9/+=_-]*[0-9])(?=[A-Za-z0-9/+=_-]*[A-Za-z])[A-Za-z0-9/+=_-]{32,}(?![A-Za-z0-9/+=])"), _token_sub),
 ]
+# \w is Unicode-aware in Python, so an internationalised name (пример.рф, プロキシ.日本) is a host too; the last label
+# is letters of any script, an IDN "xn--" label, or a private ending.
 HOST = re.compile(
-    r"(?<![\w-])((?:xn--[a-z0-9-]+\.|[\w](?:[\w-]{0,61}[\w])?\.)+(?:[a-z]{2,24}|xn--[a-z0-9-]+|test|local|lan|internal|home))(:\d{1,5})?(?!\w|-|\.\w)",
+    r"(?<![\w-])((?:xn--[a-z0-9-]+\.|[\w](?:[\w-]{0,61}[\w])?\.)+(?:[^\W\d_]{2,24}|xn--[a-z0-9-]+|test|local|lan|internal|home))(:\d{1,5})?(?!\w|-|\.\w)",
     re.I,
 )
-ONE_WORD_HOST = re.compile(r"(?<![\w.:/-])([a-z][\w-]{1,62}):(\d{2,5})(?![\w.])", re.I)
-CODE_FILE = re.compile(r"\.(?:kt|kts|java|py|go|md|xml|json|txt|log|yml|yaml|sh|gradle)$", re.I)
+# A bare name with a proxy-like port (myproxy:1080); "attempt:10" in prose is not one.
+ONE_WORD_HOST = re.compile(r"(?<![\w.:/-])([a-z][\w-]{1,62}):(\d{4,5}|80|443)(?![\w.])", re.I)
+CODE_FILE = re.compile(r"\.(?:kt|kts|java|py|go|md|xml|json|txt|log|yml|yaml|sh|gradle|js|ts|css|html|pac|apk|aab|aar|so|jar|zip|png|jpg|pem|p12|jks)$", re.I)
+# Package roots no proxy host starts with; "app." and "android." are common host labels, so only app.proxyflow.* counts.
+CODE_ROOTS = {"androidx", "kotlinx", "kotlin", "java", "javax", "dalvik", "okhttp3", "okio", "org"}
+# Generic top-level labels; a two-letter last label is a country code. A name ending in one of these is a host even
+# when a label is capitalised (Proxy.MyProvider.com); a class name's last label never is one.
+GTLDS = {
+    "com", "net", "org", "io", "info", "biz", "app", "dev", "xyz", "online", "site", "tech", "cloud", "host", "pro",
+    "shop", "store", "top", "club", "asia", "eu", "name", "mobi", "vpn", "proxy", "network", "link", "live", "space",
+    "me", "tv", "cc", "ws", "to", "one", "zone", "world", "today", "run", "fun", "icu", "digital", "systems",
+    "services", "solutions", "center", "ltd", "inc", "llc", "test", "local", "lan", "internal", "home",
+}
+
+
+def tld_like(label: str) -> bool:
+    label = label.lower()
+    return len(label) == 2 or label in GTLDS or label.startswith("xn--")
 
 
 def is_code_name(name: str) -> bool:
-    """A Java name (app.proxyflow.android, kotlinx.coroutines.JobCancellationException), a file name (Engine.kt), a
-    version-like number: not a host. A host's labels are lower case and its last label is a known ending."""
+    """A Java name (app.proxyflow.android, kotlinx.coroutines.JobCancellationException), a file name (Engine.kt): not
+    a host. A class has a capitalised label and never ends in a top-level domain; a host may be typed in any case."""
     labels = name.split(".")
     if CODE_FILE.search(name):
         return True
-    if any(label[:1].isupper() for label in labels):
+    if labels[0].lower() in CODE_ROOTS and not tld_like(labels[-1]):
         return True
-    if labels[0] in ("app", "androidx", "android", "kotlin", "kotlinx", "java", "javax") and labels[-1].lower() not in ("net", "io", "jp", "com", "org", "co"):
+    if name.lower().startswith("app.proxyflow."):
+        return True
+    if any(label[:1].isupper() for label in labels) and not tld_like(labels[-1]):
         return True
     return False
 

@@ -83,6 +83,11 @@ jobs:
           python3 scripts/check_data_behavior.py
           python3 scripts/release/check_release_ready.py
           python3 scripts/check_target_api.py
+          # The lock fingerprints the version catalog, so every library must come from it: a coordinate written
+          # straight into a build script would bypass the lock.
+          if grep -rnE '\("[A-Za-z0-9._-]+:[A-Za-z0-9._-]+:[^"]+"\)' --include=*.gradle.kts --exclude-dir=build --exclude-dir=spike . ; then
+            echo "::error title=Data behaviour::a dependency coordinate outside gradle/libs.versions.toml; add it to the catalog so the data-behaviour lock sees it"; exit 1
+          fi
 
       # M12 (docs/m12/rollback.md §5): the profiles database never falls back to a destructive migration, forward or
       # downgrade — profiles are kept or the app refuses to open; the ephemeral log database is the one place allowed.
@@ -92,7 +97,9 @@ jobs:
           if grep -rn "fallbackToDestructive" --include=*.kt core app feature | grep -v "core/data/src/main/kotlin/app/proxyflow/core/data/db/LogDatabase.kt"; then
             echo "::error title=Destructive migration::fallbackToDestructiveMigration* is allowed only in LogDatabase.create (docs/m12/rollback.md §5)"; exit 1
           fi
-          grep -q "fallbackToDestructiveMigrationOnDowngrade(true)" core/data/src/main/kotlin/app/proxyflow/core/data/db/LogDatabase.kt
+          if ! grep -q "fallbackToDestructiveMigrationOnDowngrade(true)" core/data/src/main/kotlin/app/proxyflow/core/data/db/LogDatabase.kt; then
+            echo "::error title=Destructive migration::LogDatabase.create must drop a newer logs.db on downgrade (docs/m12/rollback.md §5)"; exit 1
+          fi
 
       - name: Design tokens and generated colours agree
         if: ${{ !cancelled() }}

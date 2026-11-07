@@ -56,7 +56,7 @@ rules change, so §2 is re-read on the day of submission and the date updated.
 | ☐ | `docs/m10/physical-phone-checklist.md` run on the owner's phone with the Play-installed build and the owner's own proxy; its table in `docs/m10/compatibility-matrix.md` §3 filled | | | the checklist's results |
 | ☐ | **Closed testing** track created, the testers' list (e-mail list or Google Group) added, the opt-in link sent to the 12 or more testers; each tester opted in | | | tester count on the track's page |
 | ☐ | Day 14 (consecutive) reached with 12 or more still opted in — the date written here: ‹…› | | | the track's page |
-| ☐ | Crash-free sessions ≥ 99.8 % and no ANR in Play Console → Quality → Android vitals over the test; every crash with a ProxyFlow frame filed in `docs/m11/defect-register.md` and fixed or accepted | | | vitals screenshot or export |
+| ☐ | Crash rate ≤ 0.2 % (99.8 % crash-free) and no ANR in Play Console → Quality → Android vitals over the test; every crash with a ProxyFlow frame filed in `docs/m11/defect-register.md` and fixed or accepted | | | vitals screenshot or export |
 | ☐ | Tester feedback read; defects filed and resolved; a new build uploaded to the track for each fix (versionCode +1 each) | | | |
 | ☐ | The representative devices of `docs/m10/compatibility-matrix.md` §4 covered as far as the testers' phones allow (makers' battery management, Android 10 and 14 on ARM, a low-memory phone); the gaps named | | | |
 | ☐ | (Personal accounts) "Apply for production" submitted with the closed test's summary; the answer received | | | date, answer |
@@ -90,8 +90,9 @@ rules change, so §2 is re-read on the day of submission and the date updated.
 
 - [ ] **GitHub private vulnerability reporting is on**: repository Settings → Code security (and analysis) → *Private
       vulnerability reporting* → Enable. It is off by default, and `SECURITY.md` and the issue chooser send reporters
-      to `…/security/advisories/new`, which outsiders cannot use until it is on. Checked by opening that address
-      signed out.
+      to `…/security/advisories/new`, which outsiders cannot use until it is on. Checked on the repository's
+      Security tab, which shows "Report a vulnerability" once it is on (or by a second account that is not a
+      collaborator).
 - [ ] GitHub Pages is on (Settings → Pages → Source: GitHub Actions) and the repository variable `PAGES_ENABLED` is
       `true`, so the privacy policy and a known-issue notice (`docs/m12/incident-response.md` §3) deploy from `main`.
 - [ ] The support mailbox's auto-reply is the text of `docs/m12/support.md` §3.

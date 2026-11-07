@@ -150,5 +150,6 @@ jobs:
             echo "- [ ] Play Console: the policy notices in the inbox (a new rule, a deadline), the app's status, the testing track's testers"
             [ -n "$quarter" ] && echo "$quarter"
             echo "- [ ] Anything open in docs/m12/release-history.md's last row (the crash rate, the rollout column) written in"
+            echo "- [ ] docs/m12/known-issue.md is empty unless an incident is open (docs/m12/incident-response.md §3)"
           } > "$RUNNER_TEMP/issue.md"
           gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label maintenance --body-file "$RUNNER_TEMP/issue.md" || gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/issue.md"

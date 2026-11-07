@@ -22,8 +22,10 @@ clock whether or not the owner is reachable. Before the first production release
 the owner's password manager, not in this public repository) and gives
 them, in this order:
 
-1. **Play Console**: a second user on the developer account with *Release manager* rights (Users and permissions),
-   so that a release can be halted, a rollback uploaded and a policy notice read without the owner. Google asks for
+1. **Play Console**: a second user on the developer account (Users and permissions) with the permissions to release
+   to production (halt, resume, upload), to release to the testing tracks, to view app information and to manage the
+   policy declarations (the Console names them per permission, not as a role), so that a release can be halted, a
+   rollback uploaded and a policy notice read without the owner. Google asks for
    the account's own verification from time to time; the owner's recovery phone and e-mail are kept current.
 2. **The upload key and its passwords**: the two offline backups of `docs/m11/signing.md` §2 — one of them is the
    second person's, or in a store (a password manager's shared vault, a safe) they can open. Without it no release
@@ -45,7 +47,7 @@ line in the sign-off. Checked yearly (§2).
 |---|---|---|---|
 | **Every working day** | The support mailbox and GitHub issues (a person answers within 3 working days); the security channel (acknowledged within 3 days) | Mail; `github.com/bibekthapamgr/app/issues`; Security → Advisories | `triage.md` |
 | **Weekly** | Android vitals: the crash rate (28 days) against 0.2 % and the user-perceived crash rate against Google's threshold, new crash clusters, ANRs; new Play reviews; the current rollout's step (`rollback.md` §2) | Play Console → Quality → Android vitals; Reviews; Release → Production | A cluster with a ProxyFlow frame → a defect the same day; a review that reports a bug → an issue the owner files |
-| **Monthly** (the first week; the `maintenance` workflow opens the issue) | OSV at today's resolved versions; the Play target API rule; the data-behaviour lock; the release readiness; dependabot's pull requests; the Play Console inbox (policy notices, deadlines, a rejected release → §4.1); the open items of the last release's row. **The owner's calendar carries its own reminder** for the 8th of each month: "is there an issue *Maintenance review YYYY-MM*?" — GitHub disables a workflow's schedule after 60 days without a push to the repository and says nothing, and a quiet app in maintenance is exactly that; when the issue is missing, Actions → maintenance → *Enable workflow*, then *Run workflow* | The issue "Maintenance review YYYY-MM"; `.github/workflows/maintenance.yml` | Ticks on the issue; a vulnerability → §3.1; a target API warning → §3.3 |
+| **Monthly** (the first week; the `maintenance` workflow opens the issue) | OSV at today's resolved versions; the Play target API rule; the data-behaviour lock; the release readiness; dependabot's pull requests; the Play Console inbox (policy notices, deadlines, a rejected release → §4.1); the open items of the last release's row. **The owner's calendar carries its own reminder** for the 8th of each month: "is there an issue *Maintenance review YYYY-MM*?" — GitHub disables a workflow's schedule after 60 days without a push to a public repository (it may e-mail the workflow's last author; the issue simply stops), and a quiet app in maintenance is exactly that; when the issue is missing, Actions → maintenance → *Enable workflow*, then *Run workflow* | The issue "Maintenance review YYYY-MM"; `.github/workflows/maintenance.yml` | Ticks on the issue; a vulnerability → §3.1; a target API warning → §3.3 |
 | **Quarterly** (January, April, July, October — the monthly issue carries the line) | The policy review: the privacy policy, the Data safety form and the VpnService declaration read against the app | `policy-review.md` | The lock's note updated (`check_data_behavior.py --update`), or a release with the policy changed |
 | **Every 180 days at most** | Google's target API page re-read, `docs/m12/play-target-api.json` updated with the date | `check_target_api.py` warns when it is older | — |
 | **Yearly** | The Android Gradle plugin, Kotlin and Gradle (§3.2); the Go toolchain and gomobile (§3.2); the lab's images (`docs/m10/compatibility-matrix.md`: the new Android's emulator image added to the matrix when it reaches `google_apis`); the upload key's backups opened and the Play account's recovery details checked (`docs/m11/signing.md` §2, §6); §1.1's second person still reachable and still able to sign in everywhere | — | A release |
@@ -84,7 +86,11 @@ passed and warns 120 days ahead, from the dates in `docs/m12/play-target-api.jso
 `compileSdk` and `targetSdk` in `gradle/libs.versions.toml`; the new Android's behaviour changes read
 (`developer.android.com/about/versions/<n>/behavior-changes-<n>`) against the VpnService, the foreground service,
 notifications, the Keystore and storage; the new emulator image added to `android.yml`'s matrix and to
-`docs/m10/compatibility-matrix.md` (the suite must be green on it); then a release. Allow a month.
+`docs/m10/compatibility-matrix.md` (the suite must be green on it); then a release. Allow a month. If the bump
+will not make Google's date: request the extension in Play Console (the target API notice in the inbox offers it,
+until the `extension_until` of the rules file), and when the Console confirms it set `"extension_granted": true`
+on that rule in `docs/m12/play-target-api.json` — CI then warns until the extension's end instead of failing every
+push; `check_target_api.py --extended` is the same thing for a local dry run.
 
 ## 4. A release, from the first change to 100 %
 
@@ -100,13 +106,16 @@ docs-only commit, because the tooling is built for that order (`check_release_re
 2. **If what the app keeps or sends changed** (and only then — the lock leaves the policy's version line out, so a
    bump alone does not touch it): `policy-review.md`, then `scripts/check_data_behavior.py --update --reviewed-by
    --note`. CI fails on every push until this is done.
-3. The pull request to `main`; the `android` run of its final commit rerun twice (`qa-process.md` §3); the history
-   row's *commit* and *`android` run* columns filled in a docs-only commit on the branch (`qa-process.md` §1 allows
-   it: the runs are of the commit the row names); `scripts/release/check_release_ready.py --release-run` green.
-4. Merge (without a merge commit when possible: `rollback.md` §4 step 6 says what a merge commit costs); the
-   hand-started `release` run on `main` with the fingerprint (`docs/m11/signing.md` §5), green three times (rerun
-   twice); the bundle's `release-facts.txt` checked; the row's *`release` run* column filled;
-   `check_release_ready.py --production` green; the tag `v<name>` pushed on the released commit.
+3. The pull request to `main` and its `android` run green (a first proof: a pull request's run is of GitHub's test
+   merge of the branch into `main`, not of the branch head). Merge with **Create a merge commit**: the merge commit
+   on `main` is **the verified commit** — its `android` run (the push to `main`) rerun twice with `gh run rerun`,
+   pushing nothing meanwhile (`qa-process.md` §3).
+4. The history row's *commit* and *`android` run* columns filled with the merge commit and its run, in a docs-only
+   commit on `main` (`qa-process.md` §1 allows it: the tree built is the verified commit's);
+   `scripts/release/check_release_ready.py --release-run` green. The hand-started `release` run on `main` with the
+   fingerprint (`docs/m11/signing.md` §5; it builds `main`'s head, whose code tree is the verified commit's), green
+   three times (rerun twice); the bundle's `release-facts.txt` checked; the row's *`release` run* column filled;
+   `check_release_ready.py --production` green; the tag `v<name>` on the verified commit.
 5. Internal testing (the owner's phone, `docs/m10/physical-phone-checklist.md` for a change in routing or the VPN),
    then closed testing if the change is large, then production as a staged rollout (`rollback.md` §2).
 6. The docs-only commit that closes the release: the changelog heading's date (replacing "release candidate"), the
@@ -117,13 +126,13 @@ docs-only commit, because the tooling is built for that order (`check_release_re
 
 Play Console → Inbox (and the e-mail) names the reason: a declaration (the VpnService declaration, Data safety, the
 *App access* instructions for a proxy the reviewer could not test — `docs/m11/declarations.md` says what each answer
-is and why), a listing claim, a policy the app is said to breach, or a target API deadline.
+is and why, *App access* being a row of its §2 table), a listing claim, a policy the app is said to breach, or a target API deadline.
 
 1. Read the reason in full and write it into the release's defect register with the date.
 2. A declaration or listing problem: fix the text in `docs/m11/declarations.md` / `docs/m11/store-listing.md`
    (`check_listing_claims.py` and the data-behaviour lock still apply), re-enter it in the Console, resubmit the same
    bundle. A build problem: a new version through this section. A "could not test" of the proxy: the App access
-   instructions re-written with a proxy the reviewer can reach (`declarations.md` §App access; the owner's own test
+   instructions re-written with a proxy the reviewer can reach (that row; the owner's own test
    proxy for the review period, its password changed afterwards) and resubmitted.
 3. A policy decision the owner believes wrong: the appeal from the inbox message, with the documents that show the
    behaviour (`docs/m6/routing-and-limitations.md`, the privacy policy, the capture evidence), and a note here under

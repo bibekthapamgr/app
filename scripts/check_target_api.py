@@ -52,7 +52,8 @@ def check(today: dt.date, lead: int, stale: int, extended: bool = False) -> tupl
         due = dt.date.fromisoformat(rule["new_apps_and_updates_from"])
         if rule["api"] > target:
             extension = dt.date.fromisoformat(rule["extension_until"]) if rule.get("extension_until") else None
-            if due <= today and extended and extension and today <= extension:
+            granted = extended or bool(rule.get("extension_granted"))
+            if due <= today and granted and extension and today <= extension:
                 warnings.append(f"Google Play has required targetSdk {rule['api']} (Android {rule['android']}) since {due}; the app targets {target} under an extension that ends {extension}, in {(extension - today).days} days")
             elif due <= today:
                 failures.append(f"Google Play has required targetSdk {rule['api']} (Android {rule['android']}) for new apps and updates since {due}; the app targets {target}" + (f" (an extension, if Google granted one, would end {extension}: run with --extended)" if extension and today <= extension else ""))
@@ -75,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--today", default=dt.date.today().isoformat())
     parser.add_argument("--lead", type=int, default=120)
     parser.add_argument("--stale", type=int, default=180)
-    parser.add_argument("--extended", action="store_true", help="Google granted the extension in Play Console: a passed requirement warns until its extension_until instead of failing")
+    parser.add_argument("--extended", action="store_true", help="as if every rule had extension_granted (a local dry run); in CI the owner sets extension_granted in docs/m12/play-target-api.json when Play Console confirms the extension")
     args = parser.parse_args(argv)
     failures, warnings = check(dt.date.fromisoformat(args.today), args.lead, args.stale, args.extended)
     for w in warnings:

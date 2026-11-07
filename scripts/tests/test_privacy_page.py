@@ -57,8 +57,8 @@ class PrivacyPage(unittest.TestCase):
         self.assertIn("<p>Fix on the way; 1.0.0 (11) is unaffected.</p>", page)
         self.assertLess(page.index("</aside>"), page.index("Privacy policy</a>"))
         self.assertNotIn("<script", page)
-        with open(os.path.join(os.path.dirname(__file__), "..", "..", "docs", "m12", "known-issue.md"), encoding="utf-8") as f:
-            self.assertEqual(f.read().strip(), "", "docs/m12/known-issue.md must be empty when no incident is open")
+        # The tracked file's state is not asserted here: the push that publishes a notice must build (RB-1);
+        # pages.yml annotates a non-empty file and the monthly issue asks about it.
 
     def test_the_page_fetches_nothing_and_runs_nothing(self) -> None:
         for page in (privacy_page.privacy_html("support@example.test"), privacy_page.index_html()):

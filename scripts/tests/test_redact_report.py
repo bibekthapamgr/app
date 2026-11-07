@@ -39,6 +39,12 @@ class Redaction(unittest.TestCase):
         self.gone("bibek:hunter22@proxy.example.net:1080", "bibek", "hunter22", "proxy.example.net")
         self.gone("curl -v -U bibek:hunter22 --proxy myproxy.jp:3128", "bibek", "hunter22", "myproxy.jp")
         self.gone("curl --proxy-user 'bibek:hunter 22'", "bibek", "hunter 22")
+        self.gone("curl -Ubibek:hunter22 --proxy myproxy.jp:3128", "bibek", "hunter22")
+        out, counts = rr.redact("curl --proxy-user=bibek:hunter22 http://x")
+        self.assertEqual(out, "curl --proxy-user <user>:<password> http://x")
+        self.assertIn("curl credentials", counts)
+        self.gone("* Basic YmliZWs6aHVudGVyMjI= sent", "YmliZWs6aHVudGVyMjI=")
+        self.kept("Basic authentication is used")
 
     def test_password_fields_in_every_form(self) -> None:
         for text, secret in (
@@ -65,6 +71,18 @@ class Redaction(unittest.TestCase):
             ("密码: hunter22", "hunter22"),
             ("비밀번호: hunter22", "hunter22"),
             ("password：hunter22", "hunter22"),
+            # Re-review A RA-1: the colon inside the bold, HTML labels.
+            ("**Password:** hunter22", "hunter22"),
+            ("- **Proxy password:** hunter22", "hunter22"),
+            ("Password:** hunter22", "hunter22"),
+            ("<b>password</b>: hunter22", "hunter22"),
+            ("password:</b> hunter22", "hunter22"),
+            # RA-4, RA-5: 「」 as the only separator; auth/creds labels.
+            ("パスワード「hunter22」", "hunter22"),
+            ("auth: bibek:hunter22", "hunter22"),
+            ("creds bibek:hunter22", "hunter22"),
+            ("Password    hunter22", "hunter22"),
+            ("credentials: bibek/hunter22", "hunter22"),
         ):
             with self.subTest(text=text):
                 out = self.gone(text, secret)
@@ -82,6 +100,9 @@ class Redaction(unittest.TestCase):
         self.gone("v6 2001:0db8:85a3:0000:0000:8a2e:0370:7334 ok", "2001:0db8:85a3")
         self.gone("via ::ffff:203.0.113.9", "203.0.113.9")
         self.gone("key a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6")
+        # RA-3: an address at the end of a sentence.
+        self.gone("my gateway is 192.168.1.1. and the proxy is 203.0.113.9. ok", "192.168.1.1", "203.0.113.9")
+        self.gone("ip 203.0.113.9.", "203.0.113.9")
 
     def test_hosts_in_every_place_but_not_the_apps_own(self) -> None:
         out, counts = rr.redact("tunnel to proxyflow.test and connectivitycheck.gstatic.com, then jp1.myproxy.co.jp:443 and corp.internal")
@@ -96,6 +117,14 @@ class Redaction(unittest.TestCase):
         self.gone("host com.myprovider.proxy", "myprovider")
         self.gone("host io.myproxy.net", "myproxy")
         self.gone("at xn--80ahd1agd.xn--p1ai", "xn--80ahd1agd")
+        # RA-2: hosts typed as the provider prints them, and common first labels.
+        self.gone("My server is Proxy.MyProvider.com and MyProxy.jp and JP1.MyProxy.Net:1080", "MyProvider", "MyProxy")
+        self.gone("Host=JP-1.MyProxy.jp", "MyProxy")
+        self.gone("the proxy is at MYPROXY.EXAMPLE.NET", "MYPROXY.EXAMPLE")
+        self.gone("host app.proxyprovider.de and android.myproxy.fr and app.proxy.me", "proxyprovider", "myproxy", "app.proxy.me")
+        # RA-10: internationalised names.
+        self.gone("сервер пример.рф и proxy.рф", "пример.рф", "proxy.рф")
+        self.gone("サーバーはプロキシ.日本です", "プロキシ.日本")
         self.kept("jp2.proxyflow.test answered")
 
     def test_the_exported_log_and_ordinary_report_text_survive(self) -> None:
@@ -114,13 +143,27 @@ class Redaction(unittest.TestCase):
             "Wi-Fi. Then it reconnected",
             "server <redacted> user <user>",
             "androidx.compose.ui.platform.AndroidComposeView",
+            "dalvik.system.NativeStart.main at okhttp3.internal.http2.Http2Connection",
+            # RA-6: hyphenated prose, and a label at the end of a line is not a label for the next line.
+            "a password-protected proxy with token-based auth",
+            "user-agent: Mozilla/5.0",
+            "| password |\n26 attempts",
+            # RA-11: version-like numbers of other makers, a path, a commit hash, file names.
+            "MIUI 14.0.0.1 and HyperOS 2.0.0.1, build 240.0.0.1",
+            "/storage/emulated/0/Download/ProxyFlow-2026-11-08-101630-export.txt",
+            "commit 3f8c3ad39c0e5b1d2a4f6c8e0b2d4f6a8c0e2b4d",
+            "node.js, proxy.pac and settings.html",
+            "python3 -u run.py",
+            "attempt:10 and Reconnecting:30",
+            "| username | password |",
         ):
             with self.subTest(text=text):
                 self.kept(text)
 
     def test_the_rotate_line_only_for_a_real_credential(self) -> None:
-        _, counts = rr.redact("Password: [redacted]")
-        self.assertFalse(any(k in counts for k in rr.CREDENTIAL_KINDS))
+        for text in ("Password: [redacted]", "a password-protected proxy", "the password field was empty"):
+            _, counts = rr.redact(text)
+            self.assertFalse(any(k in counts for k in rr.CREDENTIAL_KINDS), text)
         _, counts = rr.redact("Password: hunter22")
         self.assertTrue(any(k in counts for k in rr.CREDENTIAL_KINDS))
 

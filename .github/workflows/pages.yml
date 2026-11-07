@@ -43,6 +43,9 @@ jobs:
           python3 scripts/release/privacy_page.py --out site --notice docs/m12/known-issue.md
           python3 -m unittest scripts.tests.test_privacy_page scripts.tests.test_privacy_policy
           grep -c '<h2>' site/privacy.html
+          if [ -s docs/m12/known-issue.md ]; then
+            echo "::warning title=Known issue::docs/m12/known-issue.md is not empty, so the front page carries a notice (docs/m12/incident-response.md §3); empty it in the commit that dates the fixing release"
+          fi
 
       - name: The documents a release depends on (M12), on every push
         run: |
