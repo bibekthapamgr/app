@@ -1,0 +1,42 @@
+# ADR-0017 — Launch and maintenance: the support process, the scheduled reviews, the locks that keep the policy true, and the release discipline after V1 (M12)
+
+**Status:** Technical decisions accepted 2026-11-08 (delegated by the owner, "Timi nai decide gara"; implemented in M12); the owner's part is the calendar of `docs/m12/maintenance-runbook.md` · **Date:** 2026-11-08
+
+## Context
+
+M12 asks for the app to be maintained safely after release: privacy-respecting crash and error signals and user feedback; a support and bug-report process that tells users not to share proxy passwords; triage of compatibility, connection and security bugs; dependencies and the target API updated as required; regression tests for protocol and routing kept; staged rollouts and a rollback procedure; a changelog, release notes and an incident-response runbook; the privacy policy and the Play declarations reviewed whenever the data behaviour changes. Its acceptance: every release with a changelog and regression results; critical security reports with a named owner and a process; profile data compatible or safely migrated; rollback and incident instructions; policy and dependency reviews scheduled.
+
+The project has one maintainer, no servers, no SDK that reports anything, and a privacy policy that says "nothing to the developer" (ADR-0016 §6). Whatever maintenance adds must keep that true, and must run without anyone remembering to run it.
+
+## Decision
+
+1. **No signal of ProxyFlow's own; Google's, under the user's setting, is the only crash signal** (`docs/m12/support.md` §1). Android vitals (crashes, ANRs, the crash-free rate), Play reviews, the support e-mail, GitHub issues and GitHub's private vulnerability reporting are the channels; no crash SDK, analytics or in-app feedback form is added, so the Data safety answer "no collection" stays true and the data-behaviour lock (decision 5) would fail a build that added one.
+2. **Users are told, everywhere they could write to the developer, never to send a proxy password** (`support.md` §2): the issue template (a required checkbox and a bold warning), the mailbox's auto-reply, the listing's support text and the app's own Help → Feedback (`help_feedback_body`, guarded by `CopyClaimsTest`). What slips through is redacted with `scripts/release/redact_report.py` before it is kept, and the reporter told to change the password. The exported log is what users are asked for, since it already carries no credential, server or site (M7).
+3. **A named owner and a clock for security reports** (`SECURITY.md`; `docs/m12/incident-response.md`): the repository owner; acknowledgement in 3 days, assessment in 7, a fixed release for a critical finding on the internal track in 14 days, high in 30; disclosure after the fix has reached everyone. Severity is defined by what the app promises (a leak around the proxy, a credential exposed, the kill switch failing, a remote crash are critical). The process is drilled once before production and yearly.
+4. **Triage by kind, with the first question written down** (`docs/m12/triage.md`): security, routing, connection, protocol compatibility, device compatibility, crash, UI, question; a documented limit is answered with the document and counted, so that the limits users hit most shape the next help text; a provider-specific protocol deviation is reproduced in the lab with the host redacted, never with the reporter's credentials.
+5. **The data behaviour is locked** (`scripts/check_data_behavior.py`, `docs/m12/data-behavior.lock`): a fingerprint of the manifests' permissions and services, the connectivity-check destination, the Room schemas, the DataStore keys, the log's retention, the `privacy_*` strings, the policy and declarations documents and the dependency review; every build fails when any of them changed since the last review, until the review of `docs/m12/policy-review.md` is done and the lock rewritten with the reviewer and the note. A quarterly review happens whether or not anything changed, because Google's forms move.
+6. **Dependencies by dependabot, the platform by hand, vulnerabilities on a clock** (`.github/dependabot.yml`, `docs/m12/maintenance-runbook.md` §3): monthly grouped pull requests that the whole CI runs on; the Android Gradle plugin, Kotlin, Gradle, Go, gomobile and the NDK yearly on a branch of their own with three green runs; OSV at today's resolved versions monthly (`.github/workflows/maintenance.yml`), a reachable vulnerability handled as an incident.
+7. **The target API is watched by a script with Google's dates** (`scripts/check_target_api.py`, `docs/m12/play-target-api.json`): a passed requirement fails every build, one within 120 days warns, a rules file older than 180 days warns; the bump is a procedure of the runbook with a month's lead.
+8. **A release is a version everywhere at once, refused until its documents exist** (`scripts/release/bump_version.py`, `scripts/release/check_release_ready.py`, `CHANGELOG.md`, `docs/m12/release-history.md`): one command bumps the version code and name, opens the changelog section, adds the history row and regenerates the privacy policy's version line; CI refuses a tree whose version has no changelog section or history row, whose policy names another version, or whose data behaviour is unreviewed; `--production` refuses undated sections and pending rows. The history row is where the regression results (the runs' ids) and the crash-free rate of each release live.
+9. **Staged rollouts with fixed gates; a rollback is a forward release that may need a downgrade migration** (`docs/m12/rollback.md`): 5 % → 20 % → 50 % → 100 % on 2–3-day holds gated on the crash-free rate, new clusters and reports; a halt within the hour for a critical finding; since Play cannot roll a user back, the rollback is the tag's code with the next version code — and, when the bad release bumped the Room schema, a downgrade migration with a test, because Room refuses a newer database and the profiles would otherwise be unreadable (`DatabaseMigrationTest` proves they are kept, not that the old code can read them). A destructive downgrade is never used.
+10. **The monthly review is an issue the workflow opens** (`.github/workflows/maintenance.yml`): the checks' results in its first line and the owner's checklist as tick boxes — vitals, reviews, mail, dependabot, OSV, the target API, the Play Console inbox, the quarterly policy review, the last release's open columns — so the calendar of `maintenance-runbook.md` §2 has a place to be ticked and a history.
+
+## Alternatives considered
+
+- **A crash-reporting SDK** (Firebase Crashlytics, Sentry): better traces, faster alerts; but a third party receiving device data from every user, a Data safety answer that is no longer "no collection", and a policy that would have to say so. Android vitals gives the crash-free rate and sanitized traces under the user's own setting.
+- **An in-app feedback form**: a destination of ProxyFlow's own, which the app has none of; the exported log plus a mail or an issue does the same with the user holding the data.
+- **Pinning dependencies and never updating**: no churn, but no vulnerability fixes; the monthly OSV check against the *resolved* versions is the compromise.
+- **A lock on the whole source tree**: every commit would be a "data behaviour change"; the ten items are the ones that decide what is kept or sent, and the dependency review catches a new library.
+- **Trusting the migration tests for rollback**: they prove forward migrations and that a newer database is not destroyed; the rollback document has to say the rest, and does.
+
+## Consequences
+
+- One person's calendar is in a workflow and a document; a second maintainer could follow it.
+- A change to what the app keeps or sends cannot ship by accident; it costs a review and a note.
+- Every release carries its changelog section, its history row and its runs' ids, or CI refuses it.
+- Users are told the one thing that matters at every door, and the owner has a script for what they send anyway.
+- The policy, the forms and the target API are re-read on a schedule a script enforces, not a memory.
+
+## Evidence
+
+`docs/m12/M12-acceptance-report.md`; the `android` run of the verified commit (the three M12 checks in the build job, the Help text's screenshot, `CopyClaimsTest`); the 15 M12 tests among `scripts/tests`; `docs/m12/*.md`; `SECURITY.md`; `CHANGELOG.md`; `.github/dependabot.yml`; `.github/workflows/maintenance.yml`; `.github/ISSUE_TEMPLATE/*`.
