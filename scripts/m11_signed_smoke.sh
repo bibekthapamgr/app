@@ -72,8 +72,11 @@ note "installed from the bundle's APK set: download size $(tail -1 "$OUT/install
 
 # 2. What was installed: the package, the certificate, debuggable, version (pm; the APK pulled for apksigner's certs).
 step "the installed package"
-if ! timeout 30 adb shell pm list packages | tr -d '\r' | grep -qx "package:$APPLICATION_ID"; then
-    fail "no package $APPLICATION_ID is installed; third-party packages: $(timeout 30 adb shell pm list packages -3 | tr -d '\r' | tr '\n' ' ')"
+# The listing is read whole before it is searched: a `grep -q` that stops reading early gives adb a SIGPIPE, which
+# `pipefail` reports as the pipeline's failure (API 29 in run 42361983214: M11-54).
+packages="$(timeout 30 adb shell pm list packages | tr -d '\r')"
+if ! grep -qE "^package:${APPLICATION_ID}[[:space:]]*$" <<<"$packages"; then
+    fail "no package $APPLICATION_ID is installed; third-party packages: $(grep -v 'package:com\.\(android\|google\)' <<<"$packages" | tr '\n' ' ')"
     exit 1
 fi
 timeout 60 adb shell dumpsys package "$APPLICATION_ID" | tr -d '\r' > "$OUT/package.txt" || { fail "dumpsys package failed"; exit 1; }
@@ -159,12 +162,16 @@ sleep 2
 step "the lab's logs"
 sudo chmod -R a+rX /tmp/pf 2>/dev/null || true
 destination="$(prop destination.name)"
+port="$(prop destination.port)"
 connections="$(since destination.log | grep -c . || true)"
-tunnels="$(since danted.log | grep -E "tcp/connect \[: .*${destination//./\\.}\.$(prop destination.port)\b" | grep -vc 'block(' || true)"
+# Dante names the destination as the SOCKS request did (the name) or as resolved (the address), as M6's evidence reads it.
+tunnels="$(since danted.log | grep -E "tcp/connect \[: .*(${destination//./\\.}|$(prop destination.address))\.$port\b" | grep -vc 'block(' || true)"
 if [ "$connections" = 1 ] && [ "$tunnels" = 1 ]; then
     note "the destination saw 1 connection and Dante opened 1 tunnel to it: the line, through the proxy"
 else
     fail "the destination saw $connections connection(s) and Dante opened $tunnels tunnel(s) to it; expected 1 and 1"
+    echo "Dante's lines since the lab came up that name port $port:"; since danted.log | grep "\.$port\b" | tail -5 | cut -c1-300
+    echo "the destination's lines:"; since destination.log | tail -3 | cut -c1-200
 fi
 heard="$(since witness.log | grep -c . || true)"
 [ "$heard" = 0 ] || fail "the witness's log has $heard new line(s)"
