@@ -6,6 +6,8 @@
     uid owns the admin; only the shell reaches the command receiver (it needs DUMP, which apps cannot get).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The idle test holds a partial wake lock from the end of its idle period until the screen is back on (M12-65). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application>
         <receiver
             android:name="app.proxyflow.e2e.LabDeviceAdmin"

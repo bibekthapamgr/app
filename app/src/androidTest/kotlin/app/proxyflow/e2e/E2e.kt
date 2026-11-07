@@ -119,10 +119,33 @@ object Shell {
         return text
     }
 
+    /**
+     * [run], but failed after [timeoutMillis] instead of waited for: a shell command on a phone that has suspended with
+     * its screen off (API 29 in run 42394191622: `input keyevent KEYCODE_WAKEUP` after the idle test, M12-65) can block
+     * `executeShellCommand` for as long as the phone sleeps, which took the device job's whole 55 minutes from the tests
+     * after it. The command's thread is left behind on a timeout; the test fails with the command named.
+     */
+    fun runBounded(command: String, timeoutMillis: Long = BOUNDED_MS): String {
+        var text: String? = null
+        var failure: Throwable? = null
+        val runner = thread(isDaemon = true, name = "shell: $command") {
+            try {
+                text = exec(command)
+            } catch (e: Throwable) {
+                failure = e
+            }
+        }
+        runner.join(timeoutMillis)
+        failure?.let { throw it }
+        return text ?: throw AssertionError("the shell command did not return within $timeoutMillis ms: $command")
+    }
+
     /** Ends every shell client still running, as a test that may have left one does before it disconnects. */
     fun stopClients() {
         exec("pkill -f $SHELL_CLIENT")
     }
+
+    private const val BOUNDED_MS = 30_000L
 
     private fun exec(command: String): String {
         val output = automation.executeShellCommand(command)
@@ -133,6 +156,9 @@ object Shell {
 
     /** A sh script, for pipes: the command line is split at spaces, so they become ${IFS}. */
     fun script(script: String): String = run("sh -c " + script.replace(" ", "\${IFS}"))
+
+    /** [script], bounded as [runBounded] is. */
+    fun scriptBounded(script: String): String = runBounded("sh -c " + script.replace(" ", "\${IFS}"))
 
     /**
      * Sends one line to [host]:[port] with toybox's nc and returns what came back. The
