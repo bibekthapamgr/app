@@ -1,6 +1,7 @@
 package app.proxyflow.core.data
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.data.db.LogDatabase
@@ -46,9 +47,9 @@ class LogRepositoryTest {
         // must not keep the Logs screen from opening. The opposite of the profiles database's rule
         // (DatabaseMigrationTest.aDatabaseFromANewerVersionFailsLoudlyAndKeepsItsData).
         val first = LogDatabase.create(context, name)
-        first.logEventDao().insertAll(listOf(LogEventEntity(timeMillis = 1, level = "INFO", event = "connected", stage = null, code = null, profileId = null, details = "")))
+        first.logEventDao().insertAll(listOf(newerEntry(1)))
         first.close()
-        android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, android.database.sqlite.SQLiteDatabase.OPEN_READWRITE).use { raw ->
+        SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { raw ->
             raw.execSQL("ALTER TABLE log_events ADD COLUMN newer_column TEXT") // as a newer schema would have
             raw.version = raw.version + 1
         }
@@ -56,9 +57,12 @@ class LogRepositoryTest {
         val reopened = LogDatabase.create(context, name).also { opened += it }
         val rows = reopened.logEventDao().observeLatest(10).first()
         assertTrue("the newer log was dropped, not read: $rows", rows.isEmpty())
-        reopened.logEventDao().insertAll(listOf(LogEventEntity(timeMillis = 2, level = "INFO", event = "connected", stage = null, code = null, profileId = null, details = "")))
+        reopened.logEventDao().insertAll(listOf(newerEntry(2)))
         assertEquals(1, reopened.logEventDao().observeLatest(10).first().size)
     }
+
+    private fun newerEntry(time: Long) =
+        LogEventEntity(timeMillis = time, level = "INFO", event = "connected", stage = null, code = null, profileId = null, details = "")
 
     private fun room(maxEntries: Int = LogRepository.MAX_ENTRIES, file: Boolean = false): RoomLogRepository {
         val db = (if (file) LogDatabase.create(context, name) else LogDatabase.inMemory(context)).also { opened += it }
