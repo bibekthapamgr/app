@@ -63,8 +63,13 @@ FORBIDDEN: list[tuple[str, re.Pattern[str]]] = [
     ),
     # The listing's own extra rules (review G-1): the passive and periphrastic forms of the same claims, as VPN marketing
     # writes them, which the app's strings never needed.
-    ("hidden identity", re.compile(r"(?i)\b(ip( address)?|identity|location|activity)\s+(is|are|stays?|remains?|kept)\s+(hidden|masked|concealed|private|invisible)|\bkeeps?\s+(your\s+)?(real\s+)?(ip|identity|location)\s+(address\s+)?(hidden|masked|private)")),
-    ("nobody sees you", re.compile(r"(?i)\b(nobody|no one|no-one|no site|no website|websites? never|sites? never)\s+(can\s+)?(see|sees|know|knows|track|tracks)\b")),
+    ("hidden identity", re.compile(r"(?i)\b(ip( address)?|identity|location|activity|connection|data|traffic|everything)\s+(is|are|gets?|becomes?|stays?|remains?|kept|will be|will remain)\s+(hidden|masked|concealed|invisible|encrypted|secret|private\b(?!\s+(information|data)))|\bkeep(s|ing)?\s+(your\s+)?(real\s+)?(ip|identity|location|data)\s+(address\s+)?(hidden|masked|private|secret)|\bkeeps?\s+you\s+(safe|anonymous|hidden)")),
+    ("nobody sees you", re.compile(r"(?i)\b(nobody|no one|no-one|no site|no website|websites? never|sites? never|trackers? never|your isp cannot|not even your isp)\s+(can\s+)?(see|sees|know|knows|track|tracks)\s+(your\s+)?(real\s+)?(ip|identity|location|activity|traffic|what you)|\bcannot be tracked\b|\bnobody is tracking you\b|\bhides? who you are\b")),
+    ("no logs", re.compile(r"(?i)\b(zero|no)[- ]?log(s|ging)?\b|\blogs? nothing\b|\bnever logs\b|\bnothing is logged\b")),
+    ("getting around blocks", re.compile(r"(?i)\bbypass|\baccess (blocked|any|geo)|\bget around\b|\bspoof|\bchange your ip\b|\bnew ip address\b|\bbrowse from anywhere\b")),
+    ("total privacy", re.compile(r"(?i)\b(total|complete|absolute)\s+privacy\b|\btotally private\b|\b100\s+percent\b")),
+    ("secures everything", re.compile(r"(?i)\bsecures?\s+(your\s+)?(connection|traffic|phone|device)\b|\bshields?\s+your\b|\bsafeguards?\b|\b(entire|whole)\s+(device|phone)\b|\btunnels? everything\b|\b(enterprise|government)[- ]grade\b|\bunbreakable\b")),
+    ("games and calls, again", re.compile(r"(?i)\b(perfect|ideal|good|great)\s+(for|in)\s+(gaming|games|calls|voip)|\bplay games\b")),
     # "encrypts the connection between your phone and the proxy" is TLS to the proxy, said as the app says it (ADR-0011).
     ("encrypts your connection", re.compile(r"(?i)\bencrypt(s|ed|ing)?\s+(your|the)\s+(connection|data|internet|browsing)\b(?!\s+(between|to|with)\b)")),
     ("another location", re.compile(r"(?i)\b(appear|browse|be)\s+(to be\s+)?(as if\s+)?(in|from)\s+(another|any|a different)\s+(country|location|region)|\bunblock")),
@@ -74,12 +79,17 @@ FORBIDDEN: list[tuple[str, re.Pattern[str]]] = [
 # ("does not make you anonymous", "is not a system-wide VPN", "no guarantee"): a "not" earlier in the sentence, or in
 # another clause, about something else ("Never slow, protects your privacy"; "Not only fast: works with every app"),
 # allows nothing (reviews C-1, F-2, F-3). Clauses end at a comma, a colon, a semicolon, a dash, and "and", "but", "or".
+# The denial may stand before a noun phrase and a relative or complement clause ("is not a VPN that hides your IP",
+# "does not promise that all traffic …"), and "no" may have a word or two after it ("no more secure browsing").
 NEGATION = re.compile(
-    r"(?i)(\b(doesn't|does not|don't|do not|isn't|is not|never|not|cannot|can't|won't|will not|neither|nor)(\s+\S+){0,3}|\bno)\s*$"
+    r"(?i)(\b(doesn't|does not|don't|do not|isn't|is not|never|not|cannot|can't|won't|will not|neither|nor)(\s+\S+){0,3}"
+    r"(\s+(that|which|to)(\s+\S+){0,3})?|\bno(\s+\S+){0,2})\s*$"
 )
 # "Not only …", and a question's "isn't it …", deny nothing.
-NOT_A_DENIAL = re.compile(r"(?i)\bnot\s+(only|just|merely|one)\b|\b(isn't|doesn't|don't|won't|can't|aren't|wouldn't)\s+(it|you|we|they|this|that)\s+(great|good|nice|amazing|wonderful|better|time|want|love|like)\b")
-CLAUSE = re.compile(r"[,:;—]|\s-\s|\s(and|but|or|because|since|so|yet|while|though|although|if|unless|that|which|when)\s")
+NOT_A_DENIAL = re.compile(r"(?i)\bnot\s+(only|just|merely)\b|\b(isn't|doesn't|don't|won't|can't|aren't|wouldn't)\s+(it|you|we|they|this|that)\s+(great|good|nice|amazing|wonderful|better|time|want|love|like)\b")
+CLAUSE = re.compile(
+    r"[,:;—()/]|\s-+\s|\s(and|but|or|because|since|so|yet|while|though|although|if|unless|when|whenever|as|whereas|until|after|before|once|where)\s"
+)
 # Play's metadata policy: no performance, ranking or promotional words in the title (and so in the captions, which are
 # pictures of the listing), and no emoji there.
 PROMOTIONAL = re.compile(r"(?i)(?<!\w)(best|top|free|number[ -]one|award|no\.\s?1|n[\u00b0\u00ba]\s?1|1st|\u2460)(?!\w)|(?<!\w)#\s?1\b")

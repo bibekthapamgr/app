@@ -89,14 +89,20 @@ CONTENT_RULES = [
     # base64; a JKS with FE ED FE ED, "/u3+7Q"): 200 or more base64 characters beginning so, in any text file. Wrapped
     # base64 (several lines) is joined and read by check_blobs; a PEM certificate's body (public) is left out there.
     _content("keystore or private key as base64", r"(?<![A-Za-z0-9+/_-])(MII|/u3\+7Q)[A-Za-z0-9+/_-]{194,}"),
-    _content("credential written as a quoted literal", _CREDENTIAL_NAME + r"\"?\s*[:=]\s*[\"'][^\"'$<{(]{4,}[\"']"),
+    # A quoted value may hold spaces (a passphrase of up to four words); a longer phrase is a description (H-3).
+    _content("credential written as a quoted literal", _CREDENTIAL_NAME + r"\"?\s*[:=]\s*[\"'][^\"'$<{(\s]{4,}(?:\s[^\"'$<{(\s]+){0,3}[\"']"),
     # M11 (G-3): JSON's "storePassword": "…"; a password flag on a command line (keytool -storepass, bundletool
     # --ks-pass=pass:, the forms the release workflow never uses); the workflow's own PF_STORE_PASS=…; a NAME=value that
     # starts a command line (the variable, "=", the password, then the command).
-    _content("signing password written in JSON", r"\"(?:storePassword|keyPassword|store\.password|key\.password)\"\s*:\s*\"[^\"$]{4,}\""),
-    _content("password on a command line", r"(?:-storepass|-keypass|-srcstorepass|-deststorepass)\s+(?!:env\b|:file\b)[^\s\"'$<{(:]{4,}|--(?:ks|key)-pass=pass:[^\s\"'$]{4,}"),
-    _content("credential written as a literal value", r"(?i)^\s*(?:export\s+)?(?:[a-z][a-z0-9_]*_)?(?:store|key|ks)_pass\s*=\s*(?!(?:true|false|null|none|yes|no|nil)\b)[^\s\"'$<{(#]{4,}"),
-    _content("credential written as a literal value", r"(?i)(?<![a-z0-9_])[a-z][a-z0-9_]*_(?:password|passwd|secret|token|api_key|keystore_base64|private_key)=(?!(?:true|false|null|none|yes|no|nil)\b)[^\s\"'$<{(#`]{4,}\s+\S"),
+    _content("signing password written in JSON", r"(?i)\"[a-z_.]*(?:store|key|keystore)_?\.?password\"\s*:\s*\"[^\"$]{4,}\""),
+    # A placeholder (YOUR_PASSWORD, changeme, xxxx) is no password (H-3).
+    _content(
+        "password on a command line",
+        r"(?:-(?:src|dest)?(?:store|key)pass)\s+(?!:env\b|:file\b|[A-Z_]{4,}\b|(?:changeme|example|placeholder|x{4,})\b)[^\s\"'$<{(:]{4,}"
+        r"|--(?:ks|key)-pass[= ]\"?pass:(?![A-Z_]{4,}\b|(?:changeme|example|placeholder|x{4,})\b)[^\s\"'$]{4,}",
+    ),
+    _content("credential written as a literal value", r"(?i)^\s*(?:export\s+)?(?:[a-z][a-z0-9_]*_)?(?:store|key|ks)_pass\s*[:=]\s*(?!(?:true|false|null|none|yes|no|nil|changeme|example)\b)[^\s\"'$<{(#]{4,}"),
+    _content("credential written as a literal value", r"(?i)(?<![a-z0-9_])[a-z][a-z0-9_]*_(?:password|passwd|secret|token|api_key|keystore_base64|private_key)=(?!(?:true|false|null|none|yes|no|nil|changeme|example)\b)[^\s\"'$<{(#`|\\]{4,}(?:\s+\S|[`|.\\]\s*$|[`|.]\s)"),
     _content(
         "credential written as a literal value",
         r"^\s*(?:export\s+)?" + _CREDENTIAL_NAME + r"\s*[:=]\s*[^\s\"'$<{(#]{4,}",
@@ -137,8 +143,9 @@ def check_binary(path: str, data: bytes) -> list[Finding]:
     return []
 
 
-# A base64 line, with a Markdown quote's or a comment's marker before it allowed (one marker, then spaces).
-_BASE64_LINE = re.compile(rb"^(?:(?:[>#*]|//)[ \t]*)?([A-Za-z0-9+/=_-]{40,80})$")
+# A base64 line, with a Markdown quote's, a list's, a table's or a comment's marker before it allowed (up to two markers,
+# then spaces), 40 to 196 characters (the one-line rule takes 197 and more).
+_BASE64_LINE = re.compile(rb"^(?:(?:[>#*|-]|//|--|;;|\d{1,2}\.)[ \t]*){0,2}([A-Za-z0-9+/=_-]{40,196})[ \t]*\|?$")
 
 
 def check_blobs(path: str, data: bytes) -> list[Finding]:
@@ -301,6 +308,15 @@ def self_test() -> int:
         ("d.txt", "PF_STORE_" + "PASS=hunter22hunter22"),
         ("e.txt", "keytool -genkeypair -store" + "pass hunter22hunter22 -alias up"),
         ("e2.txt", "bundletool build-apks --ks-" + "pass=pass:hunter22hunter22"),
+        ("e3.txt", "apksigner sign --ks-" + "pass pass:hunter22hunter22 app.apk"),
+        ("e4.txt", "keytool -importkeystore -srckey" + "pass hunter22hunter22 -destkey" + "pass hunter22hunter22"),
+        ("snake.json", '  "keystore_' + 'password": "hunter22hunter22"'),
+        ("vars.yml", "PF_STORE_" + "PASS: hunter22hunter22"),
+        ("f.md", "Set `PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22` and run"),
+        ("g.md", "The password is PROXYFLOW_KEYSTORE_" + "PASSWORD=hunter22hunter22."),
+        ("list.md", "\n".join(["- MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF"] + ["- " + "A" * 76] * 4)),
+        ("table.md", "\n".join(["| MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF |"] + ["| " + "A" * 76 + " |"] * 4)),
+        ("w120.txt", "\n".join(["MIIKtAIBAzCCCm4GCSqGSIb3DQEHAaCCCl8EggpbMIIKVzCCBW4GCSqGSIb3DQEHAaCCBV8EggVbMIIF" + "A" * 40] + ["A" * 120] * 3)),
     ]
     binary_hits = [
         ("release.bin", b"\xfe\xed\xfe\xed" + b"\0" * 100),
@@ -323,6 +339,11 @@ def self_test() -> int:
         ("release.yml", "--ks-" + "pass=\"file:$RUNNER_TEMP/ks-pass.txt\""),
         ("script.sh", "export PF_STORE_" + 'PASS="$store_pass"'),
         ("doc.md", "the variable PROXYFLOW_KEYSTORE_" + "PASSWORD holds the password you typed"),
+        ("doc2.md", "keytool -list -keystore x -store" + "pass YOUR_PASSWORD -alias up"),
+        ("doc3.md", "the -store" + "pass:env form is never a password"),
+        (".env.example", "PF_STORE_" + "PASS=changeme"),
+        ("ci.yml", "  PROXYFLOW_KEYSTORE_" + 'PASSWORD: "the keystore password, from the secret of that name"'),
+        ("hashes.md", "\n".join(["- " + "a" * 64] * 5)),
         ("Vm.kt", "            keepsSaved" + "Password = keeps,"),
         ("flags.ini", "keystore_" + "password = false"),
         ("sha.txt", "a" * 64),

@@ -55,11 +55,16 @@ cleanup() {
         sleep 3
         if timeout 120 adb pull /sdcard/pf-smoke.mp4 "$OUT/smoke.mp4" >/dev/null 2>&1 && [ -s "$OUT/smoke.mp4" ]; then
             size="$(stat -c %s "$OUT/smoke.mp4")"
-            duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/smoke.mp4" 2>/dev/null | cut -d. -f1 || true)"
+            if command -v ffprobe >/dev/null 2>&1; then
+                duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/smoke.mp4" 2>/dev/null | cut -d. -f1 || true)"
+                duration="${duration:-unreadable (no duration in the file)} s"
+            else
+                duration="not measured (no ffprobe on the runner)"
+            fi
             if [ "$size" -lt 100000 ]; then
                 echo "::warning title=Signed bundle smoke (API $API)::the screen recording is only $size bytes"
             else
-                note "the screen recording: $size bytes${duration:+, $duration s} (smoke.mp4; the owner trims the Play videos to 90 s)"
+                note "the screen recording: $size bytes, length $duration (smoke.mp4; the owner trims the Play videos to 90 s)"
             fi
         else
             echo "::warning title=Signed bundle smoke (API $API)::no screen recording came back"
@@ -104,8 +109,12 @@ splits="$(timeout 30 adb shell pm path "$APPLICATION_ID" | tr -d '\r' | grep -c 
 timeout 120 adb pull "$base_apk" "$OUT/installed-base.apk" >/dev/null || { fail "could not pull $base_apk"; exit 1; }
 tools="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
 "$tools/apksigner" verify --print-certs "$OUT/installed-base.apk" > "$OUT/installed-certs.txt"
-# Positively, from the installed APK itself: aapt2 prints "application-debuggable" for a debuggable manifest.
-if "$tools/aapt2" dump badging "$OUT/installed-base.apk" 2>/dev/null | grep -q '^application-debuggable'; then fail "the installed app is debuggable (aapt2)"; fi
+# Positively, from the installed APK's own manifest: aapt2 must read it (H-4: a check that passes when aapt2 fails is
+# no check), and the flag must not be set.
+"$tools/aapt2" dump xmltree "$OUT/installed-base.apk" --file AndroidManifest.xml > "$OUT/installed-manifest.txt" 2>&1 \
+    || fail "aapt2 could not read the installed base APK's manifest: $(tail -2 "$OUT/installed-manifest.txt" | tr '\n' ' ')"
+grep -q 'package="' "$OUT/installed-manifest.txt" || fail "the installed base APK's manifest, as aapt2 printed it, names no package"
+if grep -Eq 'android:debuggable[^=]*=(\(type 0x12\))?(0xffffffff|true)' "$OUT/installed-manifest.txt"; then fail "the installed app is debuggable (its manifest)"; fi
 # apksigner names signers "Signer #1 …" or "V2 Signer: …" by build-tools version: the certificates it prints are read.
 digests="$(grep -oE 'certificate SHA-256 digest: [0-9a-f]{64}' "$OUT/installed-certs.txt" | grep -oE '[0-9a-f]{64}' | sort -u || true)"
 [ "$(printf '%s' "$digests" | grep -c . || true)" = 1 ] || fail "the installed app has $(printf '%s' "$digests" | grep -c . || true) signing certificates, not one"

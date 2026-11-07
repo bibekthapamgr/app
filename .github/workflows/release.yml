@@ -391,6 +391,10 @@ jobs:
         id: proxies
         run: bash scripts/e2e_env.sh
 
+      # For the recording's length in the smoke's notice; the smoke says "not measured" without it.
+      - name: ffprobe, for the screen recording's length
+        run: sudo apt-get install -y --no-install-recommends ffmpeg >/dev/null 2>&1 || echo "ffmpeg did not install; the recording's length will not be measured"
+
       - name: The signed bundle installed and used on a clean emulator (API ${{ matrix.api-level }})
         id: emulator
         timeout-minutes: 40
