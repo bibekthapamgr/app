@@ -67,4 +67,10 @@ proxies), with the host redacted.
 The lab's own check (`scripts/e2e_lab_check.py`) runs before every device job: a lab that cannot tunnel, block,
 refuse or log as expected fails the job before the app is blamed. Its tools (Dante, Squid, stunnel, dnsmasq,
 tcpdump) are the runner image's; a runner image change that breaks one shows up as the lab check failing, and the
-fix is in `scripts/e2e_env.sh`, never in a test's expectation.
+fix is in `scripts/e2e_env.sh`, never in a test's expectation. The emulator itself is the lab's least steady part:
+its process exits at scenario R's restart now and then (M10-54; three times in M12's runs, with nothing on the host
+to say why), so `scripts/adb_reboot.sh` starts it again from the same AVD — a cold start of the same phone, said so in
+R's note and the job's annotation — and its second capture is appended to the first (`scripts/pcap_cat.py`); an
+install that adb refuses with "device offline" for a moment is tried again (`adb_install`, M12-80). A lab weakness
+that fails a job is a register row and a fix of this kind, with its test under `scripts/tests/`; a test's expectation is
+never loosened for it.
