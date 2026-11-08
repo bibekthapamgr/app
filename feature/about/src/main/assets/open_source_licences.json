@@ -81,42 +81,42 @@
   },
   {
    "name": "androidx.compose.animation:animation",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.animation:animation-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.animation:animation-core",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.animation:animation-core-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.foundation:foundation",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.foundation:foundation-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.foundation:foundation-layout",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.foundation:foundation-layout-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
@@ -131,112 +131,122 @@
   },
   {
    "name": "androidx.compose.material:material-ripple",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.material:material-ripple-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.runtime:runtime",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.runtime:runtime-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.runtime:runtime-annotation",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.runtime:runtime-annotation-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
+   "licence": "Apache-2.0"
+  },
+  {
+   "name": "androidx.compose.runtime:runtime-retain",
+   "version": "1.12.1",
+   "licence": "Apache-2.0"
+  },
+  {
+   "name": "androidx.compose.runtime:runtime-retain-android",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.runtime:runtime-saveable",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.runtime:runtime-saveable-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-geometry",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-geometry-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-graphics",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-graphics-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-text",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-text-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-tooling-preview",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-tooling-preview-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-unit",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-unit-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-util",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
    "name": "androidx.compose.ui:ui-util-android",
-   "version": "1.9.3",
+   "version": "1.12.1",
    "licence": "Apache-2.0"
   },
   {
@@ -570,6 +580,21 @@
    "licence": "Apache-2.0"
   },
   {
+   "name": "androidx.window:window",
+   "version": "1.5.0",
+   "licence": "Apache-2.0"
+  },
+  {
+   "name": "androidx.window:window-core",
+   "version": "1.5.0",
+   "licence": "Apache-2.0"
+  },
+  {
+   "name": "androidx.window:window-core-android",
+   "version": "1.5.0",
+   "licence": "Apache-2.0"
+  },
+  {
    "name": "com.google.guava:listenablefuture",
    "version": "1.0",
    "licence": "Apache-2.0"
@@ -591,11 +616,6 @@
   },
   {
    "name": "org.jetbrains.kotlin:kotlin-stdlib",
-   "version": "2.4.21",
-   "licence": "Apache-2.0"
-  },
-  {
-   "name": "org.jetbrains.kotlin:kotlin-stdlib-common",
    "version": "2.4.21",
    "licence": "Apache-2.0"
   },
