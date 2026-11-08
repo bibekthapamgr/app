@@ -3,6 +3,7 @@ package app.proxyflow.e2e
 import android.app.Notification
 import android.content.Intent
 import android.net.VpnService
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.system.Os
@@ -83,13 +84,20 @@ class VpnEndToEndTest {
         }
         val status = checkNotNull(app.notification(ProxyFlowVpnService.STATUS_NOTIFICATION_ID))
         assertEquals(listOf("Disconnect"), status.actions?.map { it.title.toString() })
-        // Threat model I-11: the lock screen gets a version without the profile name.
-        assertEquals(profile.displayName, status.extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString())
+        // Threat model I-11: no version of it names the profile, so no lock screen shows it whatever Android's setting
+        // for notification content (M10); a private version leaves even the status off a lock screen that hides content.
         assertEquals(Notification.VISIBILITY_PRIVATE, status.visibility)
         val public = checkNotNull(status.publicVersion) { "no public version" }
-        val publicText = listOf(Notification.EXTRA_TITLE, Notification.EXTRA_TEXT, Notification.EXTRA_SUB_TEXT)
-            .mapNotNull { public.extras.getCharSequence(it)?.toString() }
-        assertTrue("the public version names no profile: $publicText", publicText.none { profile.displayName in it })
+        for (version in listOf(status, public)) {
+            val text = listOf(Notification.EXTRA_TITLE, Notification.EXTRA_TEXT, Notification.EXTRA_SUB_TEXT, Notification.EXTRA_INFO_TEXT)
+                .mapNotNull { version.extras.getCharSequence(it)?.toString() }
+            assertTrue("the notification names no profile: $text", text.none { profile.displayName in it })
+        }
+        // Disconnect sends apps to the normal network: only an unlocked phone may (Android 12+: Android's own flag; on 10
+        // and 11 through an activity, which Android starts only unlocked: VpnNotificationsTest).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            assertTrue("Disconnect needs the phone unlocked", status.actions.orEmpty().all { it.isAuthenticationRequired })
+        }
         assertReachesDestination("socks5")
 
         app.disconnectAndSettle()
@@ -173,6 +181,28 @@ class VpnEndToEndTest {
         for (profile in profiles) {
             val ended = app.connectExpectingFailure(profile.id)
             assertEquals("${profile.protocol}", "AUTH_FAILED", ended.error?.code)
+        }
+
+        assertNeverConnected()
+    }
+
+    /**
+     * M10, the brief's task 2: a profile of the other kind never connects, with nothing changed on the phone. HTTP at the
+     * lab's SOCKS5 proxy: Dante closes at the request's first byte, and the server is said not to be that kind of proxy
+     * (`PROTOCOL_ERROR`). SOCKS5 at its HTTP proxy: Squid waits for the rest of a request line that never comes, so the
+     * handshake times out (`HANDSHAKE_TIMEOUT`, whose words say to check the protocol and port).
+     */
+    @Test(timeout = TEST_TIMEOUT_MS)
+    fun aProfileOfTheOtherKindNeverConnects() {
+        val cases = listOf(
+            app.save("SOCKS at Squid", ProxyProtocol.SOCKS5, env.proxyHost, env.httpPort, env.socksUser, env.socksPassword) to
+                "HANDSHAKE_TIMEOUT",
+            app.save("HTTP at Dante", ProxyProtocol.HTTP, env.proxyHost, env.socksPort, env.httpUser, env.httpPassword) to "PROTOCOL_ERROR",
+        )
+
+        for ((profile, code) in cases) {
+            val ended = app.connectExpectingFailure(profile.id)
+            assertEquals("${profile.protocol} at the other kind of proxy: $ended", code, ended.error?.code)
         }
 
         assertNeverConnected()

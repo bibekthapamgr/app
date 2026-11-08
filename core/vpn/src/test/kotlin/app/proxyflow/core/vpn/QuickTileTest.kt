@@ -8,7 +8,9 @@ import app.proxyflow.core.vpn.QuickTile.Content
 import app.proxyflow.core.vpn.QuickTile.Line
 import app.proxyflow.core.vpn.QuickTile.Look
 import app.proxyflow.core.vpn.QuickTile.Tap
+import java.text.Bidi
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -86,5 +88,58 @@ class QuickTileTest {
             // Leaving held traffic sends apps to the normal network: only Home's confirmed Stop does that.
             assertEquals(status.name, Tap.OpenApp, QuickTile.tap(state(status), hasProfile = true, consentNeeded = false))
         }
+    }
+
+    /**
+     * The subtitle reads as its line does in the line's own direction, whatever direction the system UI lays it out in
+     * (M10-101, M10-106): right to left, as Android 12 to 15 do on a right-to-left phone (the phone's language); left to
+     * right; and by the first letter outside isolates, as Android 10 and 11 and Android 16's Compose tile do, on either
+     * kind of phone. Laid out by Java's Unicode bidi algorithm, the same as Android's. The state description is the same
+     * line, so Android 16's tile, which leaves out a subtitle its state description ("On, …") holds, reads it once
+     * (M10-115); TalkBack's description gets the line as it is.
+     */
+    @Test
+    fun theSubtitleKeepsItsOrderInEveryDirection() {
+        val names = listOf(
+            "Tokyo residential", "2 Office", "1. Home", "Tokyo.", "1.", "2606:4700::", "2606:4700:4700::1111",
+            "fd00::1", "203.0.113.10", "مكتب 2", "2 مكتب", "מִשְׂרָד.",
+        )
+        val words = mapOf(Line.Connecting to "Connecting…", Line.Off to "Off", Line.Connected to "Connected")
+        val cases = names.map { Content(Look.On, Line.Profile, it) to it } +
+            words.map { (line, text) -> Content(Look.On, line, null) to text }
+        val directions = listOf(
+            Bidi.DIRECTION_RIGHT_TO_LEFT,
+            Bidi.DIRECTION_LEFT_TO_RIGHT,
+            Bidi.DIRECTION_DEFAULT_RIGHT_TO_LEFT,
+            Bidi.DIRECTION_DEFAULT_LEFT_TO_RIGHT,
+        )
+        for ((content, line) in cases) {
+            val shown = QuickTile.shown(content, words = { words.getValue(it) }, describe = { "ProxyFlow, $it" })
+            val asWritten = shown(line, Bidi.DIRECTION_DEFAULT_LEFT_TO_RIGHT)
+            for (direction in directions) {
+                assertEquals("\"$line\" laid out with base $direction", asWritten, shown(shown.subtitle, direction))
+            }
+            assertTrue("\"$line\": Android 16 leaves the subtitle out", "On, ${shown.stateDescription}".contains(shown.subtitle))
+            assertEquals("ProxyFlow, $line", shown.description)
+        }
+        // Without the isolate, a right-to-left layout turns these round: what the test would catch.
+        assertEquals(".Tokyo", shown("Tokyo.", Bidi.DIRECTION_RIGHT_TO_LEFT))
+        assertEquals("1111::2606:4700:4700", shown("2606:4700:4700::1111", Bidi.DIRECTION_DEFAULT_RIGHT_TO_LEFT))
+        // A name's own directional formatting cannot end the isolate.
+        val formatted = QuickTile.shown(Content(Look.On, Line.Profile, "Office\u2069\u202E!"), words = { "" }, describe = { it })
+        assertEquals("\u2068Office!\u2069", formatted.subtitle)
+    }
+
+    /** [text] in visual order, left to right, laid out in [direction]; the invisible formatting characters left out. */
+    private fun shown(text: String, direction: Int): String {
+        val bidi = Bidi(text, direction)
+        val runs = Array<Any>(bidi.runCount) { it }
+        val levels = ByteArray(bidi.runCount) { bidi.getRunLevel(it).toByte() }
+        Bidi.reorderVisually(levels, 0, runs, 0, runs.size)
+        return runs.joinToString("") { run ->
+            val i = run as Int
+            val part = text.substring(bidi.getRunStart(i), bidi.getRunLimit(i))
+            if (bidi.getRunLevel(i) % 2 == 1) part.reversed() else part
+        }.filterNot { it in '\u2066'..'\u2069' }
     }
 }

@@ -13,7 +13,9 @@ import android.net.NetworkCapabilities
  *
  * Registered once for the life of the process, so the session always knows the current network,
  * also when a connection starts: it acts only on changes while connected or reconnecting. What it
- * is told is the network's id, for comparison, and its kind for the log ("wifi"), nothing more.
+ * is told is the network's id, for comparison, its kind for the log ("wifi"), and whether Android
+ * found a sign-in page on it (a captive portal, M10), nothing more. What is reported when is
+ * [NetworkReports]'s.
  */
 internal class NetworkMonitor(context: Context) {
     private val connectivity: ConnectivityManager? = context.getSystemService(ConnectivityManager::class.java)
@@ -23,20 +25,20 @@ internal class NetworkMonitor(context: Context) {
         val manager = connectivity ?: return false
         val callback = object : ConnectivityManager.NetworkCallback() {
             // Android calls one callback at a time, on one thread.
-            private var current: Network? = null
+            private val reports = NetworkReports()
 
             // Follows onAvailable at once (API 26+), and again whenever the network's capabilities change.
             override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) || network == current) return
-                current = network
-                report(VpnSession.NetworkInfo(id = network.toString(), transport = kindOf(capabilities)))
+                reports.capabilities(
+                    network = network.toString(),
+                    vpn = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+                    transport = kindOf(capabilities),
+                    signIn = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
+                )?.let(report)
             }
 
-            // A default network that was replaced is not lost: onCapabilitiesChanged already named the next one.
             override fun onLost(network: Network) {
-                if (network != current) return
-                current = null
-                report(null)
+                if (reports.lost(network.toString())) report(null)
             }
         }
         return try {

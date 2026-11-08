@@ -131,6 +131,27 @@ class LogRepositoryTest {
         }
     }
 
+    /**
+     * At start, before the user's retention is read (M10 re-review): a write deletes nothing the longest retention a user
+     * can choose would keep, so a 7-day setting loses nothing to the 24-hour default; once it is known, writes go by it.
+     */
+    @Test
+    fun aWriteBeforeTheUsersRetentionIsKnownDeletesNothingTheirSettingWouldKeep() = runTest {
+        for (repository in repositories()) {
+            repository.append(listOf(entry(now - 3 * DAY), entry(now - 2 * HOUR)))
+            repository.append(listOf(entry(now))) // the app's first write at start: its log recorder runs before the setting is read
+            if (repository is RoomLogRepository) {
+                assertEquals("the 3-day-old entry is still stored", 3, opened.last().logEventDao().count())
+            }
+
+            repository.setRetention(7 * DAY)
+            assertEquals("the user's week keeps all three", 3, repository.entries.first().size)
+            repository.setRetention(DAY)
+            repository.append(listOf(entry(now - 2 * DAY)))
+            assertEquals("once known, writes go by it", listOf(now, now - 2 * HOUR), repository.entries.first().map { it.timeMillis })
+        }
+    }
+
     @Test
     fun entriesDatedFarAheadOfTheClockAreHiddenWhenReadAndDroppedByThePurge() = runTest {
         for (repository in repositories()) {

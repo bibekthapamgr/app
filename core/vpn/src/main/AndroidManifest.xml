@@ -34,6 +34,18 @@
         </service>
 
         <!--
+          The notification's Disconnect, Cancel and Restart on Android 10 and 11 (M10): Android unlocks the phone before it
+          starts an activity from the lock screen, which it doesn't for a service there. Shows nothing; never exported.
+        -->
+        <activity
+            android:name=".NotificationActionActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
+
+        <!--
           The Quick Settings tile (board B11, M9): only Android's system UI can bind it (BIND_QUICK_SETTINGS_TILE).
           A tap connects or disconnects; a long press opens the app's QS_TILE_PREFERENCES activity (MainActivity).
         -->

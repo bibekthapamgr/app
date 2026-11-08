@@ -44,7 +44,8 @@ def tests() -> list[str]:
 
 
 def apks() -> list[str]:
-    return [f"APK {path} {os.path.getsize(path):,} bytes" for path in sorted(glob.glob("app/build/outputs/apk/*/*.apk"))]
+    files = sorted(glob.glob("app/build/outputs/apk/*/*.apk")) + sorted(glob.glob("app/build/outputs/bundle/*/*.aab"))
+    return [f"{'AAB' if path.endswith('.aab') else 'APK'} {path} {os.path.getsize(path):,} bytes" for path in files]
 
 
 def manifests() -> list[str]:

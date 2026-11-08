@@ -76,6 +76,12 @@ enum class ReconnectReason {
      * traffic is held from the start, and attempts go on as after a connection that broke.
      */
     AlwaysOnStart,
+
+    /**
+     * Traffic was blocked on a network that asked for a sign-in, and the network no longer does — the user signed in, most
+     * often (M10): what blocked may have been the sign-in page's doing, so the attempts start again at once.
+     */
+    SignInPageGone,
 }
 
 /**
@@ -122,7 +128,32 @@ data class ConnectionError(val code: String, val detail: String? = null) {
 
         /** How the engine's detail for `PROTOCOL_ERROR` starts when an HTTP proxy refuses CONNECT itself (HTTP 405, 501). */
         const val DETAIL_NO_CONNECT = "proxy does not support CONNECT"
+
+        /**
+         * Codes an attempt may fail with and still be worth another: the proxy, or the way to it, may come back
+         * (ADR-0012; core/vpn's RetryPolicy). A TLS handshake or protocol failure is often a connection reset in the
+         * middle of one; a pre-flight tunnel that failed although the proxy answered, a proxy that lost its own way out.
+         */
+        val MAY_PASS = setOf(
+            "PROXY_UNREACHABLE", "PROXY_DNS_FAILED", "HANDSHAKE_TIMEOUT", "TLS_HANDSHAKE", "PROTOCOL_ERROR",
+            "TARGET_UNREACHABLE", "TARGET_REFUSED", "PROXY_GENERAL_FAILURE",
+            INTERNAL,
+        )
+
+        /**
+         * A certificate the proxy's address answered with failed. No retry changes the proxy's own certificate, so these
+         * block at once (docs/m1/04 §4); on a network with a sign-in page, the page may have answered in the proxy's place
+         * with a certificate of its own (M10).
+         */
+        val CERTIFICATE = setOf("TLS_UNTRUSTED", "TLS_HOSTNAME", "TLS_EXPIRED")
     }
+
+    /**
+     * Traffic held for this failure is tried again at once when the phone's network no longer asks for a sign-in (M10,
+     * ADR-0015 §3): a failure that may pass, and a certificate that may have been the sign-in page's. A refused sign-in
+     * is the proxy's own answer.
+     */
+    val triedAgainAfterSignIn: Boolean get() = code in MAY_PASS || code in CERTIFICATE
 
     /** An HTTP proxy that offers only sign-in methods ProxyFlow doesn't support (catalogue: the Digest variant). */
     val unsupportedSignIn: Boolean get() = code == "AUTH_FAILED" && detail?.startsWith(DETAIL_UNSUPPORTED_SIGN_IN) == true
@@ -147,6 +178,10 @@ data class ConnectionError(val code: String, val detail: String? = null) {
  * @param held while [ConnectionStatus.Connecting]: the VPN interface is already up and holds apps' traffic — Android
  *   started ProxyFlow as Always-on VPN (M8, ADR-0013 §3) — so cancelling sends apps to the normal network, unlike a
  *   connect that changes nothing on the phone until it passes.
+ * @param networkSignIn the phone's network asks for a sign-in: Android found a sign-in page on it (a captive portal,
+ *   as in hotels and airports), and until the user signs in it may carry nothing, the way to the proxy included, or
+ *   answer in the proxy's place (M10). Set whatever the connection's status, as Android last reported it: it may
+ *   explain a failure to reach the proxy, and Home says it beside one.
  */
 data class ConnectionState(
     val status: ConnectionStatus = ConnectionStatus.Disconnected,
@@ -158,6 +193,7 @@ data class ConnectionState(
     val error: ConnectionError? = null,
     val reconnect: ReconnectInfo? = null,
     val held: Boolean = false,
+    val networkSignIn: Boolean = false,
 ) {
     /** Connecting or up: a new connect for the same profile has nothing to do. */
     val active: Boolean get() = status != ConnectionStatus.Disconnected

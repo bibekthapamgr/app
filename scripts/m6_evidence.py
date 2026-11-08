@@ -839,19 +839,28 @@ def main(argv: list[str]) -> int:
         f"the phone's sockets (its kernel's tables, {sockets.coverage()}): to placeholder addresses, by owner: "
         f"{dict(to_placeholders.most_common(8)) or 'none seen'}"
     )
-    # ProxyFlow is outside its own VPN: its sockets may reach nothing but its proxy (and the tests' gate control port).
+    # ProxyFlow is outside its own VPN: its sockets may reach nothing but its proxy (and the tests' gate control port) —
+    # and the phone network's resolver on port 53, for the lookup of its proxy's name: Android's resolver makes that query
+    # on ProxyFlow's behalf in a socket it gives ProxyFlow's uid (for data accounting), and the uplink resolver's log above
+    # shows which names the phone asked (M10: one such socket was sampled on API 35).
     own_sockets = [key for key in sockets.spans if key[5] in owners.own]
+    own_lookups = [key for key in own_sockets if key[3] in NETWORK_RESOLVERS and key[4] == 53]
     own_elsewhere = collections.Counter(
         f"{proto.upper()} {rip}:{rport}" for (proto, _, _, rip, rport, _) in own_sockets
         if not (proto == "tcp" and rip == GATEWAY and rport in PROXY_SIDE_PORTS) and not ipaddress.ip_address(rip).is_loopback
+        and not (rip in NETWORK_RESOLVERS and rport == 53)
     )
+    lookups = f", {len(own_lookups)} of them its lookups through the phone network's resolver" if own_lookups else ""
     if not owners.own:
         facts.append("ProxyFlow's own sockets: not checked, no test logged ProxyFlow's uid")
     elif own_elsewhere:
         problems.append(f"ProxyFlow's own sockets reached other places than its proxy: {dict(own_elsewhere.most_common(8))}")
-        facts.append(f"ProxyFlow's own sockets (uid {sorted(owners.own)}): {len(own_sockets)} seen, some elsewhere than its proxy")
+        facts.append(f"ProxyFlow's own sockets (uid {sorted(owners.own)}): {len(own_sockets)} seen{lookups}, some elsewhere than its proxy")
     else:
-        facts.append(f"ProxyFlow's own sockets (uid {sorted(owners.own)}): {len(own_sockets)} seen, every one to its proxy or the gate's control port")
+        facts.append(
+            f"ProxyFlow's own sockets (uid {sorted(owners.own)}): {len(own_sockets)} seen{lookups}, every one to its proxy, the gate's "
+            "control port or the phone network's resolver"
+        )
     views, view_problems = androids_views(logcat)
     problems += view_problems
     facts.append(

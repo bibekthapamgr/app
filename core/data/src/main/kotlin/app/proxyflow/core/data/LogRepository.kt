@@ -7,6 +7,7 @@ import app.proxyflow.core.data.db.LogEventEntity
 import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.LogEntry
 import app.proxyflow.core.model.LogEvent
+import app.proxyflow.core.model.LogRetention
 import app.proxyflow.core.model.LogSanitizer
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +75,14 @@ interface LogRepository {
     }
 }
 
+/**
+ * How old an entry a write may delete: the retention once it is known; before that — the app's start, the settings not
+ * read yet — the longest a user can choose, so a write never deletes what the user's own setting keeps (M10). It is known
+ * once set, or once a purge ran: the app purges only after reading the setting, or giving up waiting for it.
+ */
+internal fun writeRetention(retentionMillis: Long, settled: Boolean): Long =
+    if (settled) retentionMillis else maxOf(retentionMillis, LogRetention.entries.maxOf { it.millis })
+
 /** Whether an entry dated [timeMillis] is within the log's retention at [now]. */
 internal fun kept(timeMillis: Long, now: Long, retentionMillis: Long): Boolean =
     timeMillis >= now - retentionMillis && timeMillis <= now + LogRepository.FUTURE_MARGIN_MILLIS
@@ -98,6 +107,9 @@ class InMemoryLogRepository(
     }
     override val generation: Long get() = clears.get()
 
+    /** Whether the user's retention is known yet ([setRetention], or a purge: see [writeRetention]). */
+    @Volatile private var settled = false
+
     override suspend fun setRetention(millis: Long) {
         retention.value = millis
         purge()
@@ -107,7 +119,7 @@ class InMemoryLogRepository(
         synchronized(this) {
             if (generation < clears.get()) return
             val added = entries.map { it.sanitized().copy(id = nextId++) }
-            if (added.isNotEmpty()) list.value = bounded(added + list.value)
+            if (added.isNotEmpty()) list.value = bounded(added + list.value, writeRetention(retention.value, settled))
         }
     }
 
@@ -119,12 +131,12 @@ class InMemoryLogRepository(
     }
 
     override suspend fun purge() {
-        synchronized(this) { list.value = bounded(list.value) }
+        settled = true
+        synchronized(this) { list.value = bounded(list.value, retention.value) }
     }
 
-    private fun bounded(all: List<LogEntry>): List<LogEntry> {
+    private fun bounded(all: List<LogEntry>, keep: Long): List<LogEntry> {
         val now = clock()
-        val keep = retention.value
         return all.filter { kept(it.timeMillis, now, keep) }
             .sortedWith(compareByDescending<LogEntry> { it.timeMillis }.thenByDescending { it.id })
             .take(maxEntries)
@@ -167,13 +179,17 @@ class RoomLogRepository internal constructor(
 
     override val generation: Long get() = clears.get()
 
+    /** Whether the user's retention is known yet ([setRetention], or a purge: see [writeRetention]). */
+    @Volatile private var settled = false
+
     override suspend fun append(entries: List<LogEntry>, generation: Long) {
         val rows = entries.map { it.sanitized().toRow() }
         if (rows.isEmpty()) return
         writing.withLock {
             if (generation < clears.get()) return
             val now = clock()
-            dao.insertBounded(rows, now - retention.value, now + LogRepository.FUTURE_MARGIN_MILLIS, maxEntries)
+            val keep = writeRetention(retention.value, settled)
+            dao.insertBounded(rows, now - keep, now + LogRepository.FUTURE_MARGIN_MILLIS, maxEntries)
         }
     }
 
@@ -185,6 +201,7 @@ class RoomLogRepository internal constructor(
     }
 
     override suspend fun purge() {
+        settled = true
         val now = clock()
         dao.purge(now - retention.value, now + LogRepository.FUTURE_MARGIN_MILLIS, maxEntries)
     }

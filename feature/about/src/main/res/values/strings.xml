@@ -53,7 +53,7 @@
     <string name="privacy_permission_vpn">VPN: Android asks you the first time you connect. It lets ProxyFlow send apps\' traffic to your proxy.</string>
     <string name="privacy_permission_internet">Internet and network state: to reach your proxy, and to notice when the phone changes network.</string>
     <string name="privacy_permission_service">Foreground service: to keep the connection running while you use other apps.</string>
-    <string name="privacy_permission_notifications">Notifications (Android 13 and later, optional): for the connection status and its Disconnect button. Profile names are hidden on the lock screen.</string>
+    <string name="privacy_permission_notifications">Notifications (Android 13 and later, optional): for the connection status and its Disconnect button, which works only once the phone is unlocked. They name no profile, so the lock screen shows none.</string>
     <string name="privacy_changes_title">Changes and contact</string>
     <string name="privacy_changes">If a later version changes what ProxyFlow keeps or sends, its privacy policy will say so. ProxyFlow\'s developer can be reached through the contact details on its Google Play page.</string>
 
@@ -66,6 +66,7 @@
     <string name="help_errors_title">When something goes wrong</string>
     <string name="help_errors_home">Home says what failed and what to try first, with a code such as AUTH_FAILED that Logs and your proxy provider can use.</string>
     <string name="help_errors_reach">Can\'t reach your proxy, or it isn\'t responding: check the server address and port, that your plan is active, and that your network allows the connection. Some networks block proxy ports.</string>
+    <string name="help_errors_network_sign_in">A network with a sign-in page, as in hotels and airports, may carry nothing until you sign in, your proxy included, or answer in its place: Home says so beside a failed connection, a reconnection or a block, when Android has found one. Sign in from Android\'s notification. If its page doesn\'t open while ProxyFlow is connected, stop ProxyFlow first; with Android\'s Block connections without VPN on, Android may keep the page blocked until you turn that off.</string>
     <string name="help_errors_sign_in">Username or password rejected: check them with your provider. ProxyFlow supports the Basic sign-in of HTTP proxies and the username and password of SOCKS5, not Digest.</string>
     <string name="help_errors_protocol">This doesn\'t look like a SOCKS5 or HTTP proxy: the protocol or the port in the profile is probably wrong.</string>
     <string name="help_errors_blocked">Traffic blocked: while connected, ProxyFlow never sends traffic around your proxy. Try again, edit the profile, or choose Stop and use normal network.</string>
@@ -84,7 +85,7 @@
     <string name="help_logs_title">Logs and diagnostics</string>
     <string name="help_logs_body">Logs list connection events and errors on this phone only, without passwords, server or site names, or addresses. Copy or Export passes them on when you ask your proxy provider for help. Settings has how long they are kept.</string>
     <string name="help_background_title">When Android stops ProxyFlow</string>
-    <string name="help_background_body">To free memory, Android can stop ProxyFlow while it is connected; apps then use your normal network unless Android\'s system kill switch is on. ProxyFlow tells you on Home the next time it starts. It doesn\'t reconnect by itself; if it is your Always-on VPN, Android may start it again, or may not.</string>
+    <string name="help_background_body">To free memory, Android can stop ProxyFlow while it is connected; apps then use your normal network unless Android\'s system kill switch is on. ProxyFlow tells you on Home the next time it starts. It doesn\'t reconnect by itself; if it is your Always-on VPN, Android may start it again, or may not. Some phones stop apps in the background more than Android itself does: if it happens often, setting ProxyFlow\'s battery use to Unrestricted in Android\'s settings for the app (Android 12 and later), or turning off its battery optimization (Android 10 and 11), can help.</string>
     <string name="help_feedback_title">Getting help</string>
     <string name="help_feedback_body">ProxyFlow has no servers and collects nothing itself: what went wrong is in Logs, on this phone. Copy the log in Logs and include it when you contact your proxy provider, or ProxyFlow\'s developer through the contact details on its Google Play page.</string>
     <!-- The open-source notices (M9): generated from what the release build ships (scripts/licences.py). -->

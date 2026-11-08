@@ -19,6 +19,7 @@ import androidx.compose.ui.test.printToString
 import androidx.lifecycle.SavedStateHandle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
+import app.proxyflow.core.designsystem.theme.isolated
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
@@ -213,7 +214,7 @@ class AddEditProxyScreenTest {
             }
         }
         compose.onNodeWithText("Reconnect with changes?").assertIsDisplayed()
-        compose.onNodeWithText("ProxyFlow is using Office.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("ProxyFlow is using ${isolated("Office")}.", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Nothing is sent around your proxy.", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Keep editing").performClick()
         compose.onNodeWithText("Save and reconnect").performClick()
@@ -251,6 +252,18 @@ class AddEditProxyScreenTest {
         }
     }
 
+    /**
+     * Leaving unsaved edits asks first, naming the profile as a first-strong isolate (M10-90): "2 مكتب" keeps its digit and
+     * the sentence its full stop where they belong, whatever the name's direction.
+     */
+    @Test
+    fun discardingEditsNamesTheProfileInItsOwnDirection() {
+        showForm(editing.copy(dirty = true, originalName = "2 مكتب"))
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Discard changes?").assertIsDisplayed()
+        compose.onNodeWithText("Your edits to ${isolated("2 مكتب")} haven't been saved.").assertIsDisplayed()
+    }
+
     /** D9 during a first connect: the reconnect only checks the new settings, and says so. */
     @Test
     fun aReconnectDuringAFirstConnectSaysItOnlyChecks() {
@@ -263,8 +276,8 @@ class AddEditProxyScreenTest {
             }
         }
         compose.onNodeWithText("Reconnect with changes?").assertIsDisplayed()
-        compose.onNodeWithText("ProxyFlow is still checking Office. Saving checks the new settings instead", substring = true)
-            .assertIsDisplayed()
+        val checking = "ProxyFlow is still checking ${isolated("Office")}. Saving checks the new settings instead"
+        compose.onNodeWithText(checking, substring = true).assertIsDisplayed()
         compose.onNodeWithText("apps can't go online", substring = true).assertDoesNotExist()
     }
 

@@ -2,10 +2,12 @@ package app.proxyflow
 
 import android.content.Intent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
@@ -18,6 +20,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.model.ConnectStep
@@ -231,6 +234,31 @@ class ScreenshotTest {
             )
         HomeScreen(home(reconnecting), HomeActions(), nowMillis = SAMPLE_TIME)
     }
+
+    /**
+     * M10: reconnecting on a network that asks for a sign-in (a captive portal): Home says so beside the failure (the
+     * capture fails if the banner isn't there to scroll to).
+     */
+    @Test
+    fun homeReconnectingOnASignInNetwork() =
+        captureBothThemes("B5_home_reconnecting_sign_in", scrollTo = "This network asks you to sign in") {
+            val retry = ReconnectInfo(
+                ReconnectReason.ProxyFailures,
+                attempt = 2,
+                maxAttempts = 8,
+                nextAttemptAtMillis = SAMPLE_TIME + 4_000,
+                lastError = ConnectionError("PROXY_UNREACHABLE", "connection to the proxy timed out"),
+            )
+            val reconnecting = ConnectionState(
+                ConnectionStatus.Reconnecting,
+                "p1",
+                tokyo.name,
+                connectedSinceMillis = SAMPLE_TIME - 600_000,
+                reconnect = retry,
+                networkSignIn = true,
+            )
+            HomeScreen(home(reconnecting), HomeActions(), nowMillis = SAMPLE_TIME)
+        }
 
     /** A switch to another profile or a restart: the interface stays, so traffic is held while the new check runs. */
     @Test
@@ -667,12 +695,8 @@ class ScreenshotTest {
     @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
     fun largeFontHomeConnected() = captureLargeFont("B4_home_connected", action = hasText("Disconnect")) {
         val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
-        HomeScreen(
-            home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic),
-            HomeActions(),
-            nowMillis =
-            SAMPLE_TIME + 767_000,
-        )
+        val state = home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic)
+        HomeScreen(state, HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
     }
 
     @Test
@@ -725,8 +749,8 @@ class ScreenshotTest {
     @Test
     @Config(qualifiers = SMALL_PHONE, fontScale = LARGEST_FONT)
     fun largeFontSettings() = captureLargeFont("E1_settings", action = hasText("About & privacy")) {
-        SettingsScreen(SettingsUiState(loading = false, theme = ThemePreference.System), onThemeChange = {
-        }, onOpenAbout = {}, notificationsOn = true)
+        val state = SettingsUiState(loading = false, theme = ThemePreference.System)
+        SettingsScreen(state, onThemeChange = {}, onOpenAbout = {}, notificationsOn = true)
     }
 
     @Test
@@ -754,6 +778,71 @@ class ScreenshotTest {
         captureLargeFont("G2_privacy_policy", action = hasText("Changes and contact"), scroll = false, lazyList = true) {
             PrivacyPolicyScreen(version = "0.2.0 (2)", onBack = {})
         }
+
+    // M10's localisation review: right to left, as Arabic, Hebrew, Persian and Urdu are written. ProxyFlow declares
+    // supportsRtl, so on a phone set to one of them Android mirrors its screens, English words and all (it ships in
+    // English only until decision D8). Six screens, light theme, the top of the screen as it opens, laid out right to left
+    // as Compose does for a right-to-left configuration; the icons that point a way must turn round with it (defect M10-2).
+
+    @Test
+    fun rightToLeftHomeDisconnected() = captureRightToLeft("B2_home_disconnected") { HomeScreen(home(ConnectionState.Idle), HomeActions()) }
+
+    @Test
+    fun rightToLeftHomeConnected() = captureRightToLeft("B4_home_connected") { ConnectedHome() }
+
+    @Test
+    fun rightToLeftConnectFailed() = captureRightToLeft("B6b_connect_failed") { ConnectFailedHome() }
+
+    @Test
+    fun rightToLeftProfiles() = captureRightToLeft("C2_profiles_list") { ProfilesList() }
+
+    @Test
+    fun rightToLeftAddProxy() = captureRightToLeft("D1_add_proxy") { AddProxyForm() }
+
+    @Test
+    fun rightToLeftSettings() = captureRightToLeft("E1_settings") { SettingsSample() }
+
+    @Composable
+    private fun ConnectedHome() {
+        val connected = ConnectionState(ConnectionStatus.Connected, "p1", tokyo.name, connectedSinceMillis = SAMPLE_TIME)
+        val state = home(connected, diagnostics = sampleDiagnostics, traffic = sampleTraffic)
+        HomeScreen(state, HomeActions(), nowMillis = SAMPLE_TIME + 767_000)
+    }
+
+    @Composable
+    private fun ConnectFailedHome() {
+        HomeScreen(home(ConnectionState(profileId = "p1", error = ConnectionError("PROXY_UNREACHABLE"))), HomeActions())
+    }
+
+    @Composable
+    private fun ProfilesList() {
+        ProfilesScreen(profilesState, onAddProxy = {}, onEditProxy = {}, onUseProxy = {}, onDeleteProxy = {}, nowMillis = SAMPLE_TIME)
+    }
+
+    @Composable
+    private fun AddProxyForm() {
+        AddEditProxyScreen(AddEditUiState(input = tokyoForm, dirty = true), AddEditActions())
+    }
+
+    @Composable
+    private fun SettingsSample() {
+        val state = SettingsUiState(loading = false, theme = ThemePreference.System)
+        SettingsScreen(state, onThemeChange = {}, onOpenAbout = {}, notificationsOn = true)
+    }
+
+    /**
+     * [content] laid out right to left, as Compose lays out every screen when Android's configuration is right to left
+     * (`LocalLayoutDirection`, which Compose takes from it): captured in screenshots/rtl and checked. Robolectric's `ldrtl`
+     * qualifier left Compose's direction left to right (run 41826918038), so the direction is given here as Android gives it.
+     */
+    private fun captureRightToLeft(name: String, content: @Composable () -> Unit) {
+        compose.setContent {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { ProxyFlowTheme { content() } }
+        }
+        val captured = runCatching { compose.onRoot().captureRoboImage("$DIR/rtl/$name.png") }
+        assertAccessible("$name (right to left)")
+        captured.getOrThrow()
+    }
 
     /**
      * [content] in the light theme at the font scale the test's @Config sets, scrolled to its main [action] (unless it

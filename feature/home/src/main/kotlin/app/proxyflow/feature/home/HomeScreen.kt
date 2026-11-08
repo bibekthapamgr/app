@@ -7,6 +7,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.PluralsRes
+import androidx.annotation.StringRes
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -77,6 +78,8 @@ import app.proxyflow.core.designsystem.component.shortWhen
 import app.proxyflow.core.designsystem.icon.PfIcons
 import app.proxyflow.core.designsystem.theme.MonoSmall
 import app.proxyflow.core.designsystem.theme.Spacing
+import app.proxyflow.core.designsystem.theme.inItsOwnDirection
+import app.proxyflow.core.designsystem.theme.isolated
 import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionStatus
@@ -413,6 +416,7 @@ private fun exitReason(reason: ExitReason): String = stringResource(
 private fun ConnectFailedContent(state: HomeUiState.Ready, error: ConnectionError, actions: HomeActions) {
     StatusHeader(stringResource(R.string.home_status_disconnected), StatusTone.Off, null)
     PfBanner(title = errorTitle(error, state.profile), text = errorMessage(error, state.profile), tone = BannerTone.Error)
+    SignInNetwork(state, error, R.string.home_sign_in_network_try_again)
     val blocking = state.killSwitch?.status == KillSwitchStatus.On
     val note = when {
         // Android started ProxyFlow as Always-on VPN: whether it blocks apps now, Android says only to a running VPN.
@@ -481,7 +485,7 @@ private fun ConnectingContent(state: HomeUiState.Ready, actions: HomeActions) {
     StatusHeader(
         stringResource(R.string.home_status_connecting),
         StatusTone.Transition,
-        stringResource(R.string.home_connecting_to, state.profile.displayName),
+        stringResource(R.string.home_connecting_to, isolated(state.profile.displayName)),
     )
     // One row per stage of the attempt (ADR-0012): done, in progress, or not started yet.
     PfCard(modifier = Modifier.fillMaxWidth()) {
@@ -516,7 +520,7 @@ private fun ReconnectingContent(state: HomeUiState.Ready, actions: HomeActions) 
     StatusHeader(
         stringResource(R.string.home_status_reconnecting),
         StatusTone.Transition,
-        stringResource(R.string.home_reconnecting_to, state.profile.displayName),
+        stringResource(R.string.home_reconnecting_to, isolated(state.profile.displayName)),
     )
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { PfLoadingIndicator() }
     Note(stringResource(R.string.home_reconnecting_note))
@@ -551,7 +555,7 @@ private fun ConnectedContent(state: HomeUiState.Ready, actions: HomeActions, now
         modifier = Modifier.fillMaxWidth(),
     )
     Text(
-        listOf(state.profile.displayName, protocolLabel(state.profile)).joinToString(" · "),
+        listOf(isolated(state.profile.displayName), protocolLabel(state.profile)).joinToString(" · "),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
@@ -595,10 +599,17 @@ private fun AutoReconnectContent(state: HomeUiState.Ready, reconnect: ReconnectI
                 ReconnectReason.NetworkChanged -> R.string.home_reconnect_network_changed_message
                 ReconnectReason.ProxyUnanswered -> R.string.home_reconnect_unanswered_message
                 ReconnectReason.AlwaysOnStart -> R.string.home_reconnect_always_on_message
+                // Started as the page went; should it be back meanwhile, the banner below says so, and this says only what runs.
+                ReconnectReason.SignInPageGone -> if (state.connection.networkSignIn) {
+                    R.string.home_reconnect_proxy_message
+                } else {
+                    R.string.home_reconnect_sign_in_gone_message
+                }
             },
         ),
         tone = BannerTone.Warning,
     )
+    SignInNetwork(state, lastError, R.string.home_sign_in_network_at_once)
     val next = reconnect.nextAttemptAtMillis
     Text(
         listOf(
@@ -651,6 +662,13 @@ private fun BlockedContent(state: HomeUiState.Ready, actions: HomeActions) {
     val error = state.error ?: ConnectionError(ConnectionError.INTERNAL)
     StatusHeader(stringResource(R.string.home_status_blocked), StatusTone.Error, null)
     PfBanner(title = errorTitle(error, state.profile), text = errorMessage(error, state.profile), tone = BannerTone.Error)
+    // Traffic held for a failure that may pass, or a certificate that may have been the page's, is tried again at once
+    // after the sign-in; anything else, when the user taps Try again (ADR-0015 §3).
+    SignInNetwork(
+        state,
+        error,
+        if (error.triedAgainAfterSignIn) R.string.home_sign_in_network_at_once else R.string.home_sign_in_network_try_again_held,
+    )
     Note(stringResource(R.string.home_blocked_note))
     ErrorCode(error)
     when (error.code) {
@@ -780,6 +798,28 @@ private fun StatusHeader(status: String, tone: StatusTone, line: String?) {
             )
         }
     }
+}
+
+/**
+ * M10: Android found a sign-in page on the phone's network (a captive portal), which may explain why the proxy can't be
+ * reached, or why its certificate was wrong — the page's, answering in its place. Said beside a failure to reach the
+ * proxy, never beside one of the phone's or ProxyFlow's own; [next] is what to do, in the words of the screen it is on.
+ */
+@Composable
+private fun SignInNetwork(state: HomeUiState.Ready, error: ConnectionError?, @StringRes next: Int) {
+    if (!state.connection.networkSignIn || error?.code in NOT_THE_NETWORKS) return
+    val cause = if (error?.code in
+        ConnectionError.CERTIFICATE
+    ) {
+        R.string.home_sign_in_network_cause_certificate
+    } else {
+        R.string.home_sign_in_network_cause
+    }
+    PfBanner(
+        title = stringResource(R.string.home_sign_in_network_title),
+        text = stringResource(R.string.home_sign_in_network_text, stringResource(cause), stringResource(next)),
+        tone = BannerTone.Info,
+    )
 }
 
 @Composable
@@ -1063,7 +1103,7 @@ private fun PickerRow(profile: ProxyProfile, selected: Boolean, lastTest: Profil
     ) {
         RadioButton(selected = selected, onClick = null)
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            Text(profile.displayName, style = MaterialTheme.typography.titleMedium)
+            Text(profile.displayName, style = MaterialTheme.typography.titleMedium.inItsOwnDirection())
             Text(
                 listOf(
                     profile.protocol.name,
@@ -1088,7 +1128,7 @@ private fun ProfileCard(profile: ProxyProfile, onChangeProfile: () -> Unit) {
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                Text(profile.displayName, style = MaterialTheme.typography.titleMedium)
+                Text(profile.displayName, style = MaterialTheme.typography.titleMedium.inItsOwnDirection())
                 Text(
                     listOf(
                         profile.protocol.name,
@@ -1146,6 +1186,18 @@ private val FIX_PROFILE_FIRST = setOf(
     "PROTOCOL_ERROR",
     "PROXY_DNS_FAILED",
     ConnectionError.CREDENTIAL_UNREADABLE,
+)
+
+/** Failures of the phone or of ProxyFlow itself, which a sign-in page on the network never explains. */
+private val NOT_THE_NETWORKS = setOf(
+    ConnectionError.PROFILE_DELETED,
+    ConnectionError.ALWAYS_ON_NO_PROFILE,
+    ConnectionError.CREDENTIAL_UNREADABLE,
+    ConnectionError.ENGINE_STOPPED,
+    ConnectionError.VPN_PERMISSION_DENIED,
+    ConnectionError.VPN_REVOKED,
+    ConnectionError.OFFLINE,
+    ConnectionError.INTERNAL,
 )
 
 private const val MILLIS_PER_SECOND = 1_000L

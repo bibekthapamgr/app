@@ -66,6 +66,7 @@ import app.proxyflow.core.designsystem.icon.PfIcons
 import app.proxyflow.core.designsystem.theme.MonoSmall
 import app.proxyflow.core.designsystem.theme.ProxyFlowTheme
 import app.proxyflow.core.designsystem.theme.Spacing
+import app.proxyflow.core.designsystem.theme.inItsOwnDirection
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionStage
 import app.proxyflow.core.model.ExitReason
@@ -379,7 +380,10 @@ private fun EntrySheet(entry: LogEntry, profileName: String?, zone: ZoneId, onCo
             entry.stage?.let { Field(R.string.logs_detail_stage, stageLabel(it)) }
             entry.code?.let { Field(R.string.logs_detail_code, it) }
             // The profile's name while it exists; otherwise the short id the export uses.
-            entry.profileId?.let { id -> Field(R.string.logs_detail_profile, profileName ?: id.filter { it.isLetterOrDigit() }.take(8)) }
+            entry.profileId?.let { id ->
+                val shortId = id.filter { it.isLetterOrDigit() }.take(8)
+                Field(R.string.logs_detail_profile, profileName ?: shortId, usersOwn = profileName != null)
+            }
             if (entry.details.isNotEmpty()) {
                 Text(
                     stringResource(R.string.logs_detail_details),
@@ -402,7 +406,7 @@ private fun EntrySheet(entry: LogEntry, profileName: String?, zone: ZoneId, onCo
 }
 
 @Composable
-private fun Field(@StringRes label: Int, value: String) {
+private fun Field(@StringRes label: Int, value: String, usersOwn: Boolean = false) {
     // Read out as one: "Code, AUTH_FAILED".
     Row(
         modifier = Modifier
@@ -413,7 +417,8 @@ private fun Field(@StringRes label: Int, value: String) {
         Text(stringResource(label), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.35f))
         Text(
             value,
-            style = MaterialTheme.typography.bodyMedium,
+            // A profile's name is the user's, in its own direction (M10-64).
+            style = MaterialTheme.typography.bodyMedium.let { if (usersOwn) it.inItsOwnDirection() else it },
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(0.65f),
         )
@@ -490,6 +495,7 @@ internal fun eventTitle(entry: LogEntry): String {
                 "network_changed" -> R.string.logs_event_reconnect_network_changed
                 "proxy_unanswered" -> R.string.logs_event_reconnect_unanswered
                 "always_on_start" -> R.string.logs_event_reconnect_always_on
+                "sign_in_page_gone" -> R.string.logs_event_reconnect_sign_in_gone
                 else -> R.string.logs_event_reconnect_proxy
             },
         )
@@ -501,17 +507,9 @@ internal fun eventTitle(entry: LogEntry): String {
         LogEvent.Reconnected -> count(R.plurals.logs_event_reconnected, number(LogDetail.ATTEMPT) ?: 1)
         LogEvent.ReconnectGaveUp -> count(R.plurals.logs_event_gave_up, number(LogDetail.ATTEMPT) ?: 0)
         LogEvent.Offline -> stringResource(R.string.logs_event_offline)
-        LogEvent.NetworkChanged -> stringResource(
-            R.string.logs_event_network_changed,
-            stringResource(
-                when (details[LogDetail.NETWORK]) {
-                    "wifi" -> R.string.logs_network_wifi
-                    "cellular" -> R.string.logs_network_cellular
-                    "ethernet" -> R.string.logs_network_ethernet
-                    else -> R.string.logs_network_other
-                },
-            ),
-        )
+        LogEvent.NetworkChanged -> stringResource(R.string.logs_event_network_changed, networkKind(details))
+        LogEvent.SignInPage -> stringResource(R.string.logs_event_sign_in_page, networkKind(details))
+        LogEvent.SignInPageGone -> stringResource(R.string.logs_event_sign_in_page_gone, networkKind(details))
         LogEvent.Stopped -> stringResource(
             if (details[LogDetail.BY] == "profile_deleted") R.string.logs_event_stopped_profile_deleted else R.string.logs_event_stopped,
         )
@@ -547,6 +545,16 @@ internal fun eventTitle(entry: LogEntry): String {
 }
 
 @Composable
+private fun networkKind(details: Map<String, String>): String = stringResource(
+    when (details[LogDetail.NETWORK]) {
+        "wifi" -> R.string.logs_network_wifi
+        "cellular" -> R.string.logs_network_cellular
+        "ethernet" -> R.string.logs_network_ethernet
+        else -> R.string.logs_network_other
+    },
+)
+
+@Composable
 private fun count(plural: Int, value: Long): String {
     val n = value.coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
     return pluralStringResource(plural, n, n)
@@ -560,6 +568,7 @@ private fun count(plural: Int, value: Long): String {
 @Composable
 private fun hint(entry: LogEntry): String? {
     if (entry.event == LogEvent.SessionInterrupted) return stringResource(R.string.logs_hint_interrupted)
+    if (entry.event == LogEvent.SignInPage) return stringResource(R.string.logs_hint_sign_in_page)
     val code = entry.code ?: return null
     val error = ConnectionError(code, entry.details[LogDetail.DETAIL])
     val oneConnection = entry.event == LogEvent.ConnectionProblems
