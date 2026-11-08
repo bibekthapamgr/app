@@ -58,7 +58,7 @@ Dark theme is designed for B2, B4, B6a and C2 (all other screens follow the same
 | `TLS_EXPIRED` | Proxy | Certificate expired | The proxy's certificate is expired or not yet valid. Check your phone's date and time, or contact your provider. | Retry | Date & time settings | Error, blocked |
 | `TLS_HANDSHAKE` | Proxy | TLS to proxy failed | The proxy didn't answer with TLS. It may not support TLS on this port. ProxyFlow never falls back to an unencrypted connection. | Edit profile | — | Error, blocked |
 | `PROTOCOL_ERROR` | Proxy | This doesn't look like a {SOCKS5/HTTP} proxy | The server answered in an unexpected way. Check the protocol and port. *(405/501: "This HTTP proxy doesn't allow tunnels (CONNECT).")* | Edit profile | — | Error, blocked |
-| `HANDSHAKE_TIMEOUT` | Proxy | Proxy isn't responding | The proxy accepted the connection but didn't respond in time. | Retry | Edit profile | Reconnecting, blocked |
+| `HANDSHAKE_TIMEOUT` | Proxy | Proxy isn't responding | The proxy accepted the connection but didn't respond in time. *(M7: a SOCKS5 proxy that answered but not a connection request in time is still reaching the site, reported as `TARGET_UNREACHABLE`, ADR-0012 §6.)* | Retry | Edit profile | Reconnecting, blocked |
 | `TARGET_NOT_ALLOWED` | Target | Blocked by your proxy | {proxy} refused a connection to {destination or "a site"} (port {port}). | — | — | Logs only |
 | `TARGET_UNREACHABLE` | Target | Site unreachable via proxy | The proxy couldn't reach {destination}. | — | — | Logs only |
 | `TARGET_REFUSED` | Target | Connection refused | {destination} refused the connection. | — | — | Logs only |

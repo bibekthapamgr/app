@@ -257,6 +257,26 @@ object PfIcons {
             "M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18",
         )
     }
+
+    /** An arrow leaving a tray: "Export" (Logs, M7). */
+    val Share: ImageVector by lazy {
+        strokeIcon(
+            "Share",
+            2.0f,
+            "M12 15V4M8 8l4-4 4 4",
+            "M5 13v6h14v-6",
+        )
+    }
+
+    /** A magnifier: "Search" (Logs, M7). */
+    val Search: ImageVector by lazy {
+        strokeIcon(
+            "Search",
+            2.0f,
+            "M5 11a6 6 0 1 0 12 0a6 6 0 1 0 -12 0z",
+            "M15.5 15.5L20 20",
+        )
+    }
     val Phone: ImageVector by lazy {
         strokeIcon(
             "Phone",

@@ -4,6 +4,8 @@ import app.proxyflow.core.model.ConnectStep
 import app.proxyflow.core.model.ConnectionError
 import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionStatus
+import app.proxyflow.core.model.ReconnectInfo
+import app.proxyflow.core.model.ReconnectReason
 import app.proxyflow.core.vpn.StatusContent.Action
 import app.proxyflow.core.vpn.StatusContent.Text
 import app.proxyflow.core.vpn.StatusContent.Title
@@ -16,11 +18,20 @@ class StatusContentTest {
     fun theCheckAndTheStartOfProtectionCanBeCancelled() {
         assertEquals(
             StatusContent(Title.CONNECTING, Text.CHECKING_PROXY, listOf(Action.CANCEL)),
-            StatusContent.of(state(ConnectionStatus.Connecting, step = ConnectStep.CheckingProxy)),
+            StatusContent.of(state(ConnectionStatus.Connecting, step = ConnectStep.ProxyHandshake)),
         )
         assertEquals(
             StatusContent(Title.CONNECTING, Text.STARTING_PROTECTION, listOf(Action.CANCEL)),
-            StatusContent.of(state(ConnectionStatus.Connecting, step = ConnectStep.StartingProtection)),
+            StatusContent.of(state(ConnectionStatus.Connecting, step = ConnectStep.Authenticated)),
+        )
+    }
+
+    /** M8: an Always-on VPN start holds traffic during its check, so the way out is Disconnect, as while reconnecting. */
+    @Test
+    fun anAlwaysOnStartHoldingTrafficOffersDisconnectNotCancel() {
+        assertEquals(
+            StatusContent(Title.CONNECTING, Text.HOLDING, listOf(Action.DISCONNECT)),
+            StatusContent.of(state(ConnectionStatus.Connecting, step = ConnectStep.ProxyHandshake).copy(held = true)),
         )
     }
 
@@ -28,7 +39,24 @@ class StatusContentTest {
     fun reconnectingSaysTrafficIsPausedAndOffersDisconnect() {
         assertEquals(
             StatusContent(Title.RECONNECTING, Text.RECONNECTING, listOf(Action.DISCONNECT)),
-            StatusContent.of(state(ConnectionStatus.Reconnecting, step = ConnectStep.CheckingProxy)),
+            StatusContent.of(state(ConnectionStatus.Reconnecting, step = ConnectStep.ProxyHandshake)),
+        )
+    }
+
+    @Test
+    fun reconnectingOnItsOwnCountsTheAttempts() {
+        val retry = ReconnectInfo(ReconnectReason.ProxyFailures, attempt = 2, maxAttempts = 8, nextAttemptAtMillis = 5L, lastError = null)
+        assertEquals(
+            StatusContent(Title.RECONNECTING, Text.RECONNECTING_ATTEMPT, listOf(Action.DISCONNECT), attempt = 2, maxAttempts = 8),
+            StatusContent.of(state(ConnectionStatus.Reconnecting).copy(reconnect = retry)),
+        )
+    }
+
+    @Test
+    fun offlineSaysTrafficWaitsForANetwork() {
+        assertEquals(
+            StatusContent(Title.OFFLINE, Text.OFFLINE, listOf(Action.DISCONNECT)),
+            StatusContent.of(state(ConnectionStatus.Offline, ConnectionError.OFFLINE)),
         )
     }
 

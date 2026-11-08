@@ -8,7 +8,7 @@ This report answers the M6 acceptance criteria that need packets: supported TCP 
 
 | Capture | Where | Sees | API levels |
 |---|---|---|---|
-| The emulator's own capture (`-tcpdump`) | the emulator's network stack, outside the phone, on its mobile-data uplink | every frame the phone sends or receives on mobile data, full length | 29, 34, 36 (their uplink is mobile data); on 35 the uplink is Wi-Fi, which this capture does not see |
+| The emulator's own capture (`-tcpdump`) | the emulator's network stack, outside the phone, on its mobile-data uplink | every frame the phone sends or receives on mobile data, full length | 29 and 36 (their uplink is mobile data), and 34 until M7; on 35, and on 34 since M7, the uplink is Wi-Fi, which this capture does not see (on some API 34 boots mobile data stays up beside it, carrying none of the app's connections to the proxies) |
 | tcpdump inside the phone | each uplink interface (`eth0`, `wlan0`, `radio0`…; never the VPN's `tun0`), as root, headers and the first 400 bytes of each packet | the uplink whichever it is, Wi-Fi included | 34, 35, 36 (API 29: adbd does not survive `adb root` and back on that image) |
 
 A capture counts as covering the uplink only if it saw the app's connections to both proxies on the runner, and tcpdump inside the phone only if that interface's own tcpdump was still running after the tests (`guest-capture.txt`). The VPN's own interface is never captured: what matters is what leaves the phone. Each run also records the phone's IPv4 and IPv6 addresses and default routes (`guest-network.txt`): whether a direct IPv6 packet could have left the phone at all.

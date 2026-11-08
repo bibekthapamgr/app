@@ -120,7 +120,7 @@ func (d *fakeDialer) last() adapters.Target {
 	return d.targets[len(d.targets)-1]
 }
 
-func socketpair(t *testing.T) (int, int) {
+func socketpair(t testing.TB) (int, int) {
 	t.Helper()
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
@@ -132,7 +132,7 @@ func socketpair(t *testing.T) (int, int) {
 	return fds[0], fds[1]
 }
 
-func clientStack(t *testing.T, fd int) *stack.Stack {
+func clientStack(t testing.TB, fd int) *stack.Stack {
 	t.Helper()
 	s := stack.New(stack.Options{
 		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
@@ -155,12 +155,13 @@ type testEngine struct {
 	*Engine
 	cs     *stack.Stack
 	efd    int
+	cfd    int // the apps' end: what is written here reaches the engine as packets from the phone
 	events *eventLog
 }
 
 // startEngine starts an engine on a socketpair with a client stack on the
 // other end. dialer nil means a fakeDialer. Cleanup stops everything.
-func startEngine(t *testing.T, dialer TunnelDialer, opts ...func(*Config)) (*testEngine, *fakeDialer) {
+func startEngine(t testing.TB, dialer TunnelDialer, opts ...func(*Config)) (*testEngine, *fakeDialer) {
 	t.Helper()
 	efd, cfd := socketpair(t)
 	pool, _ := fakedns.NewPool(netip.MustParsePrefix("198.18.0.0/15"), 256, 0)
@@ -194,7 +195,7 @@ func startEngine(t *testing.T, dialer TunnelDialer, opts ...func(*Config)) (*tes
 	}
 	cs := clientStack(t, cfd)
 	t.Cleanup(func() { e.Stop(); cs.Close(); cs.Wait(); unix.Close(efd); unix.Close(cfd) })
-	return &testEngine{Engine: e, cs: cs, efd: efd, events: log}, fd
+	return &testEngine{Engine: e, cs: cs, efd: efd, cfd: cfd, events: log}, fd
 }
 
 // eventLog collects events (the engine delivers them on one goroutine).
@@ -229,7 +230,7 @@ func (l *eventLog) count(typ EventType) int {
 // 3 attempts). Retries matter only for the gVisor *test client* stack, which
 // under race-detector CPU starvation can miss a reply that arrives before its
 // UDP endpoint is ready; kernel clients (the real case) are unaffected.
-func resolve(t *testing.T, cs *stack.Stack, name string) netip.Addr {
+func resolve(t testing.TB, cs *stack.Stack, name string) netip.Addr {
 	t.Helper()
 	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 42, RecursionDesired: true})
 	_ = b.StartQuestions()
@@ -851,6 +852,102 @@ func TestProxyOutageFailsClosed(t *testing.T) {
 	}
 	if echo.Served() != 1 {
 		t.Fatalf("the destination was reached %d times; only the one tunnelled connection may reach it", echo.Served())
+	}
+}
+
+// A SOCKS5 proxy that answers its sign-in but no connection request (M8): each connection fails as the site's, marked
+// unanswered and counted apart from the proxy-level failures, by site.
+func TestUnansweredSOCKS5RequestsAreCountedApart(t *testing.T) {
+	proxytest.CheckLeaks(t)
+	stalled := proxytest.NewServer(t, proxytest.Config{Protocol: proxytest.SOCKS5, StallConnect: true})
+	dialer, err := adapters.NewDialer(adapters.ProxyConfig{Kind: adapters.KindSOCKS5, Host: stalled.Host(), Port: stalled.Port(),
+		HandshakeTimeout: 300 * time.Millisecond}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _ := startEngine(t, dialer)
+	for i, name := range []string{"a.test", "b.test", "a.test", "c.test"} {
+		if _, err := dialTCP(e.cs, resolve(t, e.cs, name), 443); !isRefused(err) {
+			t.Fatalf("connection %d to %s: got %v, want refused", i+1, name, err)
+		}
+	}
+	st := e.Status()
+	if st.UnansweredRequests != 4 || st.UnansweredSites != 3 || st.ConsecutiveProxyFails != 0 {
+		t.Fatalf("want 4 unanswered to 3 sites and no proxy-level failure: %+v", st)
+	}
+	if got := e.Stats().Failures["TARGET_UNREACHABLE"]; got != 4 {
+		t.Fatalf("each is a site's failure: %d", got)
+	}
+	waitFor(t, func() bool { return e.events.count(EvConnFail) >= 4 }, "the four failures to be reported")
+	for _, ev := range e.events.all() {
+		if ev.Type == EvConnFail && (!ev.Unanswered || ev.Code != "TARGET_UNREACHABLE") {
+			t.Fatalf("every failure is reported as unanswered: %+v", ev)
+		}
+	}
+}
+
+// The unanswered count (M8) starts over on anything that works and on any answer from the proxy about a site, goes on
+// through proxy-level failures, and remembers a bounded number of sites.
+func TestUnansweredCountStartsOverOnAnAnswer(t *testing.T) {
+	var s stats
+	s.init()
+	unanswered := func(site uint64) { s.proxyResult(adapters.CodeTargetUnreachable, true, site) }
+	check := func(what string, requests int64, sites int) {
+		t.Helper()
+		if s.unanswered != requests || len(s.unansweredSites) != sites {
+			t.Fatalf("%s: %d unanswered to %d sites, want %d to %d", what, s.unanswered, len(s.unansweredSites), requests, sites)
+		}
+	}
+	unanswered(1)
+	unanswered(2)
+	s.proxyResult(adapters.CodeProxyUnreachable, false, 0)
+	s.proxyResult(adapters.CodeCanceled, false, 0)
+	s.proxyResult(adapters.CodeLimit, false, 0)
+	check("proxy-level failures and the engine's own refusals leave it", 2, 2)
+	if s.consecutive != 1 {
+		t.Fatalf("the proxy-level failure is counted on its own: %d", s.consecutive)
+	}
+	s.proxyResult(adapters.CodeTargetRefused, false, 3)
+	check("a site refused by the proxy is an answer", 0, 0)
+	unanswered(4)
+	s.proxyResult(adapters.CodeTargetUnreachable, false, 4)
+	check("an explicit 'unreachable' reply is an answer too", 0, 0)
+	unanswered(5)
+	s.proxyResult("", false, 0)
+	check("a working connection starts it over", 0, 0)
+	if s.consecutive != 0 {
+		t.Fatalf("and the proxy-level count: %d", s.consecutive)
+	}
+	for i := 0; i < 100; i++ {
+		unanswered(uint64(i))
+	}
+	check("sites are bounded", 100, maxUnansweredSites)
+
+	// Far apart, they are not in a row: the count starts over after a quiet spell.
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	s.proxyResult("", false, 0)
+	unanswered(1)
+	now = now.Add(unansweredQuiet + time.Second)
+	unanswered(2)
+	check("a quiet spell starts it over", 1, 1)
+	now = now.Add(unansweredQuiet / 2)
+	unanswered(3)
+	check("close together they go on", 2, 2)
+}
+
+// One site is one site whatever the port, by name or by address.
+func TestUnansweredSitesAreHostsNotPorts(t *testing.T) {
+	a := siteKey(adapters.Target{Host: "Slow.Example.", Port: 80})
+	if b := siteKey(adapters.Target{Host: "slow.example", Port: 443}); a != b {
+		t.Fatal("the same name on another port must be the same site")
+	}
+	if siteKey(adapters.Target{Host: "other.example", Port: 80}) == a {
+		t.Fatal("another name is another site")
+	}
+	ip := netip.MustParseAddr("203.0.113.9")
+	if siteKey(adapters.Target{Addr: ip, Port: 80}) != siteKey(adapters.Target{Addr: netip.AddrFrom16(ip.As16()), Port: 8443}) {
+		t.Fatal("an address, also IPv4-mapped, is one site whatever the port")
 	}
 }
 

@@ -71,7 +71,7 @@ class ProxyFlowVpnService :
         lastStartId = startId
         runtime.log.add("service start $startId ${intent?.action ?: "(no action)"}")
         val session = runtime.session
-        session.attach(this, alwaysOn = intent?.action == SERVICE_INTERFACE)
+        session.attach(this, alwaysOn = intent?.action == SERVICE_INTERFACE, startId = startId)
         when (intent?.action) {
             ACTION_DISCONNECT -> session.disconnect()
             ACTION_RESTART -> session.restart()
@@ -107,7 +107,8 @@ class ProxyFlowVpnService :
             .setMtu(config.mtu)
             // ProxyFlow's own sockets (the engine's, the pre-flight check's) bypass the VPN; they are protected too.
             .addDisallowedApplication(packageName)
-            // The default network until M7's network monitor names it; metered when it is.
+            // Whichever network is the default (null): Android follows it as it changes, and setMetered(false) makes the VPN
+            // as metered as that network is. The session hears of the changes from NetworkMonitor (ADR-0012).
             .setUnderlyingNetworks(null)
             .setMetered(false)
             .setBlocking(false) // the engine polls the descriptor
@@ -190,7 +191,14 @@ class ProxyFlowVpnService :
 
     override fun clearProblem() = notifications.clearProblem()
 
-    override fun stop() {
+    // Android answers for the app whose VPN runs; without one it says false either way (M8, ADR-0013).
+    override fun systemKillSwitch(): KillSwitchReading? = try {
+        KillSwitchReading(alwaysOn = isAlwaysOn, blocksWithoutVpn = isLockdownEnabled)
+    } catch (e: RuntimeException) {
+        null // the system server could not answer
+    }
+
+    override fun stop(): Int {
         val startId = lastStartId
         val generation = synchronized(statusLock) {
             foreground = false
@@ -207,6 +215,7 @@ class ProxyFlowVpnService :
             val stopped = stopSelfResult(startId)
             runtime.log.add("service stop $startId: ${if (stopped) "stopping" else "a newer start keeps it"}")
         }
+        return startId
     }
 
     /** The interface's descriptor, closed by the session once the engine has stopped. */

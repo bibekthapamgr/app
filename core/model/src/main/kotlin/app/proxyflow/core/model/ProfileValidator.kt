@@ -96,6 +96,13 @@ object ProfileValidator {
         return if (s.length > 2 && s.startsWith('[') && s.endsWith(']')) s.substring(1, s.length - 1) else s
     }
 
+    /**
+     * What two servers are compared by, wherever ProxyFlow decides whether a saved password may go to a server (the rule
+     * of saving, [ProxyProfile.sameServerAs]): the same name in any case, with or without the root's trailing dot, an IPv6
+     * literal with or without its brackets.
+     */
+    fun hostKey(server: String): String = normalizeHost(server).removeSuffix(".").lowercase()
+
     /** A hostname, an IPv4 literal or an IPv6 literal. */
     fun isValidHost(host: String): Boolean = isIpv4Literal(host) || isIpv6Literal(host) || isValidHostname(host)
 

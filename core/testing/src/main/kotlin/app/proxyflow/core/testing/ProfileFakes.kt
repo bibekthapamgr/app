@@ -8,6 +8,7 @@ import app.proxyflow.core.data.ProfileStore
 import app.proxyflow.core.data.crypto.AesGcmCredentialCipher
 import app.proxyflow.core.data.crypto.SecretKeyStore
 import app.proxyflow.core.model.ConnectionTestResult
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfileInput
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -39,6 +40,12 @@ class InMemoryProfileStore : ProfileStore {
         records.update { list ->
             list.map { if (it.id == record.id) record.also { found = true } else it }
         }
+        return found
+    }
+
+    override suspend fun recordTest(id: String, test: ProfileTest): Boolean {
+        var found = false
+        records.update { list -> list.map { if (it.id == id) it.copy(lastTest = test).also { found = true } else it } }
         return found
     }
 
@@ -113,12 +120,19 @@ class TestProfiles(
     )
 }
 
-/** A tester that answers [result] and records what it was asked. */
-class FakeConnectionTester(var result: ConnectionTestResult = ConnectionTestResult.Unavailable) : ConnectionTester {
+/** A tester that answers [result] and records what it was asked; [testSaved] answers for profiles in [saved] only. */
+class FakeConnectionTester(var result: ConnectionTestResult = ConnectionTestResult.Passed(latencyMillis = 42)) : ConnectionTester {
     val requests = mutableListOf<Pair<String?, ProxyProfileInput>>()
+    val savedRequests = mutableListOf<String>()
+    var saved: Set<String>? = null
 
     override suspend fun test(profileId: String?, input: ProxyProfileInput): ConnectionTestResult {
         requests += profileId to input
         return result
+    }
+
+    override suspend fun testSaved(profileId: String): ConnectionTestResult? {
+        savedRequests += profileId
+        return result.takeIf { saved?.contains(profileId) != false }
     }
 }

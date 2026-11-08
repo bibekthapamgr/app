@@ -39,7 +39,7 @@ data class ProxyProfileInput(
     fun sameCredentialTargetAs(saved: ProxyProfileInput): Boolean = requiresSignIn &&
         saved.requiresSignIn &&
         protocol == saved.protocol &&
-        hostKey(server) == hostKey(saved.server) &&
+        ProfileValidator.hostKey(server) == ProfileValidator.hostKey(saved.server) &&
         port.trim().toIntOrNull() == saved.port.trim().toIntOrNull() &&
         username == saved.username &&
         useTls == saved.useTls &&
@@ -66,8 +66,6 @@ data class ProxyProfileInput(
             useTls = profile.useTls,
             tlsServerName = profile.tlsServerName.orEmpty(),
         )
-
-        private fun hostKey(server: String) = ProfileValidator.normalizeHost(server).removeSuffix(".").lowercase()
     }
 }
 

@@ -28,6 +28,8 @@ kotlin {
 dependencies {
     implementation(project(":core:designsystem"))
     implementation(project(":core:data"))
+    // LocalActivity: an open sheet or confirmation stays through a configuration change (activity-compose 1.10 or newer).
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)

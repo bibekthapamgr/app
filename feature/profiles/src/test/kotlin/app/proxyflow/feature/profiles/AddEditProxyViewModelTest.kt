@@ -1,14 +1,24 @@
 package app.proxyflow.feature.profiles
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import app.proxyflow.core.data.ConnectionController
+import app.proxyflow.core.data.ConnectionTester
 import app.proxyflow.core.data.CredentialsRead
 import app.proxyflow.core.data.CredentialsUnavailableException
 import app.proxyflow.core.data.ProfileForEditing
 import app.proxyflow.core.data.ProfileRepository
 import app.proxyflow.core.data.crypto.AesGcmCredentialCipher
+import app.proxyflow.core.model.ConnectionError
+import app.proxyflow.core.model.ConnectionState
+import app.proxyflow.core.model.ConnectionStatus
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
+import app.proxyflow.core.model.ProfileTest
 import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
@@ -16,6 +26,9 @@ import app.proxyflow.core.testing.FakeConnectionTester
 import app.proxyflow.core.testing.MainDispatcherRule
 import app.proxyflow.core.testing.TestProfiles
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -31,9 +44,10 @@ class AddEditProxyViewModelTest {
     private val profiles = TestProfiles()
     private val repository = profiles.repository
     private val tester = FakeConnectionTester()
+    private val connection = RecordingConnection()
 
     private fun viewModel(handle: SavedStateHandle = SavedStateHandle(), repo: ProfileRepository = repository) =
-        AddEditProxyViewModel(handle, repo, tester)
+        AddEditProxyViewModel(handle, repo, tester, connection)
 
     private suspend fun savedPassword(id: String): String? = (repository.readCredentials(id) as? CredentialsRead.Available)?.let {
         String(it.password)
@@ -342,21 +356,132 @@ class AddEditProxyViewModelTest {
         val vm = viewModel()
         vm.onServerChange("proxy.example.com")
         vm.onPortChange("1080")
+        val tested = vm.uiState.value.input.toProfile("", 0, 0)
 
+        tester.result = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED"), fromEngine = true)
         vm.testConnection()
-        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Unavailable), vm.uiState.value.test)
+        val rejected = ConnectionTestResult.Failed(ConnectionError("AUTH_FAILED"), fromEngine = true)
+        assertEquals(ConnectionTestState.Done(rejected, tested), vm.uiState.value.test)
         assertEquals(listOf<String?>(null), tester.requests.map { it.first })
-
-        tester.result = ConnectionTestResult.Failed("AUTH_FAILED")
-        vm.testConnection()
-        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Failed("AUTH_FAILED")), vm.uiState.value.test)
 
         tester.result = ConnectionTestResult.Passed(latencyMillis = 42)
         vm.testConnection()
-        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Passed(42)), vm.uiState.value.test)
+        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Passed(42), tested), vm.uiState.value.test)
 
         vm.onPortChange("1081")
         assertEquals("a result belongs to the form it tested", ConnectionTestState.Idle, vm.uiState.value.test)
+    }
+
+    @Test
+    fun aTestOfExactlyWhatIsSavedIsKeptWithTheProfile() = runTest {
+        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, tester, connection, clock = { 7_000L })
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        tester.result = ConnectionTestResult.Passed(latencyMillis = 182)
+        vm.testConnection()
+        vm.save()
+
+        val saved = repository.profiles.first().single()
+        assertEquals(mapOf(saved.id to ProfileTest(7_000L, code = null, latencyMillis = 182)), repository.lastTests.first())
+    }
+
+    @Test
+    fun aTestOfAnotherFormOrOfThisPhoneIsNotKept() = runTest {
+        // Tested, then changed before saving: the result was of other settings.
+        val changed = viewModel()
+        changed.onServerChange("proxy.example.com")
+        changed.onPortChange("1080")
+        changed.testConnection()
+        changed.onPortChange("1081")
+        changed.save()
+        // A test that couldn't run on this phone says nothing about the proxy.
+        tester.result = ConnectionTestResult.Failed(ConnectionError(ConnectionError.INTERNAL), fromEngine = true)
+        val broken = viewModel()
+        broken.onServerChange("other.example.com")
+        broken.onPortChange("1080")
+        broken.testConnection()
+        broken.save()
+
+        assertEquals(2, repository.profiles.first().size)
+        assertTrue(repository.lastTests.first().isEmpty())
+    }
+
+    /** A failure the tester found before asking any proxy (ADR-0014 §2) describes the form, not the proxy: never kept. */
+    @Test
+    fun aFailureFoundBeforeAskingTheProxyIsNotKept() = runTest {
+        val vm = viewModel()
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        tester.result = ConnectionTestResult.Failed(ConnectionError("AUTH_REQUIRED"), fromEngine = false)
+        vm.testConnection()
+        vm.save()
+
+        assertEquals(1, repository.profiles.first().size)
+        assertTrue(repository.lastTests.first().isEmpty())
+    }
+
+    /** An edit drops the tested input — with its typed password — even when it is edited back to what was tested. */
+    @Test
+    fun anEditForgetsWhatWasTestedEvenIfUndone() = runTest {
+        val vm = viewModel()
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.testConnection()
+        vm.onPortChange("1081")
+        vm.onPortChange("1080")
+        vm.save()
+
+        assertEquals(1, repository.profiles.first().size)
+        assertTrue("tested before the edit: not kept", repository.lastTests.first().isEmpty())
+    }
+
+    /** Save, and the reconnect it was confirmed with (D9), finish even if the screen closes meanwhile. */
+    @Test
+    fun aSaveAndItsReconnectFinishWhenTheScreenClosesMeanwhile() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        connection.current.value = ConnectionState(ConnectionStatus.Connected, saved.id, "Office", saved)
+        val gate = CompletableDeferred<Unit>()
+        val slow = object : ProfileRepository by repository {
+            override suspend fun save(id: String?, input: ProxyProfileInput): ProxyProfile {
+                gate.await()
+                return repository.save(id, input)
+            }
+        }
+        val store = ViewModelStore()
+        val factory = viewModelFactory { initializer { viewModel(editing(saved.id), slow) } }
+        val vm = ViewModelProvider(store, factory)[AddEditProxyViewModel::class.java]
+        vm.onPortChange("1081")
+        vm.onPasswordChange("secret")
+        vm.save()
+        vm.saveAndReconnect()
+        assertTrue(vm.uiState.value.saving)
+
+        store.clear() // the screen closed: the ViewModel's scope ends
+        gate.complete(Unit)
+
+        assertEquals(1081, repository.get(saved.id)?.port)
+        assertEquals(listOf("reconnect ${saved.id}"), connection.calls)
+    }
+
+    @Test
+    fun cancellingATestShowsNothingForIt() = runTest {
+        val gate = CompletableDeferred<ConnectionTestResult>()
+        val slow = object : ConnectionTester {
+            override suspend fun test(profileId: String?, input: ProxyProfileInput) = gate.await()
+
+            override suspend fun testSaved(profileId: String): ConnectionTestResult? = null
+        }
+        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, slow, connection)
+        vm.onServerChange("proxy.example.com")
+        vm.onPortChange("1080")
+        vm.testConnection()
+        assertEquals(ConnectionTestState.Testing, vm.uiState.value.test)
+
+        vm.cancelTest()
+        assertEquals(ConnectionTestState.Idle, vm.uiState.value.test)
+        // The form is as it was tested, so only the cancelled test keeps this answer from being shown.
+        gate.complete(ConnectionTestResult.Passed(1))
+        assertEquals("never a pass for a test that was cancelled", ConnectionTestState.Idle, vm.uiState.value.test)
     }
 
     @Test
@@ -373,10 +498,12 @@ class AddEditProxyViewModelTest {
     @Test
     fun aTestInProgressIsDroppedWhenTheFormChanges() = runTest {
         val gate = CompletableDeferred<ConnectionTestResult>()
-        val slow = object : app.proxyflow.core.data.ConnectionTester {
+        val slow = object : ConnectionTester {
             override suspend fun test(profileId: String?, input: ProxyProfileInput) = gate.await()
+
+            override suspend fun testSaved(profileId: String): ConnectionTestResult? = null
         }
-        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, slow)
+        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, slow, connection)
         vm.onServerChange("proxy.example.com")
         vm.onPortChange("1080")
         vm.testConnection()
@@ -398,14 +525,17 @@ class AddEditProxyViewModelTest {
 
     @Test
     fun aTesterThatBreaksIsReportedAsAFailureNeverAPass() = runTest {
-        val broken = object : app.proxyflow.core.data.ConnectionTester {
+        val broken = object : ConnectionTester {
             override suspend fun test(profileId: String?, input: ProxyProfileInput): ConnectionTestResult = error("engine crashed")
+
+            override suspend fun testSaved(profileId: String): ConnectionTestResult? = error("engine crashed")
         }
-        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, broken)
+        val vm = AddEditProxyViewModel(SavedStateHandle(), repository, broken, connection)
         vm.onServerChange("proxy.example.com")
         vm.onPortChange("1080")
         vm.testConnection()
-        assertEquals(ConnectionTestState.Done(ConnectionTestResult.Failed(AddEditProxyViewModel.INTERNAL_ERROR)), vm.uiState.value.test)
+        val done = vm.uiState.value.test as ConnectionTestState.Done
+        assertEquals(ConnectionError.INTERNAL, (done.result as ConnectionTestResult.Failed).code)
     }
 
     @Test
@@ -464,5 +594,155 @@ class AddEditProxyViewModelTest {
         val vm = viewModel()
         vm.onPortChange("\u0661\u0660\u0668\u06601080")
         assertEquals("1080", vm.uiState.value.input.port)
+    }
+
+    /** Board D9 (J11): changes to how the running connection reaches its proxy are saved only once the user confirms. */
+    @Test
+    fun savingChangesToTheConnectionsProfileAsksFirstThenReconnects() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        connection.current.value = ConnectionState(ConnectionStatus.Connected, saved.id, "Office", saved)
+        val vm = viewModel(editing(saved.id))
+        // Another port is another proxy: the password is typed again (the rule of saving).
+        vm.onPortChange("1081")
+        vm.onPasswordChange("secret")
+
+        vm.save()
+        assertEquals("Office", vm.uiState.value.confirmReconnect)
+        assertEquals("nothing saved yet", "1080", repository.get(saved.id)?.port?.toString())
+        vm.keepEditing()
+        assertNull(vm.uiState.value.confirmReconnect)
+        assertFalse(vm.uiState.value.saved)
+
+        vm.save()
+        vm.saveAndReconnect()
+        assertTrue(vm.uiState.value.saved)
+        assertEquals(1081, repository.get(saved.id)?.port)
+        assertEquals(listOf("reconnect ${saved.id}"), connection.calls)
+    }
+
+    /**
+     * During a first connect a reconnect only checks the new settings — the phone's network stays as it is until it's
+     * connected — and D9 says so; an Always-on start holding traffic is asked about as a connection is.
+     */
+    @Test
+    fun aChangeDuringAFirstConnectIsAskedInItsOwnWords() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        connection.current.value = ConnectionState(ConnectionStatus.Connecting, saved.id, "Office", saved)
+        val first = viewModel(editing(saved.id))
+        first.onPortChange("1081")
+        first.onPasswordChange("secret")
+        first.save()
+        assertEquals("Office", first.uiState.value.confirmReconnect)
+        assertFalse("a first connect holds nothing", first.uiState.value.confirmReconnectHolds)
+        first.saveAndReconnect()
+        assertTrue(first.uiState.value.saved)
+        assertEquals(listOf("reconnect ${saved.id}"), connection.calls)
+
+        connection.current.value = ConnectionState(ConnectionStatus.Connecting, saved.id, "Office", saved, held = true)
+        val held = viewModel(editing(saved.id))
+        held.onPortChange("1082")
+        held.onPasswordChange("secret")
+        held.save()
+        assertEquals("Office", held.uiState.value.confirmReconnect)
+        assertTrue("traffic held", held.uiState.value.confirmReconnectHolds)
+    }
+
+    /**
+     * D9's question follows the connection while it is open: a first connect that finishes changes its words, and once no
+     * connection runs on this profile it closes, nothing saved; Save then saves without asking.
+     */
+    @Test
+    fun theReconnectQuestionFollowsTheConnectionWhileItIsOpen() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        connection.current.value = ConnectionState(ConnectionStatus.Connecting, saved.id, "Office", saved)
+        val vm = viewModel(editing(saved.id))
+        vm.onPortChange("1081")
+        vm.onPasswordChange("secret")
+        vm.save()
+        assertFalse(vm.uiState.value.confirmReconnectHolds)
+
+        connection.current.value = ConnectionState(ConnectionStatus.Connected, saved.id, "Office", saved, connectedSinceMillis = 1)
+        assertEquals("Office", vm.uiState.value.confirmReconnect)
+        assertTrue("connected now: traffic is held while the new settings are checked", vm.uiState.value.confirmReconnectHolds)
+
+        val other = saved.copy(id = "other", name = "Elsewhere")
+        connection.current.value = ConnectionState(ConnectionStatus.Connected, other.id, "Elsewhere", other, connectedSinceMillis = 2)
+        assertNull("another profile's connection: nothing to reconnect", vm.uiState.value.confirmReconnect)
+        // A tap that reaches the question in the frame it closed in does nothing.
+        vm.saveAndReconnect()
+        assertFalse(vm.uiState.value.saved)
+        assertEquals("nothing saved", 1080, repository.get(saved.id)?.port)
+
+        vm.save()
+        assertTrue(vm.uiState.value.saved)
+        assertEquals(1081, repository.get(saved.id)?.port)
+        assertTrue("nothing reconnected", connection.calls.isEmpty())
+    }
+
+    /** A connection blocked because its profile was deleted isn't this form's: Save makes a new profile and asks nothing. */
+    @Test
+    fun aConnectionWhoseProfileWasDeletedIsNotAskedAbout() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        val vm = viewModel(editing(saved.id))
+        repository.delete(saved.id)
+        val deleted = ConnectionError(ConnectionError.PROFILE_DELETED)
+        connection.current.value = ConnectionState(ConnectionStatus.Blocked, saved.id, "Office", saved, error = deleted)
+        vm.onPortChange("1081")
+        vm.onPasswordChange("secret")
+        vm.save()
+
+        assertNull(vm.uiState.value.confirmReconnect)
+        assertTrue(vm.uiState.value.saved)
+        assertTrue("nothing reconnected", connection.calls.isEmpty())
+    }
+
+    @Test
+    fun aNewNameOrAnotherProfilesConnectionSavesWithoutAsking() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        val other = repository.save(null, signIn.copy(name = "Home", server = "home.example.com"))
+        connection.current.value = ConnectionState(ConnectionStatus.Connected, saved.id, "Office", saved)
+
+        val renamed = viewModel(editing(saved.id))
+        renamed.onNameChange("Office 2")
+        renamed.save()
+        assertNull("the connection reaches its proxy as before", renamed.uiState.value.confirmReconnect)
+        assertTrue(renamed.uiState.value.saved)
+
+        val elsewhere = viewModel(editing(other.id))
+        elsewhere.onPortChange("1082")
+        elsewhere.onPasswordChange("secret")
+        elsewhere.save()
+        assertNull(elsewhere.uiState.value.confirmReconnect)
+        assertTrue(elsewhere.uiState.value.saved)
+        assertTrue("nothing reconnected", connection.calls.isEmpty())
+    }
+
+    @Test
+    fun aNewPasswordForTheConnectionsProfileAsksToo() = runTest {
+        val saved = repository.save(null, signIn.copy(name = "Office"))
+        connection.current.value = ConnectionState(ConnectionStatus.Blocked, saved.id, "Office", saved)
+        val vm = viewModel(editing(saved.id))
+        vm.onPasswordChange("new-secret")
+        vm.save()
+        assertEquals("a blocked connection's too: Save and reconnect is how it runs again", "Office", vm.uiState.value.confirmReconnect)
+    }
+
+    private class RecordingConnection : ConnectionController {
+        val current = MutableStateFlow(ConnectionState.Idle)
+        val calls = mutableListOf<String>()
+        override val state: StateFlow<ConnectionState> = current
+        override val canConnect = true
+
+        override fun connect(profileId: String) {
+            calls += "connect $profileId"
+        }
+
+        override fun disconnect() {
+            calls += "disconnect"
+        }
+
+        override fun reconnect(profileId: String) {
+            calls += "reconnect $profileId"
+        }
     }
 }

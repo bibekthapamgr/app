@@ -18,12 +18,22 @@
     <string name="profiles_delete_body">The profile, its encrypted username and password, and the key that protects them are deleted from this phone. This can\'t be undone.</string>
     <string name="profiles_disconnect_delete">Disconnect and delete</string>
     <string name="profiles_disconnect_delete_title">Disconnect and delete \"%1$s\"?</string>
-    <string name="profiles_disconnect_delete_body">ProxyFlow is using this proxy. Deleting it ends the connection first, and your apps go back to your normal network.</string>
+    <string name="profiles_disconnect_delete_body">ProxyFlow is using this proxy. Deleting it ends the connection first: apps then use your normal network unless Android\'s system kill switch is on.</string>
     <string name="profiles_cancel">Cancel</string>
+    <string name="profiles_switch_title">Switch to \"%1$s\"?</string>
+    <!-- %1$s: the profile the connection uses now; %2$s: the one the user chose. -->
+    <string name="profiles_switch_body">ProxyFlow is using %1$s. Switching ends any open connections through it, and apps can\'t go online until ProxyFlow is connected through %2$s. If that fails, apps stay offline until ProxyFlow reconnects, you try again or you stop. Nothing is sent around a proxy meanwhile.</string>
+    <!-- During a first connect: nothing is held yet, and switching checks the other proxy instead. -->
+    <string name="profiles_switch_checking_body">ProxyFlow is still checking %1$s. Switching checks %2$s instead, and your phone\'s network stays as it is until it\'s connected.</string>
+    <string name="profiles_switch_confirm">Switch</string>
     <string name="profiles_duplicate">Duplicate</string>
+    <!-- Board C2's menu: tests the saved profile as connecting would (J3, ADR-0014). -->
+    <string name="profiles_test">Test</string>
     <string name="profiles_use_failed">Couldn\'t switch to this proxy. Try again.</string>
     <string name="profiles_duplicate_failed">Couldn\'t duplicate this proxy. Try again.</string>
     <string name="profiles_delete_failed">Couldn\'t delete this proxy. Try again.</string>
+    <!-- A test that couldn't run on this phone (the Android Keystore or the connection engine), so nothing was found. -->
+    <string name="profiles_test_failed">Couldn\'t test this proxy on this phone. Try again.</string>
     <!-- Name of a duplicated profile: %1$s is the original's name. -->
     <string name="profiles_copy_name">%1$s (copy)</string>
     <!-- Name of a further duplicate: %1$s is the original's name, %2$d counts the copies (2, 3, …). -->
@@ -50,12 +60,19 @@
     <string name="edit_credentials_unreadable_body">The saved sign-in can\'t be read on this phone any more, so it isn\'t used. Enter it again.</string>
     <string name="edit_test">Test connection</string>
     <string name="edit_test_running">Testing the connection…</string>
-    <string name="edit_test_unavailable_title">Testing isn\'t available yet</string>
-    <string name="edit_test_unavailable_body">Testing needs the connection engine, which comes in a later version. Nothing was sent to your proxy.</string>
-    <string name="edit_test_passed_title">Test passed</string>
-    <string name="edit_test_passed_body">Your proxy opened a test connection in %1$d ms.</string>
-    <string name="edit_test_failed_title">Test failed</string>
-    <string name="edit_test_failed_body">The test stopped with %1$s.</string>
+    <string name="edit_test_cancel">Cancel</string>
+    <!-- Board D5. The test is ProxyFlow's pre-flight check (ADR-0010 §4, ADR-0014): the target is named in the privacy policy. -->
+    <string name="edit_test_running_note">ProxyFlow asks this proxy to open a connection to connectivitycheck.gstatic.com, then closes it without sending anything through it. Your phone\'s network doesn\'t change, and your username and password go only to this proxy.</string>
+    <!-- Board D6: how long reaching the proxy, its sign-in and its tunnel took; what still can't go through it. -->
+    <string name="edit_test_passed_title">Proxy works</string>
+    <string name="edit_test_passed_body">Your proxy opened a test connection in %1$d ms. While connected, UDP is still blocked and ping isn\'t answered.</string>
+    <!-- Board D7. %1$s: the error catalogue's title, the one connecting shows for the same failure. -->
+    <string name="edit_test_failed_title">Test failed: %1$s</string>
+    <string name="edit_test_code">Code: %1$s</string>
+    <!-- Found before any proxy was asked (ADR-0014 §2): nothing was sent. The form asks for the password itself before a
+         test whose details the saved one can't go with, so this is a profile changed or deleted since the form opened. -->
+    <string name="edit_test_needs_password_title">Enter the password to test</string>
+    <string name="edit_test_needs_password_body">Nothing was sent. This profile was changed or deleted since you opened it, so its saved password can\'t be used for these details. Type the password to test them.</string>
     <string name="edit_password_reenter">Enter the password again: the server, port, protocol, username or TLS setting changed</string>
     <string name="edit_tls">TLS to the proxy</string>
     <string name="edit_tls_hint">Recommended. Encrypts the connection between this phone and your proxy, which must support TLS on this port. HTTPS sites stay encrypted end to end either way.</string>
@@ -87,4 +104,10 @@
     <string name="error_password_too_long">Passwords can be at most 255 bytes for SOCKS5</string>
     <string name="error_password_too_long_http">Passwords can be at most 1,024 bytes</string>
     <string name="error_tls_server_name">Enter a valid server name or leave empty</string>
+    <!-- Board D9 (J11): saving changes to the profile a connection runs on. %1$s: the profile's name. -->
+    <string name="edit_reconnect_title">Reconnect with changes?</string>
+    <string name="edit_reconnect_body">ProxyFlow is using %1$s. Saving reconnects with the new settings: any open connections close, and apps can\'t go online until ProxyFlow is connected. If the new settings don\'t work, apps stay offline until ProxyFlow reconnects, you fix them or you stop. Nothing is sent around your proxy.</string>
+    <!-- D9 during a first connect: nothing is held yet, and saving starts the check again with the new settings. -->
+    <string name="edit_reconnect_checking_body">ProxyFlow is still checking %1$s. Saving checks the new settings instead, and your phone\'s network stays as it is until it\'s connected.</string>
+    <string name="edit_reconnect_confirm">Save and reconnect</string>
 </resources>

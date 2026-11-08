@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The lab's device owner (LabDeviceAdmin) needs no device-admin policy: Always-on VPN is a device-owner call. -->
+<device-admin>
+    <uses-policies />
+</device-admin>

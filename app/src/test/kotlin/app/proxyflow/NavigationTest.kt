@@ -1,5 +1,6 @@
 package app.proxyflow
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.proxyflow.core.testing.DumpOnFailureRule
+import app.proxyflow.feature.about.AboutDestination
 import app.proxyflow.feature.profiles.AddEditProxyDestination
 import app.proxyflow.feature.profiles.navigateToAddEditProxy
 import org.junit.Assert.assertEquals
@@ -51,18 +53,46 @@ class NavigationTest {
         compose.tab("Profiles").assertIsSelected()
 
         compose.tab("Logs").performClick()
-        compose.onNodeWithText("No events yet").assertIsDisplayed()
+        compose.waitForText("No events yet").assertIsDisplayed()
 
         compose.tab("Settings").performClick()
         compose.tab("Settings").assertIsSelected()
-        compose.onNodeWithText("Theme").assertIsDisplayed()
+        // Below the kill switch section (M8) on the test's small screen: scrolled to, as a user would.
+        compose.onNodeWithText("Theme").performScrollTo().assertIsDisplayed()
 
-        // Settings → About (full screen, no bottom bar) → Back.
-        compose.onNodeWithText("About & privacy").performClick()
+        // Settings → About (full screen, no bottom bar) → each page it opens → Back, and Back again.
+        compose.onNodeWithText("About & privacy").performScrollTo().performClick()
         compose.onNodeWithText("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · free, no account").assertIsDisplayed()
         compose.tab("Home").assertDoesNotExist()
+        for ((row, title) in listOf(
+            "How ProxyFlow works" to "Websites and most apps (TCP)",
+            "Privacy policy" to "Kept on this phone",
+            "Help" to "Getting started",
+            "Open-source licences" to "Apache License 2.0",
+        )) {
+            compose.onNodeWithText(row).performScrollTo().performClick()
+            compose.waitForText(title).assertIsDisplayed()
+            compose.tab("Home").assertDoesNotExist()
+            compose.onNodeWithContentDescription("Back").performClick()
+            compose.waitForText("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · free, no account")
+        }
+        // A licence's full text, from the notices the app ships (M9), and back to the list.
+        compose.onNodeWithText("Open-source licences").performScrollTo().performClick()
+        compose.waitForText("Read the Apache License 2.0").performClick()
+        compose.waitForText("TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION").assertIsDisplayed()
         compose.onNodeWithContentDescription("Back").performClick()
-        compose.onNodeWithText("Theme").assertIsDisplayed()
+        compose.waitForText("Read the Apache License 2.0")
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Theme").performScrollTo().assertIsDisplayed()
+
+        // Settings → Help → Back (M9), and how long logs are kept, chosen from a dialog.
+        compose.onNodeWithText("Help").performScrollTo().performClick()
+        compose.waitForText("Getting started").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Keep logs for").performScrollTo().performClick()
+        compose.onNodeWithText("7 days").performClick()
+        compose.waitForText("7 days").assertIsDisplayed()
 
         // Home → Add proxy → save a profile → Home shows it.
         compose.tab("Home").performClick()
@@ -76,8 +106,10 @@ class NavigationTest {
         compose.onNodeWithText("proxy.example.com").assertIsDisplayed()
         compose.onNodeWithText("Connect").assertIsEnabled()
 
-        // Home → Profiles (Change) → Edit proxy → Back.
+        // Home → the picker (Change, B8) → Profiles (Manage profiles) → Edit proxy → Back.
         compose.onNodeWithText("Change").performClick()
+        compose.waitForText("Choose proxy").assertIsDisplayed()
+        compose.onNodeWithText("Manage profiles").performClick()
         compose.tab("Profiles").assertIsSelected()
         compose.waitForText("ACTIVE").assertIsDisplayed()
         compose.onNodeWithText("proxy.example.com:1080").performClick()
@@ -124,6 +156,25 @@ class NavigationTest {
 
         compose.pressBack()
         compose.waitForText("Add a proxy to get started").assertIsDisplayed()
+    }
+
+    /** A double tap on a link to a screen pushed on top (Settings' About & privacy) opens it once (`dropUnlessResumed`). */
+    @Test
+    fun aDoubleTapOnALinkOpensItsScreenOnce() {
+        compose.tab("Settings").performClick()
+        val about = compose.onNodeWithText("About & privacy").performScrollTo().fetchSemanticsNode()
+        val tap = checkNotNull(about.config[SemanticsActions.OnClick].action)
+        // Both taps arrive before About is drawn.
+        compose.runOnUiThread {
+            tap()
+            tap()
+        }
+        compose.waitForIdle()
+        val abouts = compose.activity.navController?.currentBackStack?.value.orEmpty().count { it.destination.hasRoute<AboutDestination>() }
+        assertEquals(1, abouts)
+
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("About & privacy").performScrollTo().assertIsDisplayed()
     }
 
     @Test

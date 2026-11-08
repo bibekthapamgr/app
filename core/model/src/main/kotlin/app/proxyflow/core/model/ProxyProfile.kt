@@ -40,13 +40,13 @@ data class ProxyProfile(
     val endpoint: String get() = if (':' in host) "[$host]:$port" else "$host:$port"
 
     /**
-     * Whether [other] reaches the same proxy the same way: protocol, server, port, TLS and the
-     * server name it checks, and whether it signs in. Credentials read for a connection are only
+     * Whether [other] reaches the same proxy the same way: protocol, server (as the rule of saving compares it,
+     * [ProfileValidator.hostKey]), port, TLS and the server name it checks, and whether it signs in. Credentials read for a connection are only
      * used while the stored profile still matches the copy the connection started with, so a
      * password is never sent to a proxy it was not saved for (ADR-0006, ADR-0010).
      */
     fun sameServerAs(other: ProxyProfile): Boolean = protocol == other.protocol &&
-        host.equals(other.host, ignoreCase = true) &&
+        ProfileValidator.hostKey(host) == ProfileValidator.hostKey(other.host) &&
         port == other.port &&
         tlsMode == other.tlsMode &&
         tlsServerName.orEmpty().equals(other.tlsServerName.orEmpty(), ignoreCase = true) &&

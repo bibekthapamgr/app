@@ -21,18 +21,26 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.proxyflow.core.designsystem.component.BannerTone
 import app.proxyflow.core.designsystem.component.PfBanner
+import app.proxyflow.core.designsystem.component.PfListRow
 import app.proxyflow.core.designsystem.component.PfSectionHeader
 import app.proxyflow.core.designsystem.component.PfTopAppBar
 import app.proxyflow.core.designsystem.icon.PfIcons
 import app.proxyflow.core.designsystem.theme.Spacing
 
 /**
- * Static About & privacy page. [version] comes from the app module's
- * BuildConfig, e.g. "0.2.0 (2)". Links to the privacy policy, licences and
- * help are added once those pages exist (M9/M11).
+ * About & privacy (board G1). [version] comes from the app module's BuildConfig, e.g. "0.2.0 (2)". The pages it opens —
+ * how ProxyFlow works, the privacy policy, help and the open-source licences — are all in the app and work offline.
  */
 @Composable
-fun AboutScreen(version: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun AboutScreen(
+    version: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    onOpenHowItWorks: () -> Unit = {},
+    onOpenPrivacyPolicy: () -> Unit = {},
+    onOpenHelp: () -> Unit = {},
+    onOpenLicences: () -> Unit = {},
+) {
     Scaffold(
         modifier = modifier,
         topBar = { PfTopAppBar(title = stringResource(R.string.about_title), onBack = onBack) },
@@ -68,6 +76,23 @@ fun AboutScreen(version: String, onBack: () -> Unit, modifier: Modifier = Modifi
             Bullet(R.string.about_carry_ipv6)
             Bullet(R.string.about_carry_outside)
             Bullet(R.string.about_carry_tls)
+            PfSectionHeader(stringResource(R.string.about_section_more))
+            PfListRow(title = stringResource(R.string.about_how_it_works), onClick = onOpenHowItWorks)
+            PfListRow(
+                title = stringResource(R.string.about_privacy_policy),
+                supportingText = stringResource(R.string.about_privacy_policy_summary),
+                onClick = onOpenPrivacyPolicy,
+            )
+            PfListRow(
+                title = stringResource(R.string.about_help),
+                supportingText = stringResource(R.string.about_help_summary),
+                onClick = onOpenHelp,
+            )
+            PfListRow(
+                title = stringResource(R.string.about_open_source),
+                supportingText = stringResource(R.string.about_open_source_summary),
+                onClick = onOpenLicences,
+            )
             Text(
                 stringResource(R.string.about_independent),
                 style = MaterialTheme.typography.bodyMedium,

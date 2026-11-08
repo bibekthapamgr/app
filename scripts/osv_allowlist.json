@@ -1,0 +1,3 @@
+{
+  "_comment": "M8 (scripts/osv_scan.py): an advisory rated HIGH or CRITICAL, or unrated, that can't reach ProxyFlow. Each entry: \"<advisory id>\": {\"package\": \"group:artifact\", \"reason\": \"why it can't reach ProxyFlow\", \"review_by\": \"YYYY-MM-DD\"}. Expired entries fail the scan again."
+}

@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -139,6 +140,7 @@ fun PfSectionHeader(text: String, modifier: Modifier = Modifier, color: Color = 
         text = text.uppercase(),
         style = MaterialTheme.typography.labelMedium,
         color = color,
-        modifier = modifier.padding(top = Spacing.lg, bottom = Spacing.sm),
+        // A heading, so TalkBack can move from section to section.
+        modifier = modifier.semantics { heading() }.padding(top = Spacing.lg, bottom = Spacing.sm),
     )
 }

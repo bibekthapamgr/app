@@ -32,6 +32,24 @@
                 <action android:name="android.net.VpnService" />
             </intent-filter>
         </service>
+
+        <!--
+          The Quick Settings tile (board B11, M9): only Android's system UI can bind it (BIND_QUICK_SETTINGS_TILE).
+          A tap connects or disconnects; a long press opens the app's QS_TILE_PREFERENCES activity (MainActivity).
+        -->
+        <service
+            android:name=".ProxyFlowTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_proxyflow"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
     </application>
 
 </manifest>

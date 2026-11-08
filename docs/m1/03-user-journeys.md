@@ -33,7 +33,7 @@ stateDiagram-v2
 Rules that apply to every state:
 
 - **Connected** is shown only after the first successful proxy handshake, never just because the TUN interface exists.
-- **Connecting** runs a pre-flight handshake with the proxy *before* the VPN interface is established. If it fails, nothing was changed on the phone: the user sees the specific error in the B6b layout ("You're not connected — apps are still using your normal network").
+- **Connecting** runs a pre-flight handshake with the proxy *before* the VPN interface is established. If it fails, nothing was changed on the phone: the user sees the specific error in the B6b layout ("You're not connected: apps use your normal network unless Android's system kill switch is on"; until M8, "You're not connected — apps are still using your normal network").
 - Once connected, in **Reconnecting, Error and Offline** the VPN interface stays up and the engine refuses new flows → traffic is blocked (B5, B6a, B6c, B7). Leaving these states always requires an explicit user action labelled "Stop and use normal network".
 - **Revoked** is outside ProxyFlow's control: Android removed the VPN. Only Always-on + "Block connections without VPN" keeps traffic blocked (`02-traffic-support-matrix.md` §4).
 
@@ -68,6 +68,7 @@ Rules that apply to every state:
 | Happy path | Steps: reach proxy (TCP connect, RTT) → TLS verified (version, certificate subject) → sign-in accepted → one test request through the proxy → result with round-trip time |
 | Branches | Each step maps to an engine code: `PROXY_DNS_FAILED`, `PROXY_UNREACHABLE`, `TLS_*`, `AUTH_REQUIRED`/`AUTH_FAILED`, `PROTOCOL_ERROR`, `HANDSHAKE_TIMEOUT`; D7 shows the failed step and the fix |
 | Acceptance | The test runs without the VPN and does not change the phone's routing; credentials go only to the configured proxy; the test target (decision D6) is disclosed in the privacy policy; result saved on the profile ("Works · 182 ms · tested 2 min ago") |
+| M9 | Implemented as ADR-0014 §1–§3: the engine answers once — the catalogue code of the step that failed, or the time the tunnel took — so D5 shows the test running and D6/D7 its answer, not each step as it passes; the test opens one tunnel to the pre-flight target and sends nothing through it (D6 stays open) |
 
 ## J4 — VPN permission
 
@@ -104,7 +105,7 @@ Rules that apply to every state:
 | | |
 |---|---|
 | Trigger | Disconnect on B4, the notification action, the Quick Settings tile (B11, built in M9), or "Stop and use normal network" from a blocked state |
-| Screens | B2 Disconnected ("Apps are using your normal network") |
+| Screens | B2 Disconnected ("Apps use your normal network unless Android's system kill switch is on"; until M8, "Apps are using your normal network") |
 | Happy path | Engine stopped (all flows closed, goroutines released — E12), TUN fd closed, foreground service stopped, notification removed |
 | Branches | If OS lockdown is on, apps have no network after disconnect — B2 says so and links to E2 |
 | Acceptance | Stop completes in < 2 s with 200 open flows and apps see their connections end at once (lab E12: `Stop()` took 24 ms with 200 flows open, goroutines 608 → 2, and the last app saw its connection end 17 ms after the stop signal); no leaked file descriptors (instrumentation check on devices); session summary written to Logs |

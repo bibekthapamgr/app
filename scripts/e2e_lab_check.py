@@ -8,8 +8,8 @@ the IPv6-only name, the LAN address), a name the proxies' DNS server does not kn
 at the proxy, each TLS front must present the certificate it is meant to (valid, wrong name,
 expired, untrusted CA: checked here against the run's CA the way a client checks it), the
 HTTPS destination must answer through a proxy with the certificate the device will expect,
-the gate must relay, the UDP sinks must answer, and the two DNS servers must answer what
-they should. Unless --offline, both proxies must also reach the pre-flight check's target
+the gate must relay, the bulk server must take and send exact byte counts through both
+proxies, the witness must answer directly and through neither proxy, the UDP sinks must answer, and the two DNS servers must answer what they should. Unless --offline, both proxies must also reach the pre-flight check's target
 (connectivitycheck.gstatic.com:443), as a user's working proxy does. --offline and
 --no-ipv6 are for trying the lab on a machine without Internet access or IPv6; CI uses
 neither.
@@ -178,6 +178,19 @@ def main(argv: list[str]) -> int:
             got = via(host, port)
             check(f"{name} to {host}:{port}", got == "PROXYFLOW-DEST lab-check", got)
 
+    # The witness (M8): the phone reaches it directly, a proxy never can. Dante would connect to 10.0.2.2, where the
+    # witness is not listening (it listens on the runner's loopback); Squid refuses the CONNECT before trying, as 8095
+    # is not one of its tunnel_ports. Either way no line through a proxy reaches it.
+    witness = int(p["witness.port"])
+    with socket.create_connection(("127.0.0.1", witness), timeout=5) as sock:
+        check("the witness answers directly", exchange(sock, "lab-check") == "PROXYFLOW-DEST lab-check")
+    for name, via in (("SOCKS5", through_socks), ("HTTP CONNECT", through_http)):
+        try:
+            got = via(p["lan.address"], witness)
+        except (OSError, IndexError, ValueError) as e:  # the proxy closed, or answered nothing usable
+            got = f"no tunnel ({e.__class__.__name__})"
+        check(f"{name} can't reach the witness", got != "PROXYFLOW-DEST lab-check", got)
+
     # A name the proxies' DNS server does not know fails at the proxy (SOCKS5 4: host unreachable).
     missing = p["missing.name"]
     check(f"SOCKS5 to {missing} fails at the proxy", through_socks(missing, 8080) == "reply 4")
@@ -203,6 +216,27 @@ def main(argv: list[str]) -> int:
             check("the HTTPS destination answers", exchange(tls, "lab-check") == "PROXYFLOW-TLS lab-check")
 
     check("the gate relays to Dante", through_socks(p["destination.name"], 8080, int(p["gate.port"])) == "PROXYFLOW-DEST lab-check")
+
+    # The bulk server (M7's controlled transfers): exact byte counts both ways, through both proxies.
+    bulk_port = int(p["bulk.port"])
+    for name, opened in (
+        ("SOCKS5", lambda s: socks5(s, socks_user, socks_pass, p["destination.name"], bulk_port) == 0),
+        ("HTTP CONNECT", lambda s: connect_request(s, http_user, http_pass, p["destination.name"], bulk_port) == 200),
+    ):
+        with connect(1080 if name == "SOCKS5" else 3128) as sock:
+            check(f"{name} to the bulk server", opened(sock))
+            sock.sendall(b"UP 100000\n" + bytes(100_000))
+            reply = b""
+            while not reply.endswith(b"\n") and (chunk := sock.recv(64)):
+                reply += chunk
+            check(f"{name}: the bulk server read 100000 bytes", reply == b"GOT 100000\n", reply.decode("ascii", "replace"))
+        with connect(1080 if name == "SOCKS5" else 3128) as sock:
+            opened(sock)
+            sock.sendall(b"DOWN 300000\n")
+            received = 0  # the server keeps the connection open until the client closes it
+            while received < 300_000 and (chunk := sock.recv(min(65536, 300_000 - received))):
+                received += len(chunk)
+            check(f"{name}: the bulk server sent 300000 bytes", received == 300_000, str(received))
 
     for address in [p["destination.address"]] + ([p["v6.address"]] if ipv6 else []):
         family = socket.AF_INET6 if ":" in address else socket.AF_INET

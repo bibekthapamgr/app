@@ -3,24 +3,30 @@ package app.proxyflow.feature.profiles
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.proxyflow.core.data.ConnectionController
 import app.proxyflow.core.data.ConnectionTester
 import app.proxyflow.core.data.InvalidProfileException
 import app.proxyflow.core.data.ProfileRepository
+import app.proxyflow.core.model.ConnectionError
+import app.proxyflow.core.model.ConnectionState
 import app.proxyflow.core.model.ConnectionTestResult
 import app.proxyflow.core.model.CredentialState
 import app.proxyflow.core.model.ProfileError
 import app.proxyflow.core.model.ProfileField
 import app.proxyflow.core.model.ProfileNames
 import app.proxyflow.core.model.ProfileValidator
+import app.proxyflow.core.model.ProxyProfile
 import app.proxyflow.core.model.ProxyProfileInput
 import app.proxyflow.core.model.ProxyProtocol
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Where "Test connection" stands (boards D5–D7). */
 sealed interface ConnectionTestState {
@@ -28,8 +34,8 @@ sealed interface ConnectionTestState {
 
     data object Testing : ConnectionTestState
 
-    /** What the tester found for the form exactly as it is now; any edit clears it. */
-    data class Done(val result: ConnectionTestResult) : ConnectionTestState
+    /** What the tester found for the form exactly as it is now, which is [tested]; any edit clears it. */
+    data class Done(val result: ConnectionTestResult, val tested: ProxyProfile) : ConnectionTestState
 }
 
 data class AddEditUiState(
@@ -59,6 +65,17 @@ data class AddEditUiState(
     /** Save or Test attempts that found errors; each one scrolls the form back to the error summary. */
     val rejectedSaves: Int = 0,
     val test: ConnectionTestState = ConnectionTestState.Idle,
+    /**
+     * Board D9: Save was tapped on changes to how the running connection reaches its proxy; the user confirms reconnecting
+     * with them first. The name of the profile the connection runs on.
+     */
+    val confirmReconnect: String? = null,
+    /**
+     * What D9's reconnect does as the connection is now ([ConnectionState.holdsTrafficOnSwitch]), kept up to date while the
+     * question is open: true, traffic is held until the new settings are checked; false, a first connect checks them
+     * instead.
+     */
+    val confirmReconnectHolds: Boolean = true,
 )
 
 /**
@@ -73,6 +90,8 @@ class AddEditProxyViewModel(
     private val savedState: SavedStateHandle,
     private val repository: ProfileRepository,
     private val tester: ConnectionTester,
+    private val connection: ConnectionController,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : ViewModel() {
     /** Navigation argument (AddEditProxyDestination.profileId); null when adding. */
     private val profileId: String? = savedState[ARG_PROFILE_ID]
@@ -88,6 +107,9 @@ class AddEditProxyViewModel(
     private var initial: ProxyProfileInput = ProxyProfileInput()
     private var showErrors: Boolean = savedState[KEY_SHOW_ERRORS] ?: false
     private var testJob: Job? = null
+
+    /** The last test's form, result and time: kept with the profile when exactly that form is saved (board C2). */
+    private var lastTested: Tested? = null
 
     init {
         if (profileId != null) {
@@ -122,6 +144,20 @@ class AddEditProxyViewModel(
                 }
                 refresh()
             }
+            // D9's question follows the connection while it is open: worded for its state now, and closed, not applied,
+            // once no connection runs on this profile.
+            viewModelScope.launch {
+                connection.state.collect { now ->
+                    state.update { s ->
+                        val running = runningHere(now, s.isEdit)
+                        when {
+                            s.confirmReconnect == null -> s
+                            running == null -> s.copy(confirmReconnect = null)
+                            else -> s.copy(confirmReconnectHolds = running.holdsTrafficOnSwitch)
+                        }
+                    }
+                }
+            }
         } else {
             refresh()
         }
@@ -145,15 +181,54 @@ class AddEditProxyViewModel(
 
     fun onTlsServerNameChange(value: String) = edit { it.copy(tlsServerName = value) }
 
-    fun save() {
+    /**
+     * Saves the form. When a connection runs on this profile and the changes are to how it reaches its proxy — its server,
+     * TLS or sign-in — the user is asked first (board D9), in the words for what the reconnect does as the connection is
+     * ([ConnectionState.holdsTrafficOnSwitch]): the connection then runs again with them ([saveAndReconnect]).
+     */
+    fun save() = save(reconnect = false)
+
+    /**
+     * D9's "Save and reconnect": saves, then the connection runs again with what was saved (J11). A tap that reaches the
+     * question after it closed (the connection ended in the same frame) does nothing: it was closed, not applied.
+     */
+    fun saveAndReconnect() {
+        if (state.value.confirmReconnect == null) return
+        state.update { it.copy(confirmReconnect = null) }
+        save(reconnect = true)
+    }
+
+    /** D9's "Keep editing": nothing is saved. */
+    fun keepEditing() = state.update { it.copy(confirmReconnect = null) }
+
+    private fun save(reconnect: Boolean) {
         val current = state.value
         if (current.loading || current.loadFailed || current.saving || current.saved || !passesValidation()) return
-        state.update { it.copy(saving = true, saveFailed = false) }
         // A profile that no longer exists is saved as a new one, under a new id.
         val id = profileId.takeIf { current.isEdit }
+        val running = runningHere(connection.state.value, current.isEdit)
+        if (!reconnect && running != null && changesTheConnection(running, current.input)) {
+            state.update {
+                it.copy(
+                    // The name the form loaded, which is also the one the connection shows (VpnSession.profileRenamed).
+                    confirmReconnect = current.originalName ?: running.profileName.orEmpty(),
+                    confirmReconnectHolds = running.holdsTrafficOnSwitch,
+                )
+            }
+            return
+        }
+        state.update { it.copy(saving = true, saveFailed = false) }
         viewModelScope.launch {
             try {
-                repository.save(id, current.input)
+                // Whole, even if the screen closes meanwhile (which ends this scope): the profile, its last test when it
+                // tested exactly what is saved, and the reconnect the user confirmed (D9).
+                withContext(NonCancellable) {
+                    val saved = repository.save(id, current.input)
+                    lastTested?.takeIf { it.input == current.input }?.let { keep(saved, it) }
+                    // Flows end and traffic is held until the saved settings are checked, never sent around a proxy;
+                    // during a first connect, the attempt starts again with them.
+                    if (reconnect) connection.reconnect(saved.id)
+                }
                 state.update { it.copy(saving = false, saved = true, dirty = false) }
             } catch (e: CancellationException) {
                 throw e
@@ -166,12 +241,30 @@ class AddEditProxyViewModel(
         }
     }
 
+    /**
+     * The connection [now] if it runs on this form's profile, or null. A connection blocked because the profile was
+     * deleted is not this form's: saving makes a new profile, under a new id, and that connection's way out is Home's Stop.
+     */
+    private fun runningHere(now: ConnectionState, isEdit: Boolean): ConnectionState? = now.takeIf {
+        isEdit && it.active && it.profileId == profileId && it.error?.code != ConnectionError.PROFILE_DELETED
+    }
+
+    /** Whether saving [input] changes how the connection [running] reaches its proxy: its server, TLS, or sign-in. */
+    private fun changesTheConnection(running: ConnectionState, input: ProxyProfileInput): Boolean {
+        val runs = running.profile ?: return true
+        val edited = input.toProfile(runs.id, createdAtMillis = 0, updatedAtMillis = 0)
+        // A typed password is a new sign-in; a new username needs one too (the form asks for it).
+        return !edited.sameServerAs(runs) || (input.requiresSignIn && input.password.isNotEmpty())
+    }
+
     /** Tests the form as it is now. Only the tester's own answer is shown; nothing else ever reports success. */
     fun testConnection() {
         val current = state.value
         if (current.loading || current.loadFailed || current.test == ConnectionTestState.Testing || !passesValidation()) return
         val input = state.value.input
         val id = profileId.takeIf { state.value.isEdit }
+        // Validated, so its port is a number; the screen words the result for this server.
+        val tested = input.toProfile(id ?: "", createdAtMillis = 0, updatedAtMillis = 0)
         state.update { it.copy(test = ConnectionTestState.Testing) }
         testJob = viewModelScope.launch {
             val result = try {
@@ -180,10 +273,37 @@ class AddEditProxyViewModel(
                 throw e
             } catch (e: Exception) {
                 // A tester that broke tested nothing: that is a failure, never a pass.
-                ConnectionTestResult.Failed(INTERNAL_ERROR)
+                ConnectionTestResult.Failed(ConnectionError(ConnectionError.INTERNAL, "the test could not run"), fromEngine = false)
             }
             // A result is only shown for the form it was made with.
-            if (state.value.input == input) state.update { it.copy(test = ConnectionTestState.Done(result)) }
+            if (state.value.input == input) {
+                lastTested = Tested(input, result, clock())
+                state.update { it.copy(test = ConnectionTestState.Done(result, tested)) }
+            }
+        }
+    }
+
+    /** Stops a test that is running; nothing is shown or kept for it. */
+    fun cancelTest() {
+        if (state.value.test != ConnectionTestState.Testing) return
+        testJob?.cancel()
+        state.update { it.copy(test = ConnectionTestState.Idle) }
+    }
+
+    /**
+     * Keeps [test] as [profile]'s last test. Only the engine's answers are: not this phone's own failures (`INTERNAL`),
+     * and not what the tester found before asking the engine — a password it had none of, say — which describes the form,
+     * not the proxy. A storage failure only loses it.
+     */
+    private suspend fun keep(profile: ProxyProfile, test: Tested) {
+        val result = test.result
+        if (result is ConnectionTestResult.Failed && (result.code == ConnectionError.INTERNAL || !result.fromEngine)) return
+        try {
+            repository.recordTest(profile.id, profile, result.asProfileTest(test.atMillis))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The profile is saved; only its test result isn't shown in the list.
         }
     }
 
@@ -201,6 +321,8 @@ class AddEditProxyViewModel(
         // Nothing to edit until the profile is read; the screen shows no fields meanwhile.
         if (state.value.loading || state.value.loadFailed) return
         testJob?.cancel()
+        // The test was of the form as it was; its copy of a typed password goes too.
+        lastTested = null
         state.update { it.copy(input = transform(it.input), test = ConnectionTestState.Idle, saveFailed = false) }
         persist(state.value.input)
         refresh()
@@ -240,12 +362,12 @@ class AddEditProxyViewModel(
         )
     }
 
+    private data class Tested(val input: ProxyProfileInput, val result: ConnectionTestResult, val atMillis: Long)
+
     companion object {
         /** Must match the property name in [AddEditProxyDestination]. */
         const val ARG_PROFILE_ID = "profileId"
 
-        /** Error code for a test that could not run (docs/m1/04 error catalogue: `INTERNAL`). */
-        const val INTERNAL_ERROR = "INTERNAL"
         private const val KEY_NAME = "form.name"
         private const val KEY_PROTOCOL = "form.protocol"
         private const val KEY_SERVER = "form.server"
