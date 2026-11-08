@@ -1,0 +1,10 @@
+{
+  "_what": "Google Play's target API level requirement, as read from https://support.google.com/googleplay/android-developer/answer/11926878 (scripts/check_target_api.py reads this; the owner re-reads the page and updates it at least every 180 days: docs/m12/maintenance-runbook.md §3.3). Dates are the day the rule applies to new apps and to updates of existing apps; extension_until is the latest date Google grants on request in Play Console; the script fails after new_apps_and_updates_from unless the rule has \"extension_granted\": true — set by the owner when Play Console confirms the extension (docs/m12/maintenance-runbook.md §3.3) — in which case it warns until extension_until; expected_next is Google's pattern for the year after the last listed rule and must be moved up when that rule is added.",
+  "read_on": "2026-11-07",
+  "source": "https://support.google.com/googleplay/android-developer/answer/11926878",
+  "requirements": [
+    {"api": 36, "android": "16", "new_apps_and_updates_from": "2026-08-31", "extension_until": "2026-11-01"},
+    {"api": 35, "android": "15", "new_apps_and_updates_from": "2025-08-31", "extension_until": "2025-11-01"}
+  ],
+  "expected_next": {"api": 37, "android": "17", "new_apps_and_updates_from": "2027-08-31", "note": "Google's pattern: the API of the Android released in the year, required from 31 August of the next year; a guess until the page says so, used only for the warning's lead time"}
+}

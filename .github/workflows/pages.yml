@@ -6,8 +6,12 @@ name: pages
 # deployed only from main (a push, or a hand-started run on main), once the owner has turned Pages on for the
 # repository (Settings → Pages → Source: GitHub Actions) and set the repository variable PAGES_ENABLED to true; until
 # then the deploy job is skipped, not failed. The page names the support address and the developer from the repository
-# variables PROXYFLOW_SUPPORT_EMAIL and PROXYFLOW_DEVELOPER_NAME (decision D10). The page is static: no script, nothing fetched from anywhere. Third-party
-# actions are pinned to commit SHAs (tag in the comment).
+# variables PROXYFLOW_SUPPORT_EMAIL and PROXYFLOW_DEVELOPER_NAME (decision D10). The page is static: no script, nothing
+# fetched from anywhere. M12: the front page carries docs/m12/known-issue.md when it is not empty (the incident notice
+# of docs/m12/incident-response.md §3), and — because this workflow runs on every push and pull request, with no path
+# filter — the three M12 document checks run here too (the data-behaviour lock, the release readiness, the target
+# API), so a docs-only commit (the privacy policy, the declarations, the changelog, the history) cannot drift past them
+# while android.yml ignores docs/** and *.md. Third-party actions are pinned to commit SHAs (tag in the comment).
 
 on:
   push:
@@ -36,9 +40,18 @@ jobs:
           PROXYFLOW_SUPPORT_EMAIL: ${{ vars.PROXYFLOW_SUPPORT_EMAIL }}
           PROXYFLOW_DEVELOPER_NAME: ${{ vars.PROXYFLOW_DEVELOPER_NAME }}
         run: |
-          python3 scripts/release/privacy_page.py --out site
+          python3 scripts/release/privacy_page.py --out site --notice docs/m12/known-issue.md
           python3 -m unittest scripts.tests.test_privacy_page scripts.tests.test_privacy_policy
           grep -c '<h2>' site/privacy.html
+          if [ -n "$(tr -d '[:space:]' < docs/m12/known-issue.md)" ]; then
+            echo "::warning title=Known issue::docs/m12/known-issue.md is not empty, so the front page carries a notice (docs/m12/incident-response.md §3); empty it in the commit that dates the fixing release"
+          fi
+
+      - name: The documents a release depends on (M12), on every push
+        run: |
+          python3 scripts/check_data_behavior.py
+          python3 scripts/release/check_release_ready.py
+          python3 scripts/check_target_api.py
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

@@ -46,6 +46,20 @@ class PrivacyPage(unittest.TestCase):
             self.assertNotIn("mailto:", page)
         self.assertEqual(privacy_page.main(["--out", "/tmp/pf-site-test", "--contact", "not an address"]), 2)
 
+    def test_the_known_issue_notice_is_shown_only_when_it_has_text(self) -> None:
+        # M12 (review B B-7): docs/m12/incident-response.md §3 publishes the notice through this file.
+        self.assertNotIn("<aside", privacy_page.index_html(notice=""))
+        self.assertNotIn("<aside", privacy_page.index_html(notice="\n  \n"))
+        page = privacy_page.index_html(notice="# Known issue: 1.0.1 (12)\n\nConnections drop after <30 s> on Android 14.\n\nFix on the way; 1.0.0 (11) is unaffected.\n")
+        self.assertIn('<aside class="notice" role="note">', page)
+        self.assertIn("<h2>Known issue: 1.0.1 (12)</h2>", page)
+        self.assertIn("<p>Connections drop after &lt;30 s&gt; on Android 14.</p>", page)
+        self.assertIn("<p>Fix on the way; 1.0.0 (11) is unaffected.</p>", page)
+        self.assertLess(page.index("</aside>"), page.index("Privacy policy</a>"))
+        self.assertNotIn("<script", page)
+        # The tracked file's state is not asserted here: the push that publishes a notice must build (RB-1);
+        # pages.yml annotates a non-empty file and the monthly issue asks about it.
+
     def test_the_page_fetches_nothing_and_runs_nothing(self) -> None:
         for page in (privacy_page.privacy_html("support@example.test"), privacy_page.index_html()):
             self.assertNotIn("<script", page)

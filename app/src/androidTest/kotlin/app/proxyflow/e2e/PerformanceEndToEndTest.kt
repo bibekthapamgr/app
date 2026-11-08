@@ -87,8 +87,15 @@ class PerformanceEndToEndTest {
             if (::gate.isInitialized) runCatching { gate.forward(env.socksPort) }
             wakeAndUnlock()
         } finally {
-            app.disconnectAndSettle()
-            app.deleteAllProfiles()
+            try {
+                app.disconnectAndSettle()
+                app.deleteAllProfiles()
+            } finally {
+                // The idle test's wake lock is held through the tear-down, so that a phone which slept through the
+                // test's own wake-up cannot sleep through these shell calls too (RC-6).
+                awakeLock?.takeIf { it.isHeld }?.release()
+                awakeLock = null
+            }
         }
     }
 
@@ -627,6 +634,11 @@ class PerformanceEndToEndTest {
             // stops a plain sleep's clock too (API 29: its 5 minutes took 24 in run 41919093108, and the tests after it
             // ran out of time; M10-130), so it ends on time, at the first moment the phone is awake after it.
             while (SystemClock.elapsedRealtime() - start < IDLE_MS) Thread.sleep(IDLE_STEP_MS)
+            // The phone is awake this instant and may suspend again before the screen is back on; the lock keeps its
+            // CPU on until wakeAndUnlock is done (API 29 in run 42394191622: the wake-up's shell command never
+            // returned, and the device job's time went into the wait; M12-65).
+            awakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "proxyflow:e2e-wake")
+            awakeLock?.acquire(WAKE_LOCK_MS)
             val awake = SystemClock.uptimeMillis() - awakeStart
             val cpu = cpuMillis() - cpuBefore
             val millis = SystemClock.elapsedRealtime() - start
@@ -659,13 +671,23 @@ class PerformanceEndToEndTest {
         }
     }
 
+    /**
+     * The partial wake lock [idleWhileConnected] holds from the end of its idle period until the screen is back on and
+     * the tear-down is done (at most [WAKE_LOCK_MS]).
+     */
+    private var awakeLock: PowerManager.WakeLock? = null
+
+    /**
+     * The screen on and the keyguard gone, with each shell command bounded: on a phone that suspended with its screen
+     * off, an unbounded one can wait for as long as the phone sleeps (M12-65).
+     */
     private fun wakeAndUnlock() {
         val power = app.context.getSystemService(PowerManager::class.java)
         val keyguard = app.context.getSystemService(KeyguardManager::class.java)
         if (power.isInteractive && !keyguard.isKeyguardLocked) return
-        Shell.run("input keyevent KEYCODE_WAKEUP")
-        Shell.run("wm dismiss-keyguard")
-        val keyguardState = { Shell.script("dumpsys window | grep -i keyguard") }
+        Shell.runBounded("input keyevent KEYCODE_WAKEUP")
+        Shell.runBounded("wm dismiss-keyguard")
+        val keyguardState = { runCatching { Shell.scriptBounded("dumpsys window | grep -i keyguard") }.getOrElse { it.toString() } }
         eventually("the phone unlocked", diagnose = keyguardState) { !keyguard.isKeyguardLocked }
     }
 
@@ -738,6 +760,7 @@ class PerformanceEndToEndTest {
         const val IDLE_MS = 5 * 60_000L
         const val IDLE_STEP_MS = 1_000L
         const val SCREEN_MS = 10_000L
+        const val WAKE_LOCK_MS = 180_000L
         const val SETTLE_MS = 3_000L
         const val CLIENT_JOIN_MS = 15_000L
 

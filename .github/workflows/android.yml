@@ -74,6 +74,33 @@ jobs:
           python3 scripts/check_listing_claims.py
           python3 scripts/release/store_assets.py check
 
+      # M12: what the app keeps or sends is as the privacy policy and the Play declarations were last reviewed for
+      # (docs/m12/policy-review.md), and the version being built has its changelog section and history row
+      # (docs/m12/release-history.md); a target API requirement past its date fails here too.
+      - name: The data behaviour as reviewed, the release readiness, Google Play's target API
+        if: ${{ !cancelled() }}
+        run: |
+          python3 scripts/check_data_behavior.py
+          python3 scripts/release/check_release_ready.py
+          python3 scripts/check_target_api.py
+          # The lock fingerprints the version catalog, so every library must come from it: a coordinate written
+          # straight into a build script would bypass the lock.
+          if grep -rnE '\("[A-Za-z0-9._-]+:[A-Za-z0-9._-]+:[^"]+"\)' --include=*.gradle.kts --exclude-dir=build --exclude-dir=spike . ; then
+            echo "::error title=Data behaviour::a dependency coordinate outside gradle/libs.versions.toml; add it to the catalog so the data-behaviour lock sees it"; exit 1
+          fi
+
+      # M12 (docs/m12/rollback.md §5): the profiles database never falls back to a destructive migration, forward or
+      # downgrade — profiles are kept or the app refuses to open; the ephemeral log database is the one place allowed.
+      - name: No destructive migration on the profiles database
+        if: ${{ !cancelled() }}
+        run: |
+          if grep -rn "fallbackToDestructive" --include=*.kt core app feature | grep -v "core/data/src/main/kotlin/app/proxyflow/core/data/db/LogDatabase.kt"; then
+            echo "::error title=Destructive migration::fallbackToDestructiveMigration* is allowed only in LogDatabase.create (docs/m12/rollback.md §5)"; exit 1
+          fi
+          if ! grep -q "fallbackToDestructiveMigrationOnDowngrade(true)" core/data/src/main/kotlin/app/proxyflow/core/data/db/LogDatabase.kt; then
+            echo "::error title=Destructive migration::LogDatabase.create must drop a newer logs.db on downgrade (docs/m12/rollback.md §5)"; exit 1
+          fi
+
       - name: Design tokens and generated colours agree
         if: ${{ !cancelled() }}
         run: |
@@ -407,6 +434,12 @@ jobs:
         # device tests (up to 55), M8's failure injection, M10's parts and the pulls between them, each bounded by what is
         # left of it — and 2 for the action to stop the emulator.
         timeout-minutes: 130
+        # The emulator process exits at scenario R's restart now and then (M10-54, M12-81; the host says nothing about
+        # why): scripts/adb_reboot.sh then starts it again from the same AVD with these options — the launch's, with the
+        # uplink capture to a second file, appended to the first before the evidence is read (scripts/pcap_cat.py).
+        env:
+          PF_EMULATOR_RELAUNCH_OPTIONS: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -dns-server 10.99.0.54 -tcpdump ${{ runner.temp }}/emulator-uplink-restart.pcap
+          PF_EMULATOR_RELAUNCH_LOG: ${{ runner.temp }}/emulator-relaunch.log
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}
@@ -423,6 +456,8 @@ jobs:
         run: |
           sudo chmod -R a+rX /tmp/pf
           status=0
+          # The capture of an emulator started again at the restart (M12-81) follows the first's records.
+          python3 scripts/pcap_cat.py "$RUNNER_TEMP/emulator-uplink.pcap" "$RUNNER_TEMP/emulator-uplink-restart.pcap" || status=1
           for check in m5_evidence m6_evidence m7_evidence m8_evidence m10_performance; do
             python3 "scripts/$check.py" --api ${{ matrix.api-level }} --pf /tmp/pf \
               --out "$RUNNER_TEMP/m5-api${{ matrix.api-level }}" --host-pcap "$RUNNER_TEMP/emulator-uplink.pcap" || status=1
@@ -441,7 +476,7 @@ jobs:
             sudo cp "/tmp/pf/$log" "$dir/" 2>/dev/null || true
           done
           sudo chown -R "$(id -u):$(id -g)" "$dir"
-          cp "$RUNNER_TEMP/emulator-uplink.pcap" "$dir/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/emulator-uplink.pcap" "$RUNNER_TEMP/emulator-relaunch.log" "$dir/" 2>/dev/null || true
           cp -r "$RUNNER_TEMP/m5-api${{ matrix.api-level }}/." "$dir/" 2>/dev/null || true
 
       - name: Device test counts (emitted as notices)

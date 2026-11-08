@@ -126,7 +126,14 @@ class CopyClaimsTest {
             "privacy_sent_nothing" to listOf("ProxyFlow itself sends nothing to its developer"),
             // Google Play shows developers the crash reports phones share with Google: never "nothing reaches the developer".
             "privacy_android_crash" to listOf("Google may show them to ProxyFlow's developer"),
-            "help_feedback_body" to listOf("collects nothing itself"),
+            // M12: the support process tells users never to send a proxy password (docs/m12/support.md).
+            "help_feedback_body" to
+                listOf(
+                    "collects nothing itself",
+                    "Never send your proxy password, username or token",
+                    "the developer never needs them",
+                    "change it at your provider",
+                ),
             "help_carry_outside" to listOf("don't use the VPN", "work profile", "Private space", "another user", "tethered"),
             "privacy_android_outside" to listOf("doesn't use the VPN"),
             // M9 (ADR-0014): what a connection test sends and where, what a pass leaves blocked, and what switching does.

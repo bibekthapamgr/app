@@ -1,0 +1,155 @@
+name: maintenance
+
+# M12: the scheduled reviews (brief acceptance "policy and dependency reviews are scheduled"). On the first Monday
+# of each month (and by hand), on main: the release build's libraries against OSV at their current resolved versions
+# (a vulnerability published since the last release), Google Play's target API requirement against the app's targetSdk
+# and the date the rules were read, the data-behaviour lock, and the release readiness — then one issue, "Maintenance
+# review <month>", with the results and the owner's checklist (docs/m12/maintenance-runbook.md §2): vitals, reviews,
+# mail, dependabot's pull requests, and every quarter the policy review (docs/m12/policy-review.md). A warning or a
+# failure is in the issue's first line; the issue is not opened twice for a month.
+#
+# GitHub disables a workflow's schedule after 60 days without a push to the repository and says nothing; the owner's
+# calendar (maintenance-runbook.md §2) checks that the month's issue exists and re-enables the workflow under Actions
+# when it does not. The first-week decision is its own job, so the engine AAR is built only in the week that uses it.
+# Days are counted in Asia/Tokyo, where the owner reads the issue.
+#
+# Third-party actions are pinned to commit SHAs (tag in the comment). The engine job builds the AAR the Gradle
+# resolution needs (the dependency graph is the same with or without it, but the build scripts require the file).
+
+on:
+  schedule:
+    - cron: "17 21 * * 0" # Sunday 21:17 UTC = Monday 06:17 JST; the job itself runs only in the month's first week
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: maintenance
+  cancel-in-progress: false
+
+jobs:
+  when:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      skip: ${{ steps.when.outputs.skip }}
+      month: ${{ steps.when.outputs.month }}
+    steps:
+      - name: Only the first week of the month (a scheduled run), or by hand
+        id: when
+        shell: bash
+        env:
+          TZ: Asia/Tokyo
+        run: |
+          day=$(date +%d)
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "${day#0}" -gt 7 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; echo "not the first week; nothing to do"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "month=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+  engine:
+    needs: when
+    if: ${{ needs.when.outputs.skip == 'false' }}
+    uses: ./.github/workflows/engine.yml
+
+  review:
+    needs: [when, engine]
+    if: ${{ needs.when.outputs.skip == 'false' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The engine AAR from the engine job
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pfengine-aar
+          path: engine/build
+
+      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: The release build's libraries against OSV, at today's resolved versions
+        id: osv
+        run: |
+          ./gradlew -q :app:dependencies --configuration releaseRuntimeClasspath > "$RUNNER_TEMP/deps.txt"
+          if python3 scripts/osv_scan.py "$RUNNER_TEMP/deps.txt" > "$RUNNER_TEMP/osv.txt" 2>&1; then
+            echo "result=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=FAILED" >> "$GITHUB_OUTPUT"
+          fi
+          tail -20 "$RUNNER_TEMP/osv.txt"
+
+      - name: Google Play's target API requirement
+        id: target
+        run: |
+          if python3 scripts/check_target_api.py > "$RUNNER_TEMP/target.txt" 2>&1; then
+            if grep -q '::warning' "$RUNNER_TEMP/target.txt"; then echo "result=WARNING" >> "$GITHUB_OUTPUT"; else echo "result=ok" >> "$GITHUB_OUTPUT"; fi
+          else
+            echo "result=FAILED" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$RUNNER_TEMP/target.txt"
+
+      - name: The data-behaviour lock and the release readiness
+        id: ready
+        run: |
+          ok=ok
+          python3 scripts/check_data_behavior.py > "$RUNNER_TEMP/lock.txt" 2>&1 || ok=FAILED
+          python3 scripts/release/check_release_ready.py > "$RUNNER_TEMP/ready.txt" 2>&1 || ok=FAILED
+          cat "$RUNNER_TEMP/lock.txt" "$RUNNER_TEMP/ready.txt"
+          echo "result=$ok" >> "$GITHUB_OUTPUT"
+
+      - name: The review issue for the month
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MONTH: ${{ needs.when.outputs.month }}
+          OSV: ${{ steps.osv.outputs.result }}
+          TARGET: ${{ steps.target.outputs.result }}
+          READY: ${{ steps.ready.outputs.result }}
+        run: |
+          title="Maintenance review $MONTH"
+          # An exact-title match among the last 100 issues; when gh itself fails, abort rather than open a duplicate.
+          if ! existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --limit 100 --json title --jq '.[].title'); then
+            echo "::error title=Maintenance::could not list the issues; not creating one"; exit 1
+          fi
+          if grep -qxF "$title" <<<"$existing"; then
+            echo "the issue for $MONTH exists"; exit 0
+          fi
+          quarter=""
+          case "${MONTH#*-}" in 01|04|07|10) quarter="- [ ] **Quarterly policy review** (docs/m12/policy-review.md): the privacy policy, the Data safety form and the VpnService declaration against the app; the lock's note updated with the date." ;; esac
+          {
+            echo "Checks on \`main\` at $GITHUB_SHA (run $GITHUB_RUN_ID): OSV **$OSV** · target API **$TARGET** · data-behaviour lock and release readiness **$READY**"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/osv.txt" | tail -8
+            cat "$RUNNER_TEMP/target.txt"
+            cat "$RUNNER_TEMP/lock.txt" "$RUNNER_TEMP/ready.txt"
+            echo '```'
+            echo
+            echo "The owner's monthly review (docs/m12/maintenance-runbook.md §2):"
+            echo "- [ ] Android vitals: the crash rate over 28 days against 0.2 % (99.8 % crash-free) and the user-perceived crash rate against Google's threshold; new crash clusters with a ProxyFlow frame filed (docs/m12/support.md §5)"
+            echo "- [ ] Play reviews, the support mailbox and the issues answered (3 working days); secrets redacted; triage labels set (docs/m12/triage.md)"
+            echo "- [ ] Dependabot's pull requests: merged when CI is green, or closed with the reason (docs/m12/maintenance-runbook.md §3)"
+            echo "- [ ] OSV: a vulnerability above is a release (docs/m12/incident-response.md §4 if it is reachable from the network)"
+            echo "- [ ] Target API: a warning above is a planned bump (docs/m12/maintenance-runbook.md §3.3)"
+            echo "- [ ] Play Console: the policy notices in the inbox (a new rule, a deadline), the app's status, the testing track's testers"
+            [ -n "$quarter" ] && echo "$quarter"
+            echo "- [ ] Anything open in docs/m12/release-history.md's last row (the crash rate, the rollout column) written in"
+            echo "- [ ] docs/m12/known-issue.md is empty unless an incident is open (docs/m12/incident-response.md §3)"
+          } > "$RUNNER_TEMP/issue.md"
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label maintenance --body-file "$RUNNER_TEMP/issue.md" || gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/issue.md"

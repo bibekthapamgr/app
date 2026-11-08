@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in ProxyFlow does not work as its documentation says.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never put a proxy password, username or token in a report — not even "just once".** A report is public, and the
+        developer never needs your password. If you already pasted one, change it at your proxy provider now.
+        Server names and addresses are yours too: write `my-proxy` instead of the real one unless the bug depends on it.
+        The in-app log export (Logs → Export log) already removes passwords, server names and site names; share that.
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Nothing secret in this report
+      options:
+        - label: This report contains no proxy password, username, token or private server address.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: ProxyFlow version
+      description: About & privacy → the version line, e.g. 1.0.0 (11)
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Phone and Android version
+      placeholder: e.g. Pixel 7, Android 15
+    validations:
+      required: true
+  - type: dropdown
+    id: proxy
+    attributes:
+      label: Proxy type
+      options: [SOCKS5, HTTP CONNECT, SOCKS5 with TLS to proxy, HTTP CONNECT with TLS to proxy, Not sure]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: Steps, in order. If apps lost their connection, say which apps and whether ProxyFlow showed Connected, Reconnecting or an error.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Exported log (optional)
+      description: Logs → Export log, pasted here. Check it for anything you would not want public before pasting.
+      render: text

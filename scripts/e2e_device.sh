@@ -238,7 +238,8 @@ choose_uplink
 if [ -z "$UPLINK" ]; then
     # A boot that brought up no network at all (API 35, runs 41219399550 and 41238841652: no interface had an
     # address, Wi-Fi or mobile data): the emulator boots once more, and the new boot is waited for (adb_reboot.sh).
-    reboot_and_wait 540 || echo "::warning title=Emulator network (API $API)::The second boot did not complete within 9 minutes."
+    reboot_and_wait 540 || echo "::warning title=Emulator network (API $API)::The second boot did not complete within 9 minutes: $REBOOT_SEEN"
+    [ -z "${REBOOT_RELAUNCHED:-}" ] || echo "::warning title=Emulator network (API $API)::$REBOOT_RELAUNCHED"
     sleep 10
     choose_uplink
     if [ -n "$UPLINK" ]; then UPLINK="$UPLINK, after a second boot (the first brought up no network)"; fi

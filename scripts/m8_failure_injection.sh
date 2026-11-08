@@ -27,6 +27,8 @@
 #
 # Usage: m8_failure_injection.sh <api level> <out dir>
 set -uo pipefail
+# shellcheck source=scripts/adb_reboot.sh
+. "$(dirname "$0")/adb_reboot.sh" # adb_install
 
 API="$1"
 OUT="$2"
@@ -255,8 +257,9 @@ trap 'fail "stopped by a signal (its time limit?)"; exit 143' TERM INT
 if [ ! -f "$APP_APK" ] || [ ! -f "$TEST_APK" ]; then
     timeout 900 ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -q > "$OUT/m8-build.txt" 2>&1 || fail "the APKs did not build"
 fi
-timeout 120 adb install -r -t -g "$APP_APK" > "$OUT/m8-install.txt" 2>&1 || fail "the app did not install: $(tail -1 "$OUT/m8-install.txt")"
-timeout 120 adb install -r -t "$TEST_APK" >> "$OUT/m8-install.txt" 2>&1 || fail "the test APK did not install: $(tail -1 "$OUT/m8-install.txt")"
+: > "$OUT/m8-install.txt"
+adb_install "$APP_APK" "$OUT/m8-install.txt" -g || fail "the app did not install: $(tail -1 "$OUT/m8-install.txt")"
+adb_install "$TEST_APK" "$OUT/m8-install.txt" || fail "the test APK did not install: $(tail -1 "$OUT/m8-install.txt")"
 timeout 60 adb push "$TEST_APK" "$CLIENT" >/dev/null 2>&1 && timeout 10 adb shell chmod 644 "$CLIENT"
 adb logcat -v threadtime -v UTC -T 1 > "$LOGCAT" 2>&1 &
 LOGCAT_PID=$!
