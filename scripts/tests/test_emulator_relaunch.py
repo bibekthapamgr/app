@@ -38,6 +38,10 @@ class EmulatorRelaunch(unittest.TestCase):
     def run_reboot(self, options: str, seconds: int = 25) -> tuple[int, str, list[str], str | None]:
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "sdk", "emulator"))
+            avd = os.path.join(tmp, "avd", "test.avd")
+            os.makedirs(os.path.join(avd, "hardware-qemu.ini.lock"))  # the dead process's lock, a directory holding its pid
+            open(os.path.join(avd, "multiinstance.lock"), "w").close()
+            self.locks_left = lambda: sorted(n for n in os.listdir(avd) if n.endswith(".lock"))
             for path, text in ((os.path.join(tmp, "adb"), FAKE_ADB), (os.path.join(tmp, "sdk", "emulator", "emulator"), FAKE_EMULATOR)):
                 with open(path, "w") as f:
                     f.write(text)
@@ -50,6 +54,7 @@ class EmulatorRelaunch(unittest.TestCase):
                 "FAKE_LOG": calls,
                 "MARKER": marker,
                 "ANDROID_HOME": os.path.join(tmp, "sdk"),
+                "ANDROID_AVD_HOME": os.path.join(tmp, "avd"),
                 "PF_EMULATOR_RELAUNCH_OPTIONS": options,
                 "PF_EMULATOR_RELAUNCH_LOG": log,
             }
@@ -58,6 +63,7 @@ class EmulatorRelaunch(unittest.TestCase):
                 f'reboot_and_wait {seconds}; code=$?; echo "relaunched: ${{REBOOT_RELAUNCHED:-no}}"; echo "seen: $REBOOT_SEEN"; exit $code'
             )
             done = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=90, check=False)
+            self.locks_after = self.locks_left()
             with open(calls) as f:
                 made = [line.strip() for line in f if line.strip()]
             started = None
@@ -74,6 +80,8 @@ class EmulatorRelaunch(unittest.TestCase):
         self.assertIn("relaunched: the emulator process had exited at the restart (M10-54), so it was started again from the same AVD", out)
         self.assertEqual(calls[0], "shell cat /proc/sys/kernel/random/boot_id")
         self.assertEqual(calls[1], "reboot")
+        self.assertEqual(self.locks_after, [])
+        self.assertRegex(out, r"locks removed first: (hardware-qemu\.ini\.lock multiinstance\.lock|multiinstance\.lock hardware-qemu\.ini\.lock)")
 
     def test_without_the_options_nothing_is_started(self) -> None:
         code, out, _, started = self.run_reboot("", seconds=12)
@@ -81,6 +89,7 @@ class EmulatorRelaunch(unittest.TestCase):
         self.assertIsNone(started)
         self.assertIn("relaunched: no", out)
         self.assertIn("emulator process: none on this host", out)
+        self.assertEqual(self.locks_after, ["hardware-qemu.ini.lock", "multiinstance.lock"])
 
 
 if __name__ == "__main__":

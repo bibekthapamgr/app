@@ -209,7 +209,7 @@ on_exit() {
     if [ "$STATUS" != 0 ]; then
         echo "::error title=$title::$(grep 'FAIL: ' "$STEPS" | head -3 | sed 's/^[0-9:]* FAIL: //' | paste -sd ' ' | cut -c1-900)"
     else
-        echo "::notice title=$title::$(grep -E '^[0-9:]+ (N|P|R): (connected|not on API|deep Doze|the most restricted|Battery Saver|started again: .*emulator process had exited|after the restart)' "$STEPS" | sed 's/^[0-9:]* //' | paste -sd ' ' | cut -c1-3000)"
+        echo "::notice title=$title::$(grep -E '^[0-9:]+ (N|P|R): (connected|not on API|deep Doze|the most restricted|Battery Saver|started again: .*emulator process had exited|after the relaunch|after the restart)' "$STEPS" | sed 's/^[0-9:]* //' | paste -sd ' ' | cut -c1-3000)"
     fi
     # A part that passed but whose clean-up failed exits with the failure; one stopped (143) keeps its status.
     if [ "$code" = 0 ] && [ "$STATUS" != 0 ]; then exit "$STATUS"; fi
@@ -442,6 +442,13 @@ part_restart() {
     fi
     local up=$SECONDS
     note "R: started again: a new boot, completed$([ -n "$REBOOT_WENT_DOWN" ] || echo "; adb was never seen leaving the old one")${REBOOT_RELAUNCHED:+; $REBOOT_RELAUNCHED}"
+    if [ -n "$REBOOT_RELAUNCHED" ]; then
+        note "R: after the relaunch: $(emulator_relaunch_facts "$CLIENT")"
+        if ! timeout 20 adb shell pm path "$TEST_ID" 2>/dev/null | grep -q package:; then
+            fail "R: the relaunched emulator is not the same phone: the test package $TEST_ID is not installed on it, so this restart cannot be judged"
+            exit 1
+        fi
+    fi
     stream_logcat
     shell_user "R: after the restart" || exit 1
 

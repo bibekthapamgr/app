@@ -33,11 +33,26 @@ emulator_running() {
 emulator_relaunch() {
     [ -n "${PF_EMULATOR_RELAUNCH_OPTIONS:-}" ] || return 1
     local sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" log="${PF_EMULATOR_RELAUNCH_LOG:-/tmp/pf-emulator-relaunch.log}"
+    local avd="${PF_EMULATOR_AVD:-test}" avd_dir="${ANDROID_AVD_HOME:-$HOME/.android/avd}/${PF_EMULATOR_AVD:-test}.avd" locks
     [ -x "$sdk/emulator/emulator" ] || return 1
+    # The dead process's locks: left in place, the new emulator takes the AVD as in use and starts read-only, on a
+    # temporary copy of the disks — a phone with none of this one's data (run 42433155832, API 30: the test package
+    # and the device owner gone after the relaunch).
+    locks="$(find "$avd_dir" -maxdepth 1 -name '*.lock' -printf '%f ' 2>/dev/null)"
+    find "$avd_dir" -maxdepth 1 -name '*.lock' -exec rm -rf {} + 2>/dev/null
     # shellcheck disable=SC2086 # the options are a command line, split as the shell splits it
-    setsid nohup "$sdk/emulator/emulator" -port 5554 -avd "${PF_EMULATOR_AVD:-test}" $PF_EMULATOR_RELAUNCH_OPTIONS \
+    setsid nohup "$sdk/emulator/emulator" -port 5554 -avd "$avd" $PF_EMULATOR_RELAUNCH_OPTIONS \
         </dev/null >"$log" 2>&1 &
-    REBOOT_RELAUNCHED="the emulator process had exited at the restart (M10-54), so it was started again from the same AVD $1 s after the restart was asked, a cold start of the same phone (its output: $log)"
+    REBOOT_RELAUNCHED="the emulator process had exited at the restart (M10-54), so it was started again from the same AVD $1 s after the restart was asked, a cold start of the same phone (its output: $log; the dead process's locks removed first: ${locks:-none})"
+}
+
+# What the relaunched emulator's log says that matters (read-only mode, a lock, a wipe, an error), and whether the
+# phone that came back is the same one: for R's note after a relaunch.
+emulator_relaunch_facts() { # <a file that must still be on the phone>
+    local log="${PF_EMULATOR_RELAUNCH_LOG:-/tmp/pf-emulator-relaunch.log}" said there
+    said="$(grep -iE 'read-only|read only|lock|wipe|userdata|ERROR|FATAL|snapshot' "$log" 2>/dev/null | grep -v 'Failed to process .ini' | tail -6 | cut -c1-160 | paste -sd '|' -)"
+    there="$(timeout 10 adb shell "[ -f '$1' ] && echo yes || echo no" 2>/dev/null | tr -d '\r[:space:]')"
+    echo "the relaunched emulator said: ${said:-nothing of note}; $1 still on the phone: ${there:-no answer}; data dir: $(timeout 10 adb shell ls -ld /data/data 2>&1 | tr -d '\r' | cut -c1-80)"
 }
 
 # Restarts the phone and waits, up to <seconds> in all, until a new boot has completed: a boot_id unlike the one before
