@@ -10,7 +10,7 @@ a pending `release` run too.
 
 | Version | Verified commit | `android` run | `release` run | On Play (production) | Crash rate, 28 days | Rollout | Notes |
 |---|---|---|---|---|---|---|---|
-| 1.0.0 (11) | pending | pending | pending | pending (closed testing first: `docs/m11/release-checklist.md` §4) | pending | — | The first release; M1–M12; `docs/m11/release-notes.md`; defects in `docs/m11/defect-register.md`, `docs/m12/defect-register.md` and the registers of M4–M10. M11's verified commit 75ce907 (runs 42366997269, 42366997278 ×3) is superseded: M12 changed the app's Help text after it, so the release is built from M12's verified commit and these columns are filled from its runs |
+| 1.0.0 (11) | 356cc67 (release candidate; superseded by `main`'s merge commit at the release — `maintenance-runbook.md` §4 step 3) | 42435846662 (attempts 1, 2 and 3 green) | pending — the owner's hand-started run with the upload key (`docs/m11/signing.md` §5); CI's run-key run 42435846641 was green in attempts 1, 2 and 3 | pending (closed testing first: `docs/m11/release-checklist.md` §4) | pending | — | The first release; M1–M12; `docs/m11/release-notes.md`; defects in `docs/m11/defect-register.md`, `docs/m12/defect-register.md` and the registers of M4–M10. M11's verified commit 75ce907 (runs 42366997269, 42366997278 ×3) is superseded: M12 changed the app's Help text after it; `docs/m12/M12-acceptance-report.md` |
 
 ## What a row's runs are
 
