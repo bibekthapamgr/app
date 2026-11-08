@@ -3,8 +3,8 @@ module github.com/bibekthapamgr/app/engine
 go 1.27.3
 
 require (
-	golang.org/x/net v0.60.0
-	golang.org/x/sys v0.48.0
+	golang.org/x/net v0.62.0
+	golang.org/x/sys v0.49.0
 	gvisor.dev/gvisor v0.0.0-20261029062900-94fcb330700e
 )
 
