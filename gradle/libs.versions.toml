@@ -8,7 +8,7 @@ agp = "9.5.0"
 # Android Lint's libraries for the app's own checks: always AGP's version + 23.0.0.
 lint = "32.5.0"
 kotlin = "2.4.21"
-composeBom = "2025.10.00"
+composeBom = "2026.09.00"
 activityCompose = "1.13.0"
 coreKtx = "1.17.0"
 lifecycle = "2.10.0"
