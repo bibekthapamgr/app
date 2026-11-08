@@ -139,12 +139,13 @@ stop_logcat() {
     fi
 }
 install() {
-    timeout 120 adb install -r -t -g "$APP_APK" > "$OUT/m10-install-$PART.txt" 2>&1 || {
+    : > "$OUT/m10-install-$PART.txt"
+    adb_install "$APP_APK" "$OUT/m10-install-$PART.txt" -g || {
         fail "the app did not install: $(tail -1 "$OUT/m10-install-$PART.txt")"
         return 1
     }
-    timeout 120 adb install -r -t "$TEST_APK" >> "$OUT/m10-install-$PART.txt" 2>&1 || {
-        fail "the test APK did not install"
+    adb_install "$TEST_APK" "$OUT/m10-install-$PART.txt" || {
+        fail "the test APK did not install: $(tail -1 "$OUT/m10-install-$PART.txt")"
         return 1
     }
     if ! { timeout 60 adb push "$TEST_APK" "$CLIENT" >/dev/null 2>&1 && timeout 10 adb shell chmod 644 "$CLIENT" >/dev/null 2>&1; }; then

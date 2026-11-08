@@ -61,3 +61,22 @@ reboot_and_wait() { # <seconds>
     REBOOT_SEEN="$REBOOT_SEEN; adb $([ -n "$REBOOT_WENT_DOWN" ] && echo "left the old boot" || echo "never left the old boot"); boot id now: ${new:-unreadable}; sys.boot_completed: ${completed:-unset}; adb state: $(timeout 5 adb get-state 2>&1 | tr -d '\r' | head -c 80); emulator process: $(pgrep -f 'qemu-system|emulator64|/emulator ' >/dev/null 2>&1 && echo running || echo "none on this host"); the runner's disk: $(df -Ph / 2>/dev/null | awk 'NR==2 {print $4 " free of " $2}'); the runner kernel's last kills and crashes: $(kernel_kills)"
     return 1
 }
+
+# Installs an APK, up to three tries: adb can say "device offline" for a moment right after Gradle's connected tests
+# hand the device back, with the phone there and answering a second later (M12-80: API 35, every test passed and the
+# install after them failed at once). Between tries it waits for the device. Output goes to <log> (appended).
+adb_install() { # <apk> <log> [adb install flags...]
+    local apk=$1 log=$2 try
+    shift 2
+    for try in 1 2 3; do
+        if timeout 120 adb install -r -t "$@" "$apk" >> "$log" 2>&1; then
+            return 0
+        fi
+        if [ "$try" -lt 3 ]; then
+            echo "install of $(basename "$apk") failed (try $try): $(tail -1 "$log"); waiting for the device" >> "$log"
+            timeout 60 adb wait-for-device >/dev/null 2>&1 || true
+            sleep "${ADB_INSTALL_PAUSE:-5}"
+        fi
+    done
+    return 1
+}
