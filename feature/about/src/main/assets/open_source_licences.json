@@ -671,12 +671,12 @@
   },
   {
    "name": "golang.org/x/net",
-   "version": "v0.60.0",
+   "version": "v0.62.0",
    "licence": "BSD-3-Clause-Go"
   },
   {
    "name": "golang.org/x/sys",
-   "version": "v0.48.0",
+   "version": "v0.49.0",
    "licence": "BSD-3-Clause-Go"
   },
   {
