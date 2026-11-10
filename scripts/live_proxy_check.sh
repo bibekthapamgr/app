@@ -226,7 +226,7 @@ for secret in "$PF_LIVE_PROXY_HOST" "${PF_LIVE_PROXY_USERNAME:-}" "${PF_LIVE_PRO
     if [ -n "$secret" ] && grep -qF -- "$secret" <<<"$logs"; then fail "the Logs screen shows the proxy's address, username or password"; fi
 done
 $UI tap "Home"
-$UI wait "Disconnect" 20
+$UI wait-scroll "Disconnect" 20
 
 step "disconnect"
 $UI tap "Disconnect"
