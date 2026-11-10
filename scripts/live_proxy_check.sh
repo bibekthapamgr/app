@@ -159,6 +159,23 @@ fi
 $UI tap "Save"
 $UI wait "Connect" 20
 step "connect"
+# The phone's sockets with their owners' uids, sampled about four times a second from before Connect until after
+# Disconnect — the lab's sampler (scripts/e2e_device.sh), so the evidence can name who sent anything found around the
+# proxy (Android's own privileged services may; any app may not).
+cat > "$OUT/pf-connecting.sh" <<'SAMPLER'
+n=0
+while true; do
+    echo "T ${EPOCHREALTIME:-$(date +%s)}"
+    for f in tcp tcp6; do grep -v -e ' 0A ' -e ' 06 ' /proc/net/$f 2>/dev/null | sed "s/^/$f /"; done
+    for f in udp udp6; do grep ' 01 ' /proc/net/$f 2>/dev/null | sed "s/^/$f /"; done
+    if [ $((n % 20)) = 0 ]; then ip -o addr show 2>/dev/null | sed 's/^/A /'; fi
+    n=$((n + 1))
+    sleep 0.25
+done
+SAMPLER
+timeout 30 adb push "$OUT/pf-connecting.sh" /data/local/tmp/pf-connecting.sh >/dev/null 2>&1 || true
+timeout 30 adb shell "setsid sh /data/local/tmp/pf-connecting.sh > /data/local/tmp/pf-connecting.txt 2>/dev/null </dev/null &" || true
+rm -f "$OUT/pf-connecting.sh"
 $UI tap "Connect"
 $UI wait "Allow a VPN connection" 20
 $UI screenshot "$OUT/3-vpn-explainer.png"
@@ -243,17 +260,28 @@ elif [ -n "$again_ip" ]; then
     note "after Disconnect, api.ipify.org saw the phone as the runner's own address again"
 fi
 sleep 3
+timeout 30 adb shell 'pkill -f pf-connecting.sh' >/dev/null 2>&1 || true
+timeout 120 adb pull /data/local/tmp/pf-connecting.txt "$OUT/phone-connecting.txt" >/dev/null 2>&1 || echo "no socket samples" > "$OUT/phone-connecting.txt"
+timeout 60 adb shell pm list packages -U 2>/dev/null | tr -d '\r' > "$OUT/packages-uids.txt" || true
+timeout 120 adb shell dumpsys package 2>/dev/null | tr -d '\r' |
+    grep -E '(Package|SharedUser) \[|(userId|appId)=[0-9]|android\.permission\.[A-Z_]*(NETWORK|CONNECTIVITY)[A-Z_]*: granted=true' \
+    > "$OUT/packages-network-permissions.txt" || true
+timeout 30 adb shell rm -f /data/local/tmp/pf-connecting.sh /data/local/tmp/pf-connecting.txt >/dev/null 2>&1 || true
 
-# 7. The uplink capture: while Connected, nothing left the phone for anywhere but the proxy.
+# 7. The uplink capture: while Connected, nothing of any app's left the phone for anywhere but the proxy; what
+#    Android's own privileged services sent around it is named (docs/m6/routing-and-limitations.md §4).
 step "the uplink capture"
 if [ -n "${UPLINK_PCAP:-}" ] && [ -s "$UPLINK_PCAP" ]; then
     sudo chmod a+r "$UPLINK_PCAP" 2>/dev/null || true
-    if $EVIDENCE "$UPLINK_PCAP" "$PF_LIVE_PROXY_HOST" "$PF_LIVE_PROXY_PORT" "$CONNECTED_AT" "$DISCONNECTED_AT" | tee "$OUT/uplink-evidence.txt"; then
+    if $EVIDENCE "$UPLINK_PCAP" "$PF_LIVE_PROXY_HOST" "$PF_LIVE_PROXY_PORT" "$CONNECTED_AT" "$DISCONNECTED_AT" --out "$OUT" | tee "$OUT/uplink-evidence.txt"; then
         note "the uplink capture: $(tail -1 "$OUT/uplink-evidence.txt")"
+        if grep -q "Android's own" "$OUT/uplink-evidence.txt"; then
+            note "around the proxy, Android's own: $(sed -n "/Android's own (not/,/^LEAK\|^nothing/p" "$OUT/uplink-evidence.txt" | grep '^  ' | sed 's/^ *//' | paste -sd ';' - | cut -c1-900)"
+        fi
     elif [ "$UPLINK_CAPTURED" = 0 ] && grep -q 'never reached the proxy' "$OUT/uplink-evidence.txt"; then
         echo "::warning title=Live proxy check (API $API)::the emulator's capture saw nothing of the tunnel (the phone was on Wi-Fi, which it does not record): the leak check could not be made on this level"
     else
-        fail "the uplink capture: $(grep -m1 'LEAK\|never' "$OUT/uplink-evidence.txt" || tail -1 "$OUT/uplink-evidence.txt")"
+        fail "the uplink capture: $(grep -m1 'LEAK\|never' "$OUT/uplink-evidence.txt" || tail -1 "$OUT/uplink-evidence.txt") $(sed -n '/^LEAK/,$p' "$OUT/uplink-evidence.txt" | grep '^  ' | sed 's/^ *//' | paste -sd ';' - | cut -c1-900)"
     fi
 else
     echo "::warning title=Live proxy check (API $API)::no uplink capture to read (UPLINK_PCAP)"

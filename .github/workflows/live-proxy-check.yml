@@ -175,7 +175,7 @@ jobs:
         run: |
           echo "::notice title=Live proxy check::release run ${{ inputs.release-run }}'s universal.apk (SHA-256 ${APK_SHA256:-?}), version ${VERSION_NAME:-?} (${VERSION_CODE:-?}), on API ${{ inputs.api-level }} with the owner's ${{ inputs.protocol }} proxy; commit $GITHUB_SHA"
 
-      - name: Upload the screenshots and facts (not the capture, which names the proxy)
+      - name: Upload the screenshots and facts (not the capture, the socket samples or the evidence text, which name the proxy)
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -184,6 +184,8 @@ jobs:
             live-check/
             !live-check/package.txt
             !live-check/installed-certs.txt
+            !live-check/phone-connecting.txt
+            !live-check/uplink-evidence.txt
           if-no-files-found: warn
           retention-days: 14
 

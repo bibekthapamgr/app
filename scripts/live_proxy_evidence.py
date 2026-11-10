@@ -1,25 +1,51 @@
 #!/usr/bin/env python3
 """The live proxy check's uplink evidence (scripts/live_proxy_check.sh): what left the phone while ProxyFlow was
-connected to the owner's own proxy, read from the emulator's own capture of its uplink (`-tcpdump`, Ethernet).
+connected to the owner's own proxy, read from the emulator's own capture of its uplink (`-tcpdump`, Ethernet), and
+who sent it, from the phone's own socket table sampled meanwhile (the same sampler and owner rules as the lab's
+scripts/e2e_device.sh and scripts/m6_evidence.py).
 
 Between the moment Connected showed and the moment Disconnect was tapped (host-clock seconds, as the script recorded
-them), every IPv4 packet the phone sent must have gone to the proxy's address and port over TCP: a packet to any other
-address is traffic around the proxy — a leak — and fails the check. Outside that window the phone talks to the
-internet directly (Android's own connectivity checks, Google's services), which is as it should be and is only
-counted. Broadcast, multicast, ARP, IPv6 link-local chatter and the interface's own DHCP (a raw socket below any VPN) are not
-the phone's traffic to anyone and are ignored. DNS: while connected, nothing may leave for port 53 either — ProxyFlow answers the
-phone's lookups itself and the proxy resolves names (ADR-0011) — so a query to any resolver is a leak like any other.
+them), every IPv4 packet the phone sent is expected to have gone to the proxy's address and port over TCP. A packet to
+anywhere else is sorted by its sender:
+  - Android's own: a socket whose owner Android lets leave a VPN — a system uid, or an app granted a network-bypass
+    permission, as Google Play services is on the Android 15 and 16 images (docs/m6/routing-and-limitations.md §4:
+    "Privileged system apps can bypass the VPN"; ProxyFlow cannot stop it). Reported, not a failure. A DNS query to the
+    phone's own resolver for a name of Google's or Android's is counted with these (the system resolver sends it for
+    such an app; its owner in the table is the resolver's), as is an ICMP error the phone's stack answers an inbound
+    packet with (destination unreachable, time exceeded).
+  - A leak: a packet from any other owner — an ordinary app, the shell, ProxyFlow's own uid — or a connection, datagram
+    or lookup with no owner sampled, or a DNS query for any other name. Fails the check.
+Outside the window the phone talks to the internet directly (Android's own connectivity checks, Google's services),
+which is as it should be and is only counted. Broadcast, multicast, ARP, IPv6 link-local chatter and the interface's
+own DHCP (a raw socket below any VPN) are not the phone's traffic to anyone and are ignored.
 
-Usage: live_proxy_evidence.py <uplink.pcap> <proxy address> <proxy port> <connected-at> <disconnected-at> [phone address]
-Exit 0 when nothing left the phone for anywhere but the proxy during the window; 1 otherwise; the facts on stdout.
-The proxy's address appears in the output (it is the owner's; the username and password never reach this script).
+Usage: live_proxy_evidence.py <uplink.pcap> <proxy address> <proxy port> <connected-at> <disconnected-at>
+                              [--out DIR] [--phone ADDRESS]
+  --out: the directory with phone-connecting.txt (the socket samples), packages-uids.txt and
+         packages-network-permissions.txt, as the check script pulled them; without it no owner can be named and every
+         packet around the proxy is a leak.
+Exit 0 when nothing but the proxy's traffic and Android's own left the phone during the window; 1 otherwise; the facts
+on stdout. The proxy's address appears in the output (the job masks it); the username and password never reach here.
 """
 from __future__ import annotations
 
+import argparse
+import datetime
 import ipaddress
+import os
 import struct
 import sys
-from collections import Counter
+from collections import defaultdict
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from m5_evidence import dns_name  # noqa: E402
+from m6_evidence import Owners, network_grants, package_names, socket_samples  # noqa: E402
+
+# Names whose lookups while connected are Android's and Google's own services' (the privileged apps above): the resolver
+# asks the phone's usual DNS for them around the VPN. Any other name asked around the proxy is a leak.
+SYSTEM_NAME_SUFFIXES = (".google.com", ".gstatic.com", ".googleapis.com", ".android.com", ".googleusercontent.com",
+                        ".gvt1.com", ".gvt2.com", ".1e100.net", ".googlezip.net", ".app-measurement.com",
+                        ".google", ".ggpht.com", ".youtube.com", ".googlevideo.com")
 
 
 def packets(path: str):
@@ -64,20 +90,36 @@ def ipv4_of(linktype: int, data: bytes) -> bytes | None:
     return None
 
 
+def system_name(name: str) -> bool:
+    return name.endswith(SYSTEM_NAME_SUFFIXES) or name in ("google.com", "android.com", "gstatic.com")
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) < 5:
-        print(__doc__)
-        return 2
-    path, proxy, port = argv[0], argv[1], int(argv[2])
-    start, end = float(argv[3]), float(argv[4])
-    phone = argv[5] if len(argv) > 5 else None
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("pcap")
+    parser.add_argument("proxy")
+    parser.add_argument("port", type=int)
+    parser.add_argument("start", type=float)
+    parser.add_argument("end", type=float)
+    parser.add_argument("--out", help="the directory with the socket samples and the package tables")
+    parser.add_argument("--phone", help="the phone's address on the uplink (found from its first packet to the proxy otherwise)")
+    args = parser.parse_args(argv)
+    path, proxy, port, start, end, phone = args.pcap, args.proxy, args.port, args.start, args.end, args.phone
     proxy_ip = ipaddress.ip_address(proxy)
-    inside: Counter[tuple[str, str, int]] = Counter()
-    outside: Counter[tuple[str, str, int]] = Counter()
-    proxy_syns_inside = 0
+
+    owners = None
+    if args.out:
+        sockets = socket_samples(args.out)
+        owners = Owners(package_names(args.out), network_grants(args.out), set())
+        print(f"the phone's socket table: {sockets.coverage()}; {len(owners.names)} packages with uids, "
+              f"{sum(1 for g in owners.grants.values() if g)} uids with network permissions read")
+
+    inside: dict[tuple[str, str, int], list] = defaultdict(list)  # (proto, dst, dport) -> [(stamp, sport, detail)]
+    outside_count = 0
+    outside_addresses: set[str] = set()
+    proxy_packets = proxy_syns = 0
     first = last = None
-    total = 0
-    dhcp = 0
+    total = dhcp = 0
     for stamp, linktype, data in packets(path):
         total += 1
         ip = ipv4_of(linktype, data)
@@ -89,8 +131,6 @@ def main(argv: list[str]) -> int:
         dst_addr = ipaddress.ip_address(ip[16:20])
         dst = str(dst_addr)
         if phone is None:
-            # The phone is the sender of the first packet to the proxy's address (its SYN), or, failing that, the
-            # emulator's usual 10.0.2.15.
             if dst_addr == proxy_ip:
                 phone = src
             else:
@@ -99,39 +139,91 @@ def main(argv: list[str]) -> int:
             continue
         if dst_addr.is_multicast or dst == "255.255.255.255" or dst_addr.is_link_local:
             continue
-        dport = -1
-        if proto in (6, 17) and len(ip) >= ihl + 4:
-            dport = struct.unpack("!H", ip[ihl + 2 : ihl + 4])[0]
+        l4 = ip[ihl:]
+        sport = dport = -1
+        detail = ""
+        if proto in (6, 17) and len(l4) >= 4:
+            sport, dport = struct.unpack("!HH", l4[:4])
         if proto == 17 and dport in (67, 68):
             dhcp += 1  # the interface's own lease renewal (a raw socket on eth0, below any VPN): not a connection to anyone
             continue
+        if proto == 6 and len(l4) >= 14:
+            flags = l4[13]
+            detail = "syn" if flags & 0x12 == 0x02 else ("fin" if flags & 0x01 else ("rst" if flags & 0x04 else "data"))
+        elif proto == 17 and dport == 53 and len(l4) >= 8:
+            detail = "query " + (dns_name(l4[8:]) or "(unreadable)")
+        elif proto == 1 and len(l4) >= 2:
+            detail = {0: "echo reply", 3: "destination unreachable", 8: "echo request", 11: "time exceeded"}.get(l4[0], f"type {l4[0]}")
         name = {6: "tcp", 17: "udp", 1: "icmp"}.get(proto, f"proto{proto}")
-        key = (name, dst, dport)
         if start <= stamp <= end:
-            inside[key] += 1
             first = stamp if first is None else first
             last = stamp
-            if proto == 6 and dst_addr == proxy_ip and dport == port and len(ip) >= ihl + 14 and ip[ihl + 13] & 0x12 == 0x02:
-                proxy_syns_inside += 1
+            if proto == 6 and dst_addr == proxy_ip and dport == port:
+                proxy_packets += 1
+                proxy_syns += detail == "syn"
+            else:
+                inside[(name, dst, dport)].append((stamp, sport, detail))
         else:
-            outside[key] += 1
+            outside_count += 1
+            outside_addresses.add(dst)
     if phone is None:
         print(f"no IPv4 packet in {path} ({total} records) went to {proxy}; the phone never reached the proxy")
         return 1
-    leaks = {k: n for k, n in inside.items() if not (k[0] == "tcp" and k[1] == proxy and k[2] == port)}
-    to_proxy = sum(n for k, n in inside.items() if k[0] == "tcp" and k[1] == proxy and k[2] == port)
+
     print(f"{path}: {total} records; the phone is {phone}; window {start:.0f}–{end:.0f} ({end - start:.0f} s)")
-    print(f"while connected: {to_proxy} packets to the proxy {proxy}:{port} over TCP ({proxy_syns_inside} new connections)"
+    print(f"while connected: {proxy_packets} packets to the proxy {proxy}:{port} over TCP ({proxy_syns} new connections)"
           + (f", from {first - start:.1f} s to {last - start:.1f} s into the window" if first is not None else ""))
-    print(f"outside the window (before Connected, after Disconnect): {sum(outside.values())} packets to "
-          f"{len({k[1] for k in outside})} address(es) — the phone's own direct traffic, as expected when ProxyFlow is off"
+    print(f"outside the window (before Connected, after Disconnect): {outside_count} packets to {len(outside_addresses)} "
+          f"address(es) — the phone's own direct traffic, as expected when ProxyFlow is off"
           + (f"; {dhcp} DHCP packet(s) of the interface itself ignored" if dhcp else ""))
+    if not inside:
+        print("nothing left the phone for anywhere but the proxy while connected: no leak")
+        return 0
+
+    androids: list[str] = []
+    leaks: list[str] = []
+    for (name, dst, dport), items in sorted(inside.items(), key=lambda kv: -len(kv[1])):
+        stamps = [s for s, _, _ in items]
+        kinds = sorted({d for _, _, d in items if d})
+        where = f"{name} to {dst}" + (f":{dport}" if dport >= 0 else "")
+        when = f"{min(stamps) - start:.1f}–{max(stamps) - start:.1f} s into the window"
+        line = f"{len(items):4d}  {where}  [{', '.join(kinds) or '-'}]  {when}"
+        if name == "icmp":
+            if all(d in ("destination unreachable", "time exceeded") for _, _, d in items):
+                androids.append(line + "  — the phone's stack answering inbound packets, no connection of anyone's")
+            else:
+                leaks.append(line + "  — ICMP the phone sent on its own (ping is refused inside the VPN)")
+            continue
+        if name == "udp" and dport == 53:
+            names_asked = sorted({d[6:] for _, _, d in items if d.startswith("query ")})
+            if names_asked and all(system_name(n) for n in names_asked):
+                androids.append(line + "  — the resolver asking the phone's usual DNS for Android's and Google's own services (documented: routing-and-limitations §4)")
+            else:
+                leaks.append(line + "  — a lookup around the proxy for a name that is not Android's own")
+            continue
+        uids: set[int] = set()
+        if owners is not None:
+            for stamp, sport, _ in items:
+                when_dt = datetime.datetime.fromtimestamp(stamp, datetime.timezone.utc).replace(tzinfo=None)
+                uids.update(sockets.owners(name, phone, sport, dst, dport, when_dt))
+        if uids and all(owners.may_bypass(uid) for uid in uids):
+            androids.append(line + "  — owner " + "; ".join(owners.label(u) for u in sorted(uids))
+                            + ": Android lets it leave the VPN (documented: routing-and-limitations §4)")
+        elif uids:
+            leaks.append(line + "  — owner " + "; ".join(owners.label(u) for u in sorted(uids)) + ": not allowed around the VPN")
+        else:
+            leaks.append(line + "  — no owner sampled" + ("" if owners is not None else " (no socket samples given)"))
+    if androids:
+        print("while connected, around the proxy, Android's own (not ProxyFlow's to stop; reported, not a failure):")
+        for line in androids:
+            print("  " + line)
     if leaks:
-        print("LEAK: while connected, the phone sent packets around the proxy:")
-        for (name, dst, dport), n in sorted(leaks.items(), key=lambda kv: -kv[1]):
-            print(f"  {n:6d}  {name} to {dst}" + (f":{dport}" if dport >= 0 else ""))
+        print("LEAK: while connected, the phone sent packets around the proxy that are not Android's own:")
+        for line in leaks:
+            print("  " + line)
         return 1
-    print("nothing left the phone for anywhere but the proxy while connected: no leak")
+    print("nothing of any app's left the phone for anywhere but the proxy while connected: no leak"
+          + (f" ({len(androids)} flow(s) of Android's own privileged services around it, listed above)" if androids else ""))
     return 0
 
 

@@ -35,12 +35,55 @@ def pcap(records: list[tuple[float, bytes]]) -> bytes:
     return out.getvalue()
 
 
-def run(records, *args):
+def run(records, *args, out: dict | None = None):
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "uplink.pcap")
         with open(path, "wb") as f:
             f.write(pcap(records))
-        return subprocess.run([sys.executable, "-I", SCRIPT, path, *args], capture_output=True, text=True)
+        extra = []
+        if out is not None:
+            for name, text in out.items():
+                with open(os.path.join(d, name), "w") as f:
+                    f.write(text)
+            extra = ["--out", d]
+        return subprocess.run([sys.executable, "-I", SCRIPT, path, *args, *extra], capture_output=True, text=True)
+
+
+def dns_query(name: str) -> bytes:
+    body = b"".join(bytes([len(p)]) + p.encode() for p in name.split(".")) + b"\x00\x00\x01\x00\x01"
+    return b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + body
+
+
+def udp_packet(src: str, dst: str, dport: int, payload: bytes) -> bytes:
+    l4 = struct.pack("!HHHH", 40001, dport, 8 + len(payload), 0) + payload
+    ip = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 20 + len(l4), 0, 0, 64, 17, 0, ip4(src), ip4(dst)) + l4
+    return b"\x52\x55\x0a\x00\x02\x02" + b"\x52\x54\x00\x12\x34\x56" + b"\x08\x00" + ip
+
+
+def icmp_packet(src: str, dst: str, icmp_type: int) -> bytes:
+    l4 = bytes([icmp_type, 0, 0, 0, 0, 0, 0, 0])
+    ip = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 20 + len(l4), 0, 0, 64, 1, 0, ip4(src), ip4(dst)) + l4
+    return b"\x52\x55\x0a\x00\x02\x02" + b"\x52\x54\x00\x12\x34\x56" + b"\x08\x00" + ip
+
+
+def hex_endpoint(addr: str, port: int) -> str:
+    return "".join(f"{b:02X}" for b in reversed(ip4(addr))) + f":{port:04X}"
+
+
+# One socket-table sample at [when]: the phone's TCP socket from port 40000 to [dst]:[dport], owned by [uid].
+def sample(when: float, dst: str, dport: int, uid: int) -> str:
+    return (f"T {when:.3f}\n"
+            f"tcp 0: {hex_endpoint(PHONE, 40000)} {hex_endpoint(dst, dport)} 01 00000000:00000000 00:00000000 00000000 "
+            f"{uid} 0 12345 1 0000000000000000 20 4 30 10 -1\n")
+
+
+GRANTS = """Package [com.google.android.gms] (abc):
+    userId=10100
+    android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS: granted=true
+Package [com.example.ordinary] (def):
+    userId=10200
+"""
+PACKAGES = "package:com.google.android.gms uid:10100\npackage:com.example.ordinary uid:10200\n"
 
 
 class LiveProxyEvidence(unittest.TestCase):
@@ -71,6 +114,46 @@ class LiveProxyEvidence(unittest.TestCase):
         self.assertIn("LEAK", r.stdout)
         self.assertIn("udp to 8.8.8.8:53", r.stdout)
         self.assertIn("tcp to 93.184.216.34:443", r.stdout)
+        self.assertIn("no owner sampled (no socket samples given)", r.stdout)
+
+    def test_androids_own_privileged_traffic_is_reported_not_failed(self):
+        records = [
+            (100, packet(PHONE, "203.0.113.5", 6, 44444)),
+            (150, packet(PHONE, "142.250.141.188", 6, 5228, flags=0x18)),  # Play services' push connection
+            (151, udp_packet(PHONE, "10.0.2.3", 53, dns_query("mtalk.google.com"))),  # its lookup
+            (152, icmp_packet(PHONE, "142.251.156.119", 3)),  # the stack answering an inbound packet
+        ]
+        out = {
+            "phone-connecting.txt": sample(149.5, "142.250.141.188", 5228, 10100) + sample(150.5, "142.250.141.188", 5228, 10100),
+            "packages-uids.txt": PACKAGES,
+            "packages-network-permissions.txt": GRANTS,
+        }
+        r = run(records, "203.0.113.5", "44444", "100", "200", out=out)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Android's own", r.stdout)
+        self.assertIn("uid 10100 (com.google.android.gms; CONNECTIVITY_USE_RESTRICTED_NETWORKS)", r.stdout)
+        self.assertIn("query mtalk.google.com", r.stdout)
+        self.assertIn("destination unreachable", r.stdout)
+        self.assertIn("no leak", r.stdout)
+
+    def test_an_ordinary_apps_connection_and_a_foreign_lookup_fail(self):
+        records = [
+            (100, packet(PHONE, "203.0.113.5", 6, 44444)),
+            (150, packet(PHONE, "93.184.216.34", 6, 443)),  # an ordinary app's SYN
+            (151, udp_packet(PHONE, "10.0.2.3", 53, dns_query("example.org"))),
+            (152, icmp_packet(PHONE, "1.1.1.1", 8)),  # a ping
+        ]
+        out = {
+            "phone-connecting.txt": sample(150.2, "93.184.216.34", 443, 10200),
+            "packages-uids.txt": PACKAGES,
+            "packages-network-permissions.txt": GRANTS,
+        }
+        r = run(records, "203.0.113.5", "44444", "100", "200", out=out)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("uid 10200 (com.example.ordinary): not allowed around the VPN", r.stdout)
+        self.assertIn("query example.org", r.stdout)
+        self.assertIn("not Android's own", r.stdout)
+        self.assertIn("echo request", r.stdout)
 
     def test_no_packet_to_the_proxy_fails(self):
         r = run([(100, packet(PHONE, "142.250.1.1", 6, 443))], "203.0.113.5", "44444", "100", "200")

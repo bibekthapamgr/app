@@ -41,13 +41,20 @@ after the check (`gh secret delete …`) when the proxy is not to stay in the re
 5. Photographs Home (the session's counts) and the Logs screen, and checks the Logs screen shows none of the address,
    username or password.
 6. Disconnect, Not connected; `api.ipify.org` must see the runner's own address again.
-7. Reads the emulator's own capture of its uplink (`scripts/live_proxy_evidence.py`): between Connected and
-   Disconnect, every IPv4 packet the phone sent went to the proxy's address and port over TCP — a packet to any other
-   address, a DNS query to any resolver among them, is a leak and fails the run. Before and after, the phone's direct
-   traffic is counted and expected.
+7. Reads the emulator's own capture of its uplink (`scripts/live_proxy_evidence.py`), with the phone's socket table
+   sampled meanwhile (the lab's sampler: every socket with its owner's uid, four times a second): between Connected
+   and Disconnect, every IPv4 packet the phone sent is expected to have gone to the proxy's address and port over TCP.
+   Anything else is sorted by its sender: a socket whose owner Android lets leave a VPN (a system uid, or an app with
+   a network-bypass permission — Google Play services on the Android 15 and 16 images, whose push connection on port
+   5228 and lookups of Google's names the capture shows; `docs/m6/routing-and-limitations.md` §4, which ProxyFlow
+   cannot stop) is reported and not a failure; a packet of any app's, the shell's or ProxyFlow's own, a connection or
+   lookup with no owner sampled, a lookup of a name that is not Android's or Google's, or a ping the phone sent, is a
+   leak and fails the run. Before and after the window, the phone's direct traffic is counted and expected. The phone
+   is put on mobile data with Wi-Fi off first: from API 30 on the emulator's capture does not record Wi-Fi (M10-89).
 
 The screenshots (`live-check/*.png`) are uploaded as the run's artifact and pushed to the branch `ci-live-check`; the
-capture stays on the runner (it names the proxy), the evidence text in the artifact only.
+capture, the socket samples and the evidence text stay on the runner (they name the proxy) — the job's log carries
+the evidence's lines with the proxy masked.
 
 ## What it proves, and what it cannot
 
