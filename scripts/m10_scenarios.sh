@@ -209,7 +209,7 @@ on_exit() {
     if [ "$STATUS" != 0 ]; then
         echo "::error title=$title::$(grep 'FAIL: ' "$STEPS" | head -3 | sed 's/^[0-9:]* FAIL: //' | paste -sd ' ' | cut -c1-900)"
     else
-        echo "::notice title=$title::$(grep -E '^[0-9:]+ (N|P|R): (connected|not on API|deep Doze|the most restricted|Battery Saver|started again: .*emulator process had exited|after the relaunch|after the restart)' "$STEPS" | sed 's/^[0-9:]* //' | paste -sd ' ' | cut -c1-3000)"
+        echo "::notice title=$title::$(grep -E '^[0-9:]+ (N|P|R): (connected|not on API|deep Doze|the most restricted|Battery Saver|started again: .*emulator process had exited|after the relaunch|the relaunched emulator is the same phone|after the restart)' "$STEPS" | sed 's/^[0-9:]* //' | paste -sd ' ' | cut -c1-3000)"
     fi
     # A part that passed but whose clean-up failed exits with the failure; one stopped (143) keeps its status.
     if [ "$code" = 0 ] && [ "$STATUS" != 0 ]; then exit "$STATUS"; fi
@@ -444,10 +444,22 @@ part_restart() {
     note "R: started again: a new boot, completed$([ -n "$REBOOT_WENT_DOWN" ] || echo "; adb was never seen leaving the old one")${REBOOT_RELAUNCHED:+; $REBOOT_RELAUNCHED}"
     if [ -n "$REBOOT_RELAUNCHED" ]; then
         note "R: after the relaunch: $(emulator_relaunch_facts "$CLIENT")"
-        if ! timeout 20 adb shell pm path "$TEST_ID" 2>/dev/null | grep -q package:; then
-            fail "R: the relaunched emulator is not the same phone: the test package $TEST_ID is not installed on it, so this restart cannot be judged"
-            exit 1
-        fi
+        # The package manager is asked for up to 90 s: right after a relaunched emulator's boot completed, adb's shell
+        # answered one command and not the next for a while (run 42842138681, API 30: "no answer from the phone" from
+        # three commands in a row, the disk the same — M12-85), so one unanswered `pm path` is not a different phone.
+        local pm_said="" waited=$SECONDS
+        while [ $((SECONDS - waited)) -lt 90 ]; do
+            pm_said="$(timeout 20 adb shell pm path "$TEST_ID" 2>&1 | tr -d '\r')"
+            case "$pm_said" in *package:*) break ;; esac
+            sleep 3
+        done
+        case "$pm_said" in
+            *package:*) note "R: the relaunched emulator is the same phone: $TEST_ID installed ($((SECONDS - waited)) s after its boot completed)" ;;
+            *)
+                fail "R: the relaunched emulator is not the same phone, or does not answer: in 90 s after its boot completed, pm path $TEST_ID said '${pm_said:-nothing}', so this restart cannot be judged"
+                exit 1
+                ;;
+        esac
     fi
     stream_logcat
     shell_user "R: after the restart" || exit 1
