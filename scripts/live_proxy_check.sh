@@ -91,6 +91,32 @@ step "the shell client"
 timeout 60 adb push "$CLIENT_APK" "$CLIENT" >/dev/null
 client() { timeout 60 adb shell "CLASSPATH=$CLIENT app_process /system/bin app.proxyflow.e2e.ShellClient $*" 2>&1 | tr -d '\r' | grep -v '^$' | tail -1 || true; }
 
+# The phone's uplink: mobile data, with Wi-Fi off. From API 30 on the emulator's Wi-Fi is a network device of its own,
+# which the emulator's own capture (-tcpdump) does not record (M10-89; scripts/e2e_device.sh): with Wi-Fi up the phone
+# prefers it and the capture would see nothing of the tunnel. Wi-Fi is switched off (its automatic re-enabling and
+# scanning too) and mobile data waited for; if Wi-Fi will not stay off, the run says so and the capture's verdict is
+# not trusted (the evidence step then warns instead of passing).
+step "the uplink"
+UPLINK_CAPTURED=1
+timeout 30 adb shell settings put global wifi_wakeup_enabled 0 >/dev/null 2>&1 || true
+timeout 30 adb shell settings put global wifi_scan_always_enabled 0 >/dev/null 2>&1 || true
+wifi_down() { ! timeout 15 adb shell 'ip -o -4 addr show wlan0 2>/dev/null; true' 2>&1 | grep -q inet; }
+mobile_up() { timeout 30 adb shell 'ip -o -4 addr show' 2>&1 | tr -d '\r' | grep -Eq '^[0-9]+: (eth[0-9]+|radio[0-9]+|rmnet[0-9]+) +inet '; }
+for _ in 1 2 3; do
+    timeout 30 adb shell svc wifi disable >/dev/null 2>&1 || true
+    for _ in $(seq 1 15); do wifi_down && break; sleep 1; done
+    sleep 5
+    wifi_down && break
+done
+for _ in $(seq 1 30); do mobile_up && break; sleep 2; done
+if wifi_down && mobile_up; then
+    note "the phone's uplink is mobile data, Wi-Fi off: the device the emulator's own capture records"
+else
+    UPLINK_CAPTURED=0
+    echo "::warning title=Live proxy check (API $API)::the uplink could not be made mobile data alone (Wi-Fi down: $(wifi_down && echo yes || echo no); mobile data up: $(mobile_up && echo yes || echo no)); the emulator's capture may not record Wi-Fi"
+fi
+echo "addresses: $(timeout 30 adb shell 'ip -o -4 addr show' 2>&1 | tr -d '\r' | awk '{print $2, $4}' | tr '\n' ' ')"
+
 # Before the app: what the internet sees of this phone with ProxyFlow off — the runner's own address.
 before="$(client https api.ipify.org 443 /?format=text 15000)"
 before_ip="$(sed -n 's/.*BODY \([0-9.]*\).*/\1/p' <<<"$before")"
@@ -224,6 +250,8 @@ if [ -n "${UPLINK_PCAP:-}" ] && [ -s "$UPLINK_PCAP" ]; then
     sudo chmod a+r "$UPLINK_PCAP" 2>/dev/null || true
     if $EVIDENCE "$UPLINK_PCAP" "$PF_LIVE_PROXY_HOST" "$PF_LIVE_PROXY_PORT" "$CONNECTED_AT" "$DISCONNECTED_AT" | tee "$OUT/uplink-evidence.txt"; then
         note "the uplink capture: $(tail -1 "$OUT/uplink-evidence.txt")"
+    elif [ "$UPLINK_CAPTURED" = 0 ] && grep -q 'never reached the proxy' "$OUT/uplink-evidence.txt"; then
+        echo "::warning title=Live proxy check (API $API)::the emulator's capture saw nothing of the tunnel (the phone was on Wi-Fi, which it does not record): the leak check could not be made on this level"
     else
         fail "the uplink capture: $(grep -m1 'LEAK\|never' "$OUT/uplink-evidence.txt" || tail -1 "$OUT/uplink-evidence.txt")"
     fi
