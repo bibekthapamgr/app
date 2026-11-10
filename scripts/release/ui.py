@@ -190,9 +190,9 @@ def main(argv: list[str]) -> None:
         tap(args[0])
     elif command == "tap-contains":
         tap(args[0], contains=True)
-    elif command == "wait":
+    elif command in ("wait", "wait-scroll"):
         began = time.monotonic()
-        if wait_for(args[0], float(args[1]) if len(args) > 1 else 20) is None:
+        if wait_for(args[0], float(args[1]) if len(args) > 1 else 20, scroll=command == "wait-scroll") is None:
             fail(f"{args[0]!r} did not show")
         say(f"{args[0]!r} showed after {time.monotonic() - began:.1f} s")
     elif command == "type":

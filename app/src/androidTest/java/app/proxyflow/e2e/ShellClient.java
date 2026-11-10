@@ -46,6 +46,8 @@ import javax.net.ssl.TrustManagerFactory;
  *   dns SERVER NAME TYPE TIMEOUT_MS [tcp]     RCODE n ANSWERS a,b|- | TIMEOUT | ERROR ...
  *   resolve NAME                              ADDRESSES a,b | ERROR ...
  *   tls HOST PORT CA_PEM LINE TIMEOUT_MS      TLS protocol LEAF sha256 REPLY text | ERROR ...
+ *   http HOST PORT PATH TIMEOUT_MS            HTTP status BODY text | ERROR ...
+ *   https HOST PORT PATH TIMEOUT_MS           HTTPS protocol LEAF sha256 HTTP status BODY text | ERROR ...
  *   bulk HOST PORT up BYTES TIMEOUT_MS LINGER_MS     SENT n REPLY text | ERROR ...
  *   bulk HOST PORT down BYTES TIMEOUT_MS LINGER_MS   RECEIVED n | ERROR ...
  *   hold HOST PORT SECONDS                    ENDED ms closed|reset|data|timeout | ERROR ...
@@ -78,6 +80,12 @@ import javax.net.ssl.TrustManagerFactory;
  * TYPE is a DNS record type number (1 A, 28 AAAA, 16 TXT, 65 HTTPS). tls trusts only the CA in
  * CA_PEM and checks the host name, as a browser checks a site: what it prints is the certificate
  * the destination itself presented, end to end through the tunnel.
+ *
+ * http and https (the live proxy check, scripts/live_proxy_check.sh) fetch one page the way a browser's first request
+ * does — GET PATH, HTTP/1.0, Connection: close — and print the status and the body's first 200 characters, whitespace
+ * collapsed (a site that answers with the caller's address shows which address the site saw). https trusts the
+ * phone's own certificate store, as the phone's browser does, and checks the host name; it prints the protocol and
+ * the certificate the site presented. Neither takes a line of input from the command line beyond the path.
  */
 public final class ShellClient {
     private ShellClient() {}
@@ -106,6 +114,10 @@ public final class ShellClient {
                 return resolve(a[1]);
             case "tls":
                 return tls(a[1], Integer.parseInt(a[2]), a[3], a[4], Integer.parseInt(a[5]));
+            case "http":
+                return http(a[1], Integer.parseInt(a[2]), a[3], Integer.parseInt(a[4]), false);
+            case "https":
+                return http(a[1], Integer.parseInt(a[2]), a[3], Integer.parseInt(a[4]), true);
             case "bulk":
                 return bulk(a[1], Integer.parseInt(a[2]), a[3], Long.parseLong(a[4]), Integer.parseInt(a[5]), Integer.parseInt(a[6]));
             case "hold":
@@ -550,6 +562,46 @@ public final class ShellClient {
         List<String> out = new ArrayList<>();
         for (InetAddress address : InetAddress.getAllByName(name)) out.add(address.getHostAddress());
         return "ADDRESSES " + String.join(",", out);
+    }
+
+    private static String http(String host, int port, String path, int timeout, boolean tls) throws Exception {
+        Socket plain = new Socket();
+        plain.connect(new InetSocketAddress(host, port), timeout);
+        plain.setSoTimeout(timeout);
+        Socket socket = plain;
+        String front = "";
+        if (tls) {
+            // The phone's own trust store, as its browser uses it (no lab CA): the platform's default context.
+            SSLSocket ssl = (SSLSocket) SSLContext.getDefault().getSocketFactory().createSocket(plain, host, port, true);
+            SSLParameters parameters = ssl.getSSLParameters();
+            parameters.setEndpointIdentificationAlgorithm("HTTPS");
+            ssl.setSSLParameters(parameters);
+            ssl.startHandshake();
+            Certificate leaf = ssl.getSession().getPeerCertificates()[0];
+            StringBuilder sha = new StringBuilder();
+            for (byte b : MessageDigest.getInstance("SHA-256").digest(leaf.getEncoded())) sha.append(String.format("%02x", b));
+            front = "HTTPS " + ssl.getSession().getProtocol() + " LEAF " + sha + " ";
+            socket = ssl;
+        }
+        try (Socket s = socket) {
+            OutputStream out = s.getOutputStream();
+            out.write(("GET " + path + " HTTP/1.0\r\nHost: " + host + "\r\nUser-Agent: ProxyFlow-live-check\r\nConnection: close\r\n\r\n")
+                    .getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            ByteArrayOutputStream all = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int n;
+            while (all.size() < 65536 && (n = s.getInputStream().read(buffer)) != -1) all.write(buffer, 0, n);
+            String response = all.toString("ISO-8859-1");
+            int headersEnd = response.indexOf("\r\n\r\n");
+            String statusLine = response.contains("\r\n") ? response.substring(0, response.indexOf("\r\n")) : response;
+            String[] status = statusLine.split(" ");
+            String code = status.length > 1 && statusLine.startsWith("HTTP/") ? status[1] : "?";
+            String body = headersEnd < 0 ? "" : response.substring(headersEnd + 4);
+            body = body.replaceAll("\\s+", " ").trim();
+            if (body.length() > 200) body = body.substring(0, 200);
+            return front + "HTTP " + code + " BODY " + body;
+        }
     }
 
     private static String tls(String host, int port, String caPem, String line, int timeout) throws Exception {
